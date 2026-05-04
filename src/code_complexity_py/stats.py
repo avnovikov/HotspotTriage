@@ -1,9 +1,12 @@
 """Statistic dataclass + aggregation, sorting, limiting.
 
-The `score` column is the product of a user-chosen subset of metrics
-(`SCORE_METRICS`), so the same run can answer different questions
-("which files are complex AND churned?", "which are just complex?",
-"which are unmaintainable AND churned?", etc.).
+Every Statistic carries every metric so a single CSV/JSON dump can be re-sorted
+later without rerunning. The `score` column is the product of a user-chosen
+subset of metrics (`-s` on the CLI), so the same run can answer different
+questions ("which files are unstable AND complex?", "which are just complex?").
+
+`churn_per_sloc` is derived: `churn / sloc` — instability normalized by file
+size, so a small, frequently-rewritten file outranks a big, rarely-touched one.
 """
 from __future__ import annotations
 
@@ -14,9 +17,9 @@ from typing import Iterable
 
 from code_complexity_py import complexity as _complexity
 
-# Every metric that can appear in the output and contribute to the score.
-SCORE_METRICS: tuple[str, ...] = (*_complexity.METRICS, "churn")
-DEFAULT_SCORE_METRICS: tuple[str, ...] = ("churn", "cyclomatic")
+# Every metric that may appear in the output and contribute to the score.
+SCORE_METRICS: tuple[str, ...] = (*_complexity.METRICS, "churn", "churn_per_sloc")
+DEFAULT_SCORE_METRICS: tuple[str, ...] = ("churn_per_sloc", "cyclomatic")
 
 
 @dataclass(frozen=True)
@@ -27,7 +30,8 @@ class Statistic:
     halstead: int
     maintainability: int
     churn: int
-    score: int
+    churn_per_sloc: float
+    score: float
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -36,8 +40,12 @@ class Statistic:
 SORT_KEYS: tuple[str, ...] = ("score", "file")
 
 
-def _score(metrics: dict[str, int], score_metrics: Iterable[str]) -> int:
-    return prod(metrics[m] for m in score_metrics)
+def _ratio(churn: int, sloc: int) -> float:
+    return churn / sloc if sloc > 0 else 0.0
+
+
+def _score(metrics: dict[str, float], score_metrics: Iterable[str]) -> float:
+    return float(prod(metrics[m] for m in score_metrics))
 
 
 def build_stats(
@@ -49,16 +57,18 @@ def build_stats(
     sm = list(score_metrics)
     out: list[Statistic] = []
     for rel in files:
-        m = _complexity.compute_all(repo / rel)
+        m: dict[str, float] = dict(_complexity.compute_all(repo / rel))
         m["churn"] = churn.get(rel, 0)
+        m["churn_per_sloc"] = _ratio(int(m["churn"]), int(m["sloc"]))
         out.append(
             Statistic(
                 path=rel,
-                sloc=m["sloc"],
-                cyclomatic=m["cyclomatic"],
-                halstead=m["halstead"],
-                maintainability=m["maintainability"],
-                churn=m["churn"],
+                sloc=int(m["sloc"]),
+                cyclomatic=int(m["cyclomatic"]),
+                halstead=int(m["halstead"]),
+                maintainability=int(m["maintainability"]),
+                churn=int(m["churn"]),
+                churn_per_sloc=m["churn_per_sloc"],
                 score=_score(m, sm),
             )
         )
@@ -73,21 +83,35 @@ def _ancestors(path: str) -> list[str]:
 def aggregate_by_directory(
     stats: list[Statistic], score_metrics: Iterable[str]
 ) -> list[Statistic]:
-    """Sum every metric across descendant files of each ancestor directory,
-    then recompute score as the product of the chosen metrics."""
+    """For each ancestor directory, sum every additive metric across descendants
+    and recompute `churn_per_sloc` from the *summed* totals (not an average of
+    per-file ratios), then recompute the score."""
     sm = list(score_metrics)
     sums: dict[str, dict[str, int]] = {}
+    additive = ("sloc", "cyclomatic", "halstead", "maintainability", "churn")
     for s in stats:
         for d in _ancestors(s.path):
-            entry = sums.setdefault(d, {m: 0 for m in SCORE_METRICS})
-            entry["sloc"] += s.sloc
-            entry["cyclomatic"] += s.cyclomatic
-            entry["halstead"] += s.halstead
-            entry["maintainability"] += s.maintainability
-            entry["churn"] += s.churn
-    return [
-        Statistic(path=d, **m, score=_score(m, sm)) for d, m in sums.items()
-    ]
+            entry = sums.setdefault(d, {k: 0 for k in additive})
+            for k in additive:
+                entry[k] += getattr(s, k)
+
+    out: list[Statistic] = []
+    for d, m in sums.items():
+        cps = _ratio(m["churn"], m["sloc"])
+        full: dict[str, float] = {**m, "churn_per_sloc": cps}
+        out.append(
+            Statistic(
+                path=d,
+                sloc=m["sloc"],
+                cyclomatic=m["cyclomatic"],
+                halstead=m["halstead"],
+                maintainability=m["maintainability"],
+                churn=m["churn"],
+                churn_per_sloc=cps,
+                score=_score(full, sm),
+            )
+        )
+    return out
 
 
 def sort_and_limit(

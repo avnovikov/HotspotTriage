@@ -4,16 +4,17 @@ A Python port of [`code-complexity`](https://github.com/simonrenoult/code-comple
 
 For each tracked Python file in a git repo, it computes:
 
-| metric            | what                                                                  |
-|-------------------|-----------------------------------------------------------------------|
-| `sloc`            | source lines (no blanks/comments)                                     |
-| `cyclomatic`      | sum of McCabe complexity across all functions/methods/classes         |
-| `halstead`        | Halstead volume                                                       |
-| `maintainability` | `100 - radon's MI` (so higher = worse, like the others)               |
-| `churn`           | number of commits touching the file                                   |
-| `score`           | product of the metrics passed via `-s` (default: `churn × cyclomatic`) |
+| metric            | what                                                                       |
+|-------------------|----------------------------------------------------------------------------|
+| `sloc`            | source lines (no blanks/comments)                                          |
+| `cyclomatic`      | sum of McCabe complexity across all functions/methods/classes              |
+| `halstead`        | Halstead volume                                                            |
+| `maintainability` | `100 - radon's MI` (so higher = worse, like the others)                    |
+| `churn`           | total lines added + deleted across all commits (binary files excluded)     |
+| `churn_per_sloc`  | `churn / sloc` — instability normalized by file size                       |
+| `score`           | product of the metrics passed via `-s` (default: `churn_per_sloc × cyclomatic`) |
 
-The point of `score` is to find files that are bad along *several* axes at once. The classic refactor candidate is high `churn × cyclomatic`: complex *and* changed often.
+`churn_per_sloc` removes the size effect from raw lines-changed: a small file rewritten many times gets a higher signal than a big file edited once. The default score `churn_per_sloc × cyclomatic` ≈ "how unstable is this file × how tangled is its control flow" — the classic refactor target.
 
 ## Usage
 

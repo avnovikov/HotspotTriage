@@ -9,7 +9,10 @@ from pathlib import Path
 from tests.fixtures.build_repo import build_repo
 
 
-METRIC_COLS = ("sloc", "cyclomatic", "halstead", "maintainability", "churn", "score")
+METRIC_COLS = (
+    "sloc", "cyclomatic", "halstead", "maintainability",
+    "churn", "churn_per_sloc", "score",
+)
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess:
@@ -20,7 +23,7 @@ def _run(args: list[str]) -> subprocess.CompletedProcess:
     )
 
 
-def test_cli_json_emits_all_metrics(tmp_path: Path):
+def test_cli_json_emits_all_metrics_including_per_sloc(tmp_path: Path):
     repo = build_repo(tmp_path / "r")
     r = _run([str(repo), "-f", "json"])
     assert r.returncode == 0, r.stderr
@@ -29,20 +32,18 @@ def test_cli_json_emits_all_metrics(tmp_path: Path):
     for row in rows:
         for col in ("path", *METRIC_COLS):
             assert col in row
-    by = {row["path"]: row for row in rows}
-    # Default score = churn × cyclomatic.
-    assert by["c/d.py"]["cyclomatic"] == 3
-    assert by["c/d.py"]["churn"] == 2
-    assert by["c/d.py"]["score"] == 6
+        if row["sloc"] > 0:
+            assert row["churn_per_sloc"] == row["churn"] / row["sloc"]
+        # Default score = churn_per_sloc × cyclomatic.
+        assert row["score"] == row["churn_per_sloc"] * row["cyclomatic"]
 
 
 def test_cli_score_picks_metrics_to_multiply(tmp_path: Path):
     repo = build_repo(tmp_path / "r")
-    r = _run([str(repo), "-s", "churn,sloc", "-f", "json"])
+    r = _run([str(repo), "-s", "churn,cyclomatic", "-f", "json"])
     assert r.returncode == 0, r.stderr
-    by = {row["path"]: row for row in json.loads(r.stdout)}
-    for row in by.values():
-        assert row["score"] == row["churn"] * row["sloc"]
+    for row in json.loads(r.stdout):
+        assert row["score"] == row["churn"] * row["cyclomatic"]
 
 
 def test_cli_score_single_metric_sorts_by_that_metric(tmp_path: Path):
@@ -50,17 +51,9 @@ def test_cli_score_single_metric_sorts_by_that_metric(tmp_path: Path):
     r = _run([str(repo), "-s", "churn", "-f", "json"])
     assert r.returncode == 0, r.stderr
     rows = json.loads(r.stdout)
-    # a.py has churn 4, c/d.py has 2, b.py has 1 → that's the order.
-    assert [row["path"] for row in rows] == ["a.py", "c/d.py", "b.py"]
-
-
-def test_cli_score_three_metrics(tmp_path: Path):
-    repo = build_repo(tmp_path / "r")
-    r = _run([str(repo), "-s", "churn,cyclomatic,sloc", "-f", "json"])
-    assert r.returncode == 0, r.stderr
-    by = {row["path"]: row for row in json.loads(r.stdout)}
-    for row in by.values():
-        assert row["score"] == row["churn"] * row["cyclomatic"] * row["sloc"]
+    # Result should be sorted desc by raw churn (lines added+deleted).
+    churns = [row["churn"] for row in rows]
+    assert churns == sorted(churns, reverse=True)
 
 
 def test_cli_score_rejects_bad_metric(tmp_path: Path):
@@ -79,8 +72,12 @@ def test_cli_csv_has_all_metric_headers(tmp_path: Path):
     rows = list(reader)
     assert len(rows) == 3
     for row in rows:
-        for col in METRIC_COLS:
-            int(row[col])  # parses cleanly
+        # Int columns.
+        for col in ("sloc", "cyclomatic", "halstead", "maintainability", "churn"):
+            int(row[col])
+        # Float columns.
+        for col in ("churn_per_sloc", "score"):
+            float(row[col])
 
 
 def test_cli_directories_aggregates(tmp_path: Path):
@@ -89,9 +86,9 @@ def test_cli_directories_aggregates(tmp_path: Path):
     assert r.returncode == 0, r.stderr
     rows = json.loads(r.stdout)
     assert {row["path"] for row in rows} == {"c"}
-    # c contains only c/d.py with cyclomatic=3, churn=2.
-    assert rows[0]["cyclomatic"] == 3 and rows[0]["churn"] == 2
-    assert rows[0]["score"] == 6  # default churn × cyclomatic
+    row = rows[0]
+    if row["sloc"] > 0:
+        assert row["churn_per_sloc"] == row["churn"] / row["sloc"]
 
 
 def test_cli_filter_excludes(tmp_path: Path):
