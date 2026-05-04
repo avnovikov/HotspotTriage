@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from tests.fixtures.build_repo import build_repo
+from tests.fixtures.build_block_repo import build_block_repo
 
 
 METRIC_COLS = (

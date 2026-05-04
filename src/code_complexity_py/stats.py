@@ -15,6 +15,9 @@ from math import prod
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
+from code_complexity_py import block_churn as _block_churn
+from code_complexity_py import blocks as _blocks
+from code_complexity_py import cache as _cache
 from code_complexity_py import complexity as _complexity
 
 # Every metric that may appear in the output and contribute to the score.
@@ -72,6 +75,73 @@ def build_stats(
                 score=_score(m, sm),
             )
         )
+    return out
+
+
+def build_block_stats(
+    repo: Path,
+    files: Iterable[str],
+    score_metrics: Iterable[str],
+    since: str | None = None,
+    until: str | None = None,
+) -> list[Statistic]:
+    """One Statistic per function/method (no class rows). Maintainability is
+    inherited from the file. Churn is computed via `git log -L` per block,
+    cached on disk by file blob SHA."""
+    sm = list(score_metrics)
+    files = list(files)
+
+    blob_shas = _block_churn.file_blob_shas(repo)
+    cache = _cache.Cache(_cache.cache_path_for(repo))
+
+    # Pass 1: extract blocks + compute file/snippet metrics.
+    file_metrics: dict[str, dict[str, int]] = {}
+    file_blocks: dict[str, list[_blocks.Block]] = {}
+    file_sources: dict[str, str] = {}
+    requests: list[tuple[str, str, int, int]] = []
+    for rel in files:
+        if rel not in blob_shas:
+            continue
+        try:
+            src = (repo / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        file_sources[rel] = src
+        file_metrics[rel] = _complexity.compute_all(repo / rel)
+        bs = _blocks.extract_blocks(src)
+        file_blocks[rel] = bs
+        for b in bs:
+            requests.append((rel, blob_shas[rel], b.start, b.end))
+
+    # Pass 2: parallel git log -L for all blocks (cached).
+    churns = _block_churn.compute_many(repo, requests, since, until, cache)
+    cache.save()
+
+    # Pass 3: assemble Statistic rows.
+    out: list[Statistic] = []
+    for rel in files:
+        if rel not in file_blocks:
+            continue
+        src = file_sources[rel]
+        file_mi = file_metrics[rel]["maintainability"]
+        for b in file_blocks[rel]:
+            snippet = _complexity.slice_block(src, b.start, b.end)
+            m: dict[str, float] = dict(_complexity.compute_for_source(snippet))
+            m["maintainability"] = file_mi
+            m["churn"] = churns.get((rel, b.start, b.end), 0)
+            m["churn_per_sloc"] = _ratio(int(m["churn"]), int(m["sloc"]))
+            out.append(
+                Statistic(
+                    path=f"{rel}::{b.name}",
+                    sloc=int(m["sloc"]),
+                    cyclomatic=int(m["cyclomatic"]),
+                    halstead=int(m["halstead"]),
+                    maintainability=int(m["maintainability"]),
+                    churn=int(m["churn"]),
+                    churn_per_sloc=m["churn_per_sloc"],
+                    score=_score(m, sm),
+                )
+            )
     return out
 
 

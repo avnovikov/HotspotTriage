@@ -46,6 +46,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-u", "--until", default=None)
     p.add_argument("--sort", choices=stats.SORT_KEYS, default="score")
     p.add_argument("-d", "--directories", action="store_true")
+    p.add_argument(
+        "--granularity",
+        choices=("file", "block"),
+        default="file",
+        help=(
+            "file: one row per Python file (default). "
+            "block: one row per function/method (slow on first run; cached)."
+        ),
+    )
     return p
 
 
@@ -76,13 +85,22 @@ def main(argv: list[str] | None = None) -> int:
         if not args.no_default_filter:
             patterns.append(DEFAULT_FILTER)
 
+        if args.granularity == "block" and args.directories:
+            raise ValueError("--directories cannot be combined with --granularity block")
+
         with discovery.resolve_target(args.target) as repo:
             keep = filtering.make_filter(patterns)
             files = [f for f in discovery.list_tracked_files(repo) if keep(f)]
-            churn = _churn.compute_churn(repo, since=args.since, until=args.until)
-            results = stats.build_stats(repo, files, churn, score_metrics)
-            if args.directories:
-                results = stats.aggregate_by_directory(results, score_metrics)
+            if args.granularity == "block":
+                results = stats.build_block_stats(
+                    repo, files, score_metrics,
+                    since=args.since, until=args.until,
+                )
+            else:
+                churn = _churn.compute_churn(repo, since=args.since, until=args.until)
+                results = stats.build_stats(repo, files, churn, score_metrics)
+                if args.directories:
+                    results = stats.aggregate_by_directory(results, score_metrics)
             results = stats.sort_and_limit(results, by=args.sort, limit=args.limit)
             print(output.render(results, args.format))
         return 0
