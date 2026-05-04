@@ -12,6 +12,7 @@ Files that fail to parse return zeros for the parsed metrics and emit a stderr w
 from __future__ import annotations
 
 import sys
+import textwrap
 from pathlib import Path
 
 from radon.complexity import cc_visit
@@ -35,6 +36,26 @@ def _halstead(src: str) -> int:
 
 def _maintainability(src: str) -> int:
     return max(0, int(round(100 - mi_visit(src, True))))
+
+
+def compute_for_source(src: str) -> dict[str, int]:
+    """Compute sloc/cyclomatic/halstead for a source snippet (no maintainability —
+    MI is a module-level metric and is filled in by the caller). Errors → 0."""
+    out: dict[str, int] = {"sloc": 0, "cyclomatic": 0, "halstead": 0}
+    for name, fn in (("sloc", _sloc), ("cyclomatic", _cyclomatic), ("halstead", _halstead)):
+        try:
+            out[name] = fn(src)
+        except (SyntaxError, ValueError):
+            out[name] = 0
+    return out
+
+
+def slice_block(src: str, start: int, end: int) -> str:
+    """Extract lines [start, end] (1-indexed, inclusive) and dedent so an
+    indented method becomes a parseable top-level def."""
+    lines = src.splitlines()
+    snippet = "\n".join(lines[max(0, start - 1) : end])
+    return textwrap.dedent(snippet)
 
 
 def compute_all(path: Path) -> dict[str, int]:
