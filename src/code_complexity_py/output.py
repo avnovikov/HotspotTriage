@@ -1,4 +1,4 @@
-"""Render Statistic lists as table / json / csv."""
+"""Render Statistic lists as table / json / csv. Always emits all metrics."""
 from __future__ import annotations
 
 import csv
@@ -12,15 +12,26 @@ from code_complexity_py.stats import Statistic
 
 Format = str
 FORMATS: tuple[Format, ...] = ("table", "json", "csv")
-_HEADERS: tuple[str, ...] = ("path", "complexity", "churn", "score")
+HEADERS: tuple[str, ...] = (
+    "path",
+    "sloc",
+    "cyclomatic",
+    "halstead",
+    "maintainability",
+    "churn",
+    "score",
+)
 
 
-def _rows(stats: Iterable[Statistic]) -> list[tuple[str, int, int, int]]:
-    return [(s.path, s.complexity, s.churn, s.score) for s in stats]
+def _rows(stats: Iterable[Statistic]) -> list[tuple]:
+    return [
+        (s.path, s.sloc, s.cyclomatic, s.halstead, s.maintainability, s.churn, s.score)
+        for s in stats
+    ]
 
 
 def render_table(stats: Iterable[Statistic]) -> str:
-    return tabulate(_rows(stats), headers=_HEADERS, tablefmt="github")
+    return tabulate(_rows(stats), headers=HEADERS, tablefmt="github")
 
 
 def render_json(stats: Iterable[Statistic]) -> str:
@@ -30,7 +41,7 @@ def render_json(stats: Iterable[Statistic]) -> str:
 def render_csv(stats: Iterable[Statistic]) -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(_HEADERS)
+    w.writerow(HEADERS)
     w.writerows(_rows(stats))
     return buf.getvalue().rstrip("\n")
 
