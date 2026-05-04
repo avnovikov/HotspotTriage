@@ -1,4 +1,4 @@
-"""Tiny JSON cache for per-block churn values.
+"""Per-block churn cache stored in <repo>/.hotspottriage/cache/ as pickle files.
 
 Keyed by `(file_blob_sha, start, end, since, until)`. Because the key includes
 the file's blob SHA at HEAD, any commit that touches the file invalidates its
@@ -7,31 +7,37 @@ entries valid.
 """
 from __future__ import annotations
 
-import hashlib
-import json
 import os
+import pickle
 import tempfile
 from pathlib import Path
 
 
 def cache_path_for(repo: Path) -> Path:
-    h = hashlib.sha256(str(repo.resolve()).encode()).hexdigest()[:16]
-    base = Path(os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache"))
-    return base / "code-complexity-py" / f"{h}.json"
+    """Return the cache directory for the given repo (under .hotspottriage/cache/)."""
+    return repo / ".hotspottriage" / "cache"
 
 
 class Cache:
-    def __init__(self, path: Path):
-        self.path = path
+    def __init__(self, repo: Path):
+        self.repo = repo
+        self.dir = cache_path_for(repo)
         self.data: dict[str, int] = {}
         self.dirty = False
-        if path.exists():
+        self._load()
+
+    def _load(self) -> None:
+        """Load cache from all .pkl files in the cache directory."""
+        if not self.dir.exists():
+            return
+        for pkl_file in self.dir.glob("*.pkl"):
             try:
-                self.data = json.loads(path.read_text())
-                if not isinstance(self.data, dict):
-                    self.data = {}
-            except (OSError, ValueError):
-                self.data = {}
+                with open(pkl_file, "rb") as f:
+                    cached = pickle.load(f)
+                    if isinstance(cached, dict):
+                        self.data.update(cached)
+            except (OSError, pickle.UnpicklingError):
+                pass
 
     @staticmethod
     def make_key(blob_sha: str, start: int, end: int, since: str | None, until: str | None) -> str:
@@ -47,13 +53,14 @@ class Cache:
     def save(self) -> None:
         if not self.dirty:
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.dir.mkdir(parents=True, exist_ok=True)
+        cache_file = self.dir / "blocks.pkl"
         # Atomic write so a crash mid-save doesn't corrupt the cache file.
-        fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".cache-", suffix=".tmp")
+        fd, tmp = tempfile.mkstemp(dir=self.dir, prefix=".cache-", suffix=".tmp")
         try:
-            with os.fdopen(fd, "w") as f:
-                json.dump(self.data, f)
-            os.replace(tmp, self.path)
+            with os.fdopen(fd, "wb") as f:
+                pickle.dump(self.data, f)
+            os.replace(tmp, cache_file)
         except Exception:
             try:
                 os.unlink(tmp)

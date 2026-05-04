@@ -1,59 +1,64 @@
-import json
+import pickle
 from pathlib import Path
 
 import pytest
 
-from code_complexity_py.cache import Cache, cache_path_for
+from hotspottriage.cache import Cache, cache_path_for
 
 
-def test_cache_path_under_xdg_cache_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    p = cache_path_for(Path("/some/repo"))
-    assert p.parent == tmp_path / "code-complexity-py"
-    assert p.suffix == ".json"
+def test_cache_path_in_project_hotspottriage(tmp_path: Path):
+    p = cache_path_for(tmp_path / "myrepo")
+    assert p == tmp_path / "myrepo" / ".hotspottriage" / "cache"
 
 
-def test_cache_path_is_stable_for_same_repo(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    a = cache_path_for(Path("/some/repo"))
-    b = cache_path_for(Path("/some/repo"))
+def test_cache_path_is_stable_for_same_repo(tmp_path: Path):
+    a = cache_path_for(tmp_path / "myrepo")
+    b = cache_path_for(tmp_path / "myrepo")
     assert a == b
 
 
 def test_get_returns_none_for_missing_key(tmp_path: Path):
-    c = Cache(tmp_path / "c.json")
+    c = Cache(tmp_path / "myrepo")
     assert c.get("nope") is None
 
 
 def test_put_then_get(tmp_path: Path):
-    c = Cache(tmp_path / "c.json")
+    c = Cache(tmp_path / "myrepo")
     c.put("k", 42)
     assert c.get("k") == 42
 
 
 def test_save_writes_file_and_persists(tmp_path: Path):
-    p = tmp_path / "c.json"
-    c = Cache(p)
+    repo = tmp_path / "myrepo"
+    c = Cache(repo)
     c.put("k", 7)
     c.save()
-    assert json.loads(p.read_text()) == {"k": 7}
+    # Cache should write to .hotspottriage/cache/blocks.pkl
+    pkl_path = repo / ".hotspottriage" / "cache" / "blocks.pkl"
+    assert pkl_path.exists()
+    with open(pkl_path, "rb") as f:
+        assert pickle.load(f) == {"k": 7}
     # Reopen and read back.
-    c2 = Cache(p)
+    c2 = Cache(repo)
     assert c2.get("k") == 7
 
 
 def test_save_skips_when_clean(tmp_path: Path):
-    p = tmp_path / "c.json"
-    c = Cache(p)
+    repo = tmp_path / "myrepo"
+    c = Cache(repo)
     c.save()
     # Nothing written because nothing was put.
-    assert not p.exists()
+    pkl_path = repo / ".hotspottriage" / "cache" / "blocks.pkl"
+    assert not pkl_path.exists()
 
 
 def test_corrupt_file_recovers_to_empty(tmp_path: Path):
-    p = tmp_path / "c.json"
-    p.write_text("not json {{{")
-    c = Cache(p)
+    repo = tmp_path / "myrepo"
+    cache_dir = repo / ".hotspottriage" / "cache"
+    cache_dir.mkdir(parents=True)
+    pkl_file = cache_dir / "blocks.pkl"
+    pkl_file.write_text("not pickle {{{")
+    c = Cache(repo)
     assert c.data == {}
     assert c.get("k") is None
 

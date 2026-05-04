@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from code_complexity_py.stats import (
+from hotspottriage.stats import (
     Statistic,
     aggregate_by_directory,
     build_stats,

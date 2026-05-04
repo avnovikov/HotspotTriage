@@ -26,7 +26,7 @@ def resolve_target(target: str) -> Iterator[Path]:
     """Yield a local Path for the target. Clones remote URLs to a temp dir
     and removes the temp dir on exit."""
     if is_git_url(target):
-        tmp = Path(tempfile.mkdtemp(prefix=f"code-complexity-py-{os.getpid()}-"))
+        tmp = Path(tempfile.mkdtemp(prefix=f"hotspottriage-{os.getpid()}-"))
         try:
             subprocess.run(
                 ["git", "clone", "--quiet", target, str(tmp)],

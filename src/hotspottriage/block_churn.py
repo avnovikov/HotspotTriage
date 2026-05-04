@@ -13,7 +13,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from code_complexity_py.cache import Cache
+from hotspottriage.cache import Cache, cache_path_for
 
 
 def file_blob_shas(repo: Path) -> dict[str, str]:

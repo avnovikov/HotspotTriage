@@ -15,14 +15,15 @@ from math import prod
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
-from code_complexity_py import block_churn as _block_churn
-from code_complexity_py import blocks as _blocks
-from code_complexity_py import cache as _cache
-from code_complexity_py import complexity as _complexity
+from hotspottriage import block_churn as _block_churn
+from hotspottriage import blocks as _blocks
+from hotspottriage import cache as _cache
+from hotspottriage import complexity as _complexity
 
 # Every metric that may appear in the output and contribute to the score.
+# The default recipe lives in `config.DEFAULTS["score_metrics"]`; this module
+# only owns the validation set so it stays close to the data definitions.
 SCORE_METRICS: tuple[str, ...] = (*_complexity.METRICS, "churn", "churn_per_sloc")
-DEFAULT_SCORE_METRICS: tuple[str, ...] = ("churn_per_sloc", "cyclomatic")
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,7 @@ def build_block_stats(
     score_metrics: Iterable[str],
     since: str | None = None,
     until: str | None = None,
+    workers: int | None = None,
 ) -> list[Statistic]:
     """One Statistic per function/method (no class rows). Maintainability is
     inherited from the file. Churn is computed via `git log -L` per block,
@@ -92,7 +94,7 @@ def build_block_stats(
     files = list(files)
 
     blob_shas = _block_churn.file_blob_shas(repo)
-    cache = _cache.Cache(_cache.cache_path_for(repo))
+    cache = _cache.Cache(repo)
 
     # Pass 1: extract blocks + compute file/snippet metrics.
     file_metrics: dict[str, dict[str, int]] = {}
@@ -114,7 +116,9 @@ def build_block_stats(
             requests.append((rel, blob_shas[rel], b.start, b.end))
 
     # Pass 2: parallel git log -L for all blocks (cached).
-    churns = _block_churn.compute_many(repo, requests, since, until, cache)
+    churns = _block_churn.compute_many(
+        repo, requests, since, until, cache, workers=workers
+    )
     cache.save()
 
     # Pass 3: assemble Statistic rows.

@@ -1,6 +1,6 @@
 from textwrap import dedent
 
-from code_complexity_py.blocks import extract_blocks
+from hotspottriage.blocks import extract_blocks
 
 
 def test_top_level_function():

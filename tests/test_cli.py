@@ -17,8 +17,10 @@ METRIC_COLS = (
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess:
+    """Always pass --no-config so a developer's ~/.hotspottriage/config.yml
+    cannot change the meaning of these end-to-end assertions."""
     return subprocess.run(
-        [sys.executable, "-m", "code_complexity_py", *args],
+        [sys.executable, "-m", "hotspottriage", *args, "--no-config"],
         capture_output=True,
         text=True,
     )
@@ -131,3 +133,77 @@ def test_cli_no_default_filter_includes_non_py(tmp_path: Path):
     assert r.returncode == 0, r.stderr
     paths = {row["path"] for row in json.loads(r.stdout)}
     assert "README.md" in paths
+
+
+def test_cli_project_config_changes_default_format(tmp_path: Path):
+    """A `<repo>/.hotspottriage/project.yml` should change the default output
+    format end-to-end (no --no-config; CLI does not pass -f)."""
+    repo = build_repo(tmp_path / "r")
+    cfg_dir = repo / ".hotspottriage"
+    cfg_dir.mkdir()
+    (cfg_dir / "project.yml").write_text("format: json\n")
+    r = subprocess.run(
+        [sys.executable, "-m", "hotspottriage", str(repo)],
+        capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    rows = json.loads(r.stdout)
+    assert rows
+
+
+def test_cli_explicit_config_file(tmp_path: Path):
+    """`--config PATH` is the highest-precedence file layer (still beaten
+    only by CLI flags)."""
+    repo = build_repo(tmp_path / "r")
+    cfg = tmp_path / "extra.yml"
+    cfg.write_text("format: csv\n")
+    r = subprocess.run(
+        [sys.executable, "-m", "hotspottriage", str(repo), "--config", str(cfg)],
+        capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.lstrip().startswith("path,")  # CSV header
+
+
+def test_cli_invalid_config_value_reported(tmp_path: Path):
+    repo = build_repo(tmp_path / "r")
+    cfg = tmp_path / "bad.yml"
+    cfg.write_text("format: yaml\n")
+    r = subprocess.run(
+        [sys.executable, "-m", "hotspottriage", str(repo), "--config", str(cfg)],
+        capture_output=True, text=True,
+    )
+    assert r.returncode == 1
+    assert "unknown format" in r.stderr
+
+
+def test_cli_respects_root_gitignore_for_tracked_files(tmp_path: Path):
+    repo = build_repo(tmp_path / "r")
+    (repo / ".gitignore").write_text("b.py\n")
+    subprocess.run(["git", "-C", str(repo), "add", ".gitignore"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "gitignore"], check=True)
+
+    r = _run([str(repo), "-f", "json"])
+    assert r.returncode == 0, r.stderr
+    paths = {row["path"] for row in json.loads(r.stdout)}
+    assert paths == {"a.py", "c/d.py"}
+
+
+def test_cli_ignore_dir_excludes_prefix(tmp_path: Path):
+    repo = build_repo(tmp_path / "r")
+    r = _run([str(repo), "--ignore-dir", "c", "-f", "json"])
+    assert r.returncode == 0, r.stderr
+    paths = {row["path"] for row in json.loads(r.stdout)}
+    assert paths == {"a.py", "b.py"}
+
+
+def test_cli_no_respect_gitignore_includes_tracked_matches(tmp_path: Path):
+    repo = build_repo(tmp_path / "r")
+    (repo / ".gitignore").write_text("b.py\n")
+    subprocess.run(["git", "-C", str(repo), "add", ".gitignore"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "gitignore"], check=True)
+
+    r = _run([str(repo), "--no-respect-gitignore", "-f", "json"])
+    assert r.returncode == 0, r.stderr
+    paths = {row["path"] for row in json.loads(r.stdout)}
+    assert paths == {"a.py", "b.py", "c/d.py"}

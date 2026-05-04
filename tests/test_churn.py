@@ -1,7 +1,7 @@
 from pathlib import Path
 import subprocess
 
-from code_complexity_py.churn import compute_churn
+from hotspottriage.churn import compute_churn
 from tests.fixtures.build_repo import build_repo
 
 

@@ -12,7 +12,7 @@ from typing import Iterable
 
 from tabulate import tabulate
 
-from code_complexity_py.stats import Statistic
+from hotspottriage.stats import Statistic
 
 Format = str
 FORMATS: tuple[Format, ...] = ("table", "json", "csv")
