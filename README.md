@@ -32,6 +32,7 @@ uv run hotspottriage <repo> [options]
   -u, --until <date>           passed to git log
   --sort                       score | file  (default: score)
   -d, --directories            aggregate by directory
+  --granularity                file | block  (default: file)
   --ignore-dir <PREFIX>        repeatable; drop tracked paths under this POSIX prefix
   --no-respect-gitignore       skip .gitignore / nested .gitignore / .git/info/exclude when filtering
 ```
@@ -60,6 +61,9 @@ uv run hotspottriage ~/myrepo -f csv > complexity.csv
 
 # Aggregate by directory
 uv run hotspottriage ~/myrepo -d -l 10
+
+# Per-function/method analysis (cached in .hotspottriage/)
+uv run hotspottriage ~/myrepo --granularity block -s cyclomatic -l 10
 ```
 
 The output always contains every metric, so a single CSV dump can be re-sorted later by any column you like.
@@ -104,8 +108,7 @@ until: null                      # git --until
 directories: false               # aggregate by directory; not allowed with granularity: block
 ignore_directories: []           # POSIX prefixes under the repo to skip entirely, e.g. ['vendor', 'generated']
 respect_gitignore: true         # apply .gitignore, **/.gitignore, and .git/info/exclude to tracked paths
-block_workers: null              # block-churn thread pool size
-cache_dir: null                  # null = $XDG_CACHE_HOME or ~/.cache
+block_workers: null              # block-churn thread pool size (default: 16)
 log_level: warning               # debug | info | warning | error
 ```
 
@@ -116,6 +119,16 @@ After `git ls-files` returns tracked paths, HotspotTriage applies, in order:
 1. **Glob filter** — `--filter` / `filter` plus the implicit `**/*.py` unless disabled.
 2. **Directory prefixes** — `ignore_directories` in YAML and/or repeated `--ignore-dir`. Any path equal to a prefix or under `prefix/` is dropped (prefixes are normalised POSIX paths; `..` is rejected).
 3. **Gitignore rules** — unless `respect_gitignore: false` or `--no-respect-gitignore`: root `.gitignore`, `.git/info/exclude`, then each nested `.gitignore` along the path to the file, in git’s usual order. Last matching pattern wins, including `!` negation. This matches how git would treat an **untracked** file, but is applied to **tracked** paths so accidentally-committed ignored trees can be excluded from the report.
+
+### Block-level granularity and caching
+
+When `--granularity block` is used, HotspotTriage computes metrics for each function, method, and async function (not class rows). The first run computes churn via `git log -L` for each block; subsequent runs reuse cached values in `<repo>/.hotspottriage/cache/blocks.pkl`, keyed by file blob SHA so changes invalidate automatically.
+
+Add `.hotspottriage/` to your `.gitignore` to avoid committing cached data:
+
+```bash
+echo '.hotspottriage/' >> .gitignore
+```
 
 ### Skipping config files
 
