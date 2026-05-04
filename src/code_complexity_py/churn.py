@@ -1,8 +1,13 @@
-"""Churn = number of commits touching each file, via `git log --name-only`."""
+"""Churn = total lines (added + deleted) summed across all commits, per file.
+
+Computed via a single `git log --numstat`. Binary files (numstat columns are
+`-`) are excluded. Renames are not followed (`--follow` only works per-file
+and would force one git invocation per path); a renamed file's pre-rename
+churn stays attached to its old name.
+"""
 from __future__ import annotations
 
 import subprocess
-from collections import Counter
 from pathlib import Path
 
 
@@ -11,19 +16,23 @@ def compute_churn(
     since: str | None = None,
     until: str | None = None,
 ) -> dict[str, int]:
-    """Count commits touching each tracked file across the whole repo history.
-
-    Note: we deliberately do NOT pass `--follow`, because `--follow` only works
-    when given a single pathspec. The original Node tool runs git log per-file
-    with `--follow`; doing one global log here is far cheaper for large repos
-    and gives the same churn count except across renames. For our use case
-    (rough indicator of how often a file is touched) this is the right tradeoff.
-    """
-    cmd = ["git", "-C", str(repo), "log", "--format=", "--name-only"]
+    cmd = ["git", "-C", str(repo), "log", "--format=", "--numstat"]
     if since:
         cmd.append(f"--since={since}")
     if until:
         cmd.append(f"--until={until}")
     result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-    counts: Counter[str] = Counter(line for line in result.stdout.splitlines() if line)
-    return dict(counts)
+
+    counts: dict[str, int] = {}
+    for line in result.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        added, deleted, path = parts
+        if added == "-" or deleted == "-":
+            continue  # binary file
+        try:
+            counts[path] = counts.get(path, 0) + int(added) + int(deleted)
+        except ValueError:
+            continue
+    return counts

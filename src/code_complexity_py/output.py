@@ -1,4 +1,8 @@
-"""Render Statistic lists as table / json / csv. Always emits all metrics."""
+"""Render Statistic lists as table / json / csv. Always emits all metrics.
+
+Floats (`churn_per_sloc`, `score`) are formatted to 4 decimal places in table
+and CSV outputs for readability; JSON emits raw floats.
+"""
 from __future__ import annotations
 
 import csv
@@ -19,19 +23,35 @@ HEADERS: tuple[str, ...] = (
     "halstead",
     "maintainability",
     "churn",
+    "churn_per_sloc",
     "score",
 )
 
 
-def _rows(stats: Iterable[Statistic]) -> list[tuple]:
-    return [
-        (s.path, s.sloc, s.cyclomatic, s.halstead, s.maintainability, s.churn, s.score)
-        for s in stats
-    ]
+def _row(s: Statistic) -> tuple:
+    return (
+        s.path,
+        s.sloc,
+        s.cyclomatic,
+        s.halstead,
+        s.maintainability,
+        s.churn,
+        s.churn_per_sloc,
+        s.score,
+    )
+
+
+def _fmt_float(x: float) -> str:
+    return f"{x:.4f}"
 
 
 def render_table(stats: Iterable[Statistic]) -> str:
-    return tabulate(_rows(stats), headers=HEADERS, tablefmt="github")
+    return tabulate(
+        [_row(s) for s in stats],
+        headers=HEADERS,
+        tablefmt="github",
+        floatfmt=".4f",
+    )
 
 
 def render_json(stats: Iterable[Statistic]) -> str:
@@ -42,7 +62,19 @@ def render_csv(stats: Iterable[Statistic]) -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(HEADERS)
-    w.writerows(_rows(stats))
+    for s in stats:
+        w.writerow(
+            (
+                s.path,
+                s.sloc,
+                s.cyclomatic,
+                s.halstead,
+                s.maintainability,
+                s.churn,
+                _fmt_float(s.churn_per_sloc),
+                _fmt_float(s.score),
+            )
+        )
     return buf.getvalue().rstrip("\n")
 
 
