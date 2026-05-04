@@ -3,7 +3,7 @@ from textwrap import dedent
 
 import pytest
 
-from code_complexity_py import complexity
+from hotspottriage import complexity
 
 
 @pytest.fixture

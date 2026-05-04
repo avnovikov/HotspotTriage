@@ -1,0 +1,230 @@
+"""CLI entry point. See `hotspottriage --help` for usage.
+
+Settings flow through three layers (last wins): code DEFAULTS, the
+`~/.hotspottriage/...` + `<repo>/.hotspottriage/...` config files
+(see `config.py`), and CLI flags. The argparse defaults are deliberately
+`None` sentinels so the merge layer can tell "user passed this flag" from
+"user did not".
+
+The `init` subcommand is detected manually before argparse is invoked so
+its parser does not interfere with the analyze command's positional
+`target` argument (subparsers consume the first positional and would
+reject any non-`init` string).
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+from hotspottriage import churn as _churn
+from hotspottriage import config as _config
+from hotspottriage import discovery, filtering, output, stats
+
+
+def _build_analyze_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="hotspottriage",
+        description=(
+            "Rank Python files by a composite score. Computes sloc, cyclomatic, "
+            "halstead, maintainability and churn for every tracked .py file. "
+            "Score = product of the metrics passed to -s. "
+            "Use `hotspottriage init --global|--project` to scaffold a "
+            "config file."
+        ),
+    )
+    p.add_argument("target", help="path to a local git repo, or a remote git URL")
+    p.add_argument(
+        "--filter",
+        default=None,
+        help="comma-separated globs (AND semantics, '!' negates)",
+    )
+    p.add_argument(
+        "--no-default-filter",
+        dest="no_default_filter",
+        action="store_true",
+        default=None,
+        help=(
+            "disable the implicit default filter "
+            f"(default: {_config.DEFAULTS['default_filter']})"
+        ),
+    )
+    p.add_argument(
+        "-s",
+        "--score",
+        default=None,
+        help=(
+            "comma-separated metrics whose product becomes the score. "
+            f"Choose from: {', '.join(stats.SCORE_METRICS)}. "
+            f"Default: {','.join(_config.DEFAULTS['score_metrics'])}"
+        ),
+    )
+    p.add_argument("-f", "--format", choices=output.FORMATS, default=None)
+    p.add_argument("-l", "--limit", type=int, default=None)
+    p.add_argument("-i", "--since", default=None)
+    p.add_argument("-u", "--until", default=None)
+    p.add_argument("--sort", choices=stats.SORT_KEYS, default=None)
+    p.add_argument(
+        "-d",
+        "--directories",
+        action="store_true",
+        default=None,
+    )
+    p.add_argument(
+        "--granularity",
+        choices=("file", "block"),
+        default=None,
+        help=(
+            "file: one row per Python file (default). "
+            "block: one row per function/method (slow on first run; cached)."
+        ),
+    )
+    p.add_argument(
+        "--ignore-dir",
+        dest="ignore_dir",
+        action="append",
+        default=None,
+        metavar="PREFIX",
+        help=(
+            "exclude tracked paths under this POSIX directory prefix "
+            "(repeatable); merged with ignore_directories from config"
+        ),
+    )
+    p.add_argument(
+        "--no-respect-gitignore",
+        dest="no_respect_gitignore",
+        action="store_true",
+        default=None,
+        help=(
+            "do not apply .gitignore, nested .gitignore, or .git/info/exclude "
+            "rules when filtering tracked paths"
+        ),
+    )
+    p.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="path to an additional YAML config file applied after the standard layers",
+    )
+    p.add_argument(
+        "--no-config",
+        action="store_true",
+        help="ignore all config files; use built-in defaults plus CLI flags only",
+    )
+    return p
+
+
+def _build_init_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="hotspottriage init",
+        description=(
+            "Scaffold a HotspotTriage config file. Use --global to write "
+            "~/.hotspottriage/config.yml, or --project to write "
+            "<target>/.hotspottriage/project.yml plus a gitignored "
+            "project.local.yml override."
+        ),
+    )
+    scope = p.add_mutually_exclusive_group(required=True)
+    scope.add_argument(
+        "--global",
+        dest="global_scope",
+        action="store_true",
+        help="write the global config at ~/.hotspottriage/config.yml",
+    )
+    scope.add_argument(
+        "--project",
+        dest="project_scope",
+        action="store_true",
+        help="write the project config under <target>/.hotspottriage/",
+    )
+    p.add_argument(
+        "target",
+        nargs="?",
+        default=".",
+        help="repo root for --project scope (default: current directory)",
+    )
+    return p
+
+
+def _run_init(argv: list[str]) -> int:
+    args = _build_init_parser().parse_args(argv)
+    try:
+        if args.global_scope:
+            written = _config.init_config("global")
+        else:
+            target = Path(args.target).resolve()
+            written = _config.init_config("project", target)
+    except (FileExistsError, NotADirectoryError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(f"wrote {written}")
+    return 0
+
+
+def _resolve_config(args: argparse.Namespace, target_path: Path | None) -> dict:
+    """Build the merged config: files first (unless --no-config), then CLI."""
+    if args.no_config:
+        merged = _config.load_config(
+            target_path=None, use_global=False, use_project=False
+        )
+    else:
+        merged = _config.load_config(
+            target_path=target_path,
+            explicit=args.config,
+        )
+    merged = _config.apply_cli_overrides(merged, args)
+    _config.validate(merged)
+    return merged
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    if argv and argv[0] == "init":
+        return _run_init(argv[1:])
+
+    args = _build_analyze_parser().parse_args(argv)
+
+    try:
+        with discovery.resolve_target(args.target) as repo:
+            cfg = _resolve_config(args, target_path=repo)
+
+            patterns = list(cfg["filter"])
+            if not cfg["no_default_filter"]:
+                patterns.append(cfg["default_filter"])
+
+            glob_keep = filtering.make_filter(patterns)
+            keep = filtering.make_tracked_path_predicate(
+                repo,
+                glob_keep=glob_keep,
+                ignore_directories=cfg["ignore_directories"],
+                respect_gitignore=cfg["respect_gitignore"],
+            )
+            files = [f for f in discovery.list_tracked_files(repo) if keep(f)]
+            score_metrics = list(cfg["score_metrics"])
+
+            if cfg["granularity"] == "block":
+                results = stats.build_block_stats(
+                    repo, files, score_metrics,
+                    since=cfg["since"], until=cfg["until"],
+                    workers=cfg["block_workers"],
+                )
+            else:
+                churn = _churn.compute_churn(
+                    repo, since=cfg["since"], until=cfg["until"]
+                )
+                results = stats.build_stats(repo, files, churn, score_metrics)
+                if cfg["directories"]:
+                    results = stats.aggregate_by_directory(results, score_metrics)
+            results = stats.sort_and_limit(
+                results, by=cfg["sort"], limit=cfg["limit"]
+            )
+            print(output.render(results, cfg["format"]))
+        return 0
+    except (NotADirectoryError, RuntimeError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

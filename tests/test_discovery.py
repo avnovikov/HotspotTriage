@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from code_complexity_py import discovery
+from hotspottriage import discovery
 from tests.fixtures.build_repo import build_repo
 
 
