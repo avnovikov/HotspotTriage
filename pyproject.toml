@@ -17,6 +17,7 @@ dependencies = [
 [project.scripts]
 hotspottriage = "hotspottriage.cli:main"
 hotspottriage-mcp = "hotspottriage.mcp_server:main"
+hotspottriage-cache = "hotspottriage.cache_generator:main"
 
 [dependency-groups]
 dev = [

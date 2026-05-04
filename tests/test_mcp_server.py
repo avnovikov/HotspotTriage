@@ -6,7 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from hotspottriage.mcp_server import analyze, init_config
+from hotspottriage.mcp_server import (
+    analyze,
+    analyze_classes,
+    analyze_with_cache,
+    cache_status,
+    clear_cache,
+    init_config,
+)
 
 
 @pytest.fixture
@@ -199,3 +206,70 @@ def test_analyze_sort_by_file(test_repo):
     # Should return results sorted by file path
     assert len(data) > 0
     # Can't guarantee much more about sorting without knowing the exact files
+
+
+def test_cache_status_empty(test_repo):
+    """Test cache status for repo without cache."""
+    result = cache_status(str(test_repo))
+    data = json.loads(result)
+
+    assert data["status"] in ("empty", "ok")
+    assert "cache_dir" in data
+    assert "entries" in data
+
+
+def test_clear_cache(test_repo):
+    """Test clearing cache."""
+    # First generate some cache
+    analyze_with_cache(str(test_repo))
+
+    # Then clear it
+    result = clear_cache(str(test_repo))
+    data = json.loads(result)
+
+    assert data["status"] == "success"
+
+    # Verify cache is cleared
+    status_result = cache_status(str(test_repo))
+    status = json.loads(status_result)
+    assert status["entries"] == 0
+
+
+def test_analyze_with_cache(test_repo):
+    """Test cache-backed analysis with block granularity."""
+    result = analyze_with_cache(str(test_repo), score_metrics="cyclomatic")
+    data = json.loads(result)
+
+    # Should have results and cache info
+    assert "results" in data
+    assert "cache" in data
+    assert "entries" in data["cache"]
+    assert len(data["results"]) > 0
+
+
+def test_analyze_classes(test_repo):
+    """Test class and method analysis."""
+    result = analyze_classes(str(test_repo))
+    data = json.loads(result)
+
+    # Should return list of classes/methods
+    assert isinstance(data, list)
+    assert len(data) > 0
+
+    # Check structure
+    for item in data:
+        assert "file" in item
+        assert "full_name" in item
+        assert "start_line" in item
+        assert "end_line" in item
+        assert "lines" in item
+
+
+def test_analyze_classes_with_filter(test_repo):
+    """Test class analysis with glob filter."""
+    result = analyze_classes(str(test_repo), filter="**/*.py")
+    data = json.loads(result)
+
+    # Should return results
+    assert isinstance(data, list)
+    assert len(data) > 0
