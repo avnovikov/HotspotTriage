@@ -57,7 +57,8 @@ The `init` subcommand scaffolds `.hotspottriage/` with example configs. Config k
 | `blocks.py` | AST traversal to identify functions, methods, async functions; compute per-block metrics |
 | `stats.py` | `Statistic` dataclass; aggregation (file vs. directory); sorting by score/file; limiting |
 | `output.py` | Formatting: table (tabulate), JSON, CSV |
-| `mcp_server.py` | FastMCP server exposing analyze, analyze_with_cache, analyze_classes, cache_status, clear_cache, and init_config as MCP tools |
+| `mcp_server.py` | FastMCP server exposing analyze, analyze_with_cache, analyze_classes, generate_cache, cache_status, clear_cache, and init_config as MCP tools |
+| `cache_generator.py` | Comprehensive cache generation combining block-level metrics and class/method structure analysis |
 
 ### Granularity Modes
 
@@ -80,6 +81,9 @@ uv run hotspottriage <repo> [options]
 
 # Run on the repo itself (for testing)
 uv run hotspottriage .
+
+# Generate comprehensive cache (blocks + classes)
+uv run hotspottriage-cache <repo> [--filter GLOBS] [--score METRICS]
 
 # Run the MCP server
 uv run hotspottriage-mcp
@@ -122,15 +126,27 @@ The FastMCP server (`mcp_server.py`) exposes HotspotTriage as an MCP tool for Cl
 
 - **`analyze(target, ...options)`**: Run file-level repository analysis, returns JSON list of `Statistic` objects with metrics (sloc, cyclomatic, halstead, churn, score, etc.)
 
-- **`analyze_with_cache(target, ...options)`**: Run block-level (function/method) analysis with explicit cache generation. Cache stored in `<repo>/.hotspottriage/cache/blocks.pkl` for faster subsequent runs.
+- **`analyze_with_cache(target, ...options)`**: Run block-level (function/method) analysis with explicit cache generation. Cache stored in `<repo>/.hotspottriage/cache/blocks.pkl`.
 
 - **`analyze_classes(target, filter)`**: Extract and analyze class and method definitions. Returns file/class/method hierarchy with line ranges.
+
+- **`generate_cache(target, filter, score_metrics)`**: Generate comprehensive codebase cache including blocks, classes, and metrics. Returns cache statistics.
 
 - **`cache_status(target)`**: Check cache statistics (directory, entry count, file size).
 
 - **`clear_cache(target)`**: Clear the block-level cache for a repository.
 
 - **`init_config(target, is_global)`**: Scaffold config files at `<repo>/.hotspottriage/` or `~/.hotspottriage/`
+
+### Cache Architecture
+
+The caching system is separated into two functions:
+
+- **`_initialize_repository()`**: Pure cache warming function that computes block-level metrics and stores in cache. Returns cache statistics only (no analysis results).
+
+- **`_analyze_repository()`**: Queries metrics with optional caching for block granularity. Returns full analysis results.
+
+This separation allows efficient cache warming (just store, don't return) and flexible querying (with or without cache).
 
 All tools return JSON-formatted results. The server reuses CLI logic (config, filtering, metrics) for consistency.
 
