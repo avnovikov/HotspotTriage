@@ -57,7 +57,7 @@ The `init` subcommand scaffolds `.hotspottriage/` with example configs. Config k
 | `blocks.py` | AST traversal to identify functions, methods, async functions; compute per-block metrics |
 | `stats.py` | `Statistic` dataclass; aggregation (file vs. directory); sorting by score/file; limiting |
 | `output.py` | Formatting: table (tabulate), JSON, CSV |
-| `mcp_server.py` | FastMCP server exposing analyze and init_config as MCP tools |
+| `mcp_server.py` | FastMCP server exposing analyze, analyze_with_cache, analyze_classes, cache_status, clear_cache, and init_config as MCP tools |
 
 ### Granularity Modes
 
@@ -116,12 +116,23 @@ uv run python
 
 ## MCP Server Integration
 
-The FastMCP server (`mcp_server.py`) exposes HotspotTriage as an MCP tool for Claude and other AI assistants. It provides two tools:
+The FastMCP server (`mcp_server.py`) exposes HotspotTriage as an MCP tool for Claude and other AI assistants.
 
-- **`analyze(target, ...options)`**: Run full repository analysis, returns JSON list of `Statistic` objects
+### Available MCP Tools
+
+- **`analyze(target, ...options)`**: Run file-level repository analysis, returns JSON list of `Statistic` objects with metrics (sloc, cyclomatic, halstead, churn, score, etc.)
+
+- **`analyze_with_cache(target, ...options)`**: Run block-level (function/method) analysis with explicit cache generation. Cache stored in `<repo>/.hotspottriage/cache/blocks.pkl` for faster subsequent runs.
+
+- **`analyze_classes(target, filter)`**: Extract and analyze class and method definitions. Returns file/class/method hierarchy with line ranges.
+
+- **`cache_status(target)`**: Check cache statistics (directory, entry count, file size).
+
+- **`clear_cache(target)`**: Clear the block-level cache for a repository.
+
 - **`init_config(target, is_global)`**: Scaffold config files at `<repo>/.hotspottriage/` or `~/.hotspottriage/`
 
-The server reuses CLI logic (config merging, filtering, metrics computation) so both interfaces are consistent.
+All tools return JSON-formatted results. The server reuses CLI logic (config, filtering, metrics) for consistency.
 
 ## Testing Fixtures
 

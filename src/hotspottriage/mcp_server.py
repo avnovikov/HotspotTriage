@@ -15,11 +15,77 @@ from typing import Any
 from fastmcp import FastMCP
 
 from hotspottriage import churn as _churn
+from hotspottriage import cache as _cache
+from hotspottriage import cache_generator as _cache_gen
 from hotspottriage import config as _config
+from hotspottriage import blocks as _blocks
 from hotspottriage import discovery, filtering, output, stats
 
 logger = logging.getLogger(__name__)
 mcp = FastMCP("hotspottriage")
+
+
+@mcp.tool()
+def analyze_with_cache(
+    target: str,
+    filter: str | None = None,
+    score_metrics: str | None = None,
+    limit: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    respect_gitignore: bool = True,
+    ignore_dir: str | None = None,
+) -> str:
+    """Analyze a repository with block-level caching.
+
+    Generates and caches block-level metrics (functions/methods) for faster
+    subsequent runs. The cache is stored in <repo>/.hotspottriage/cache/blocks.pkl.
+
+    Args:
+        target: Path to a local git repo
+        filter: Comma-separated glob patterns
+        score_metrics: Metrics to compute score from (default: churn_per_sloc,cyclomatic)
+        limit: Maximum results to return
+        since: Git --since date filter
+        until: Git --until date filter
+        respect_gitignore: Apply .gitignore rules (default: true)
+        ignore_dir: Comma-separated directory prefixes to skip
+
+    Returns:
+        JSON list of block-level statistics with cache metadata
+    """
+    try:
+        # Build config for block granularity analysis
+        cfg = _build_analyze_config(
+            filter=filter,
+            score_metrics=score_metrics,
+            granularity="block",
+            limit=limit,
+            directories=False,
+            sort="score",
+            since=since,
+            until=until,
+            respect_gitignore=respect_gitignore,
+            ignore_dir=ignore_dir,
+        )
+
+        # Run block-level analysis (which generates and caches metrics)
+        results = _analyze_repository(target, cfg)
+
+        # Get cache info
+        cache_info = _initialize_repository(target, cfg)
+
+        # Format results with cache metadata
+        results_list = [r.as_dict() for r in results]
+        response = {
+            "results": results_list,
+            "cache": cache_info,
+        }
+        return json.dumps(response, indent=2)
+
+    except Exception as e:
+        logger.exception("Cache-backed analysis failed")
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
@@ -82,6 +148,213 @@ def analyze(
 
     except Exception as e:
         logger.exception("Analysis failed")
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def cache_status(target: str) -> str:
+    """Check cache status and statistics for a repository.
+
+    Args:
+        target: Path to a local git repo
+
+    Returns:
+        JSON with cache statistics (size, entries, age)
+    """
+    try:
+        repo_path = Path(target)
+        cache_dir = _cache.cache_path_for(repo_path)
+
+        if not cache_dir.exists():
+            return json.dumps({
+                "status": "empty",
+                "message": "No cache directory found",
+                "cache_dir": str(cache_dir),
+                "entries": 0,
+                "size_bytes": 0,
+            })
+
+        # Count cache entries and size
+        cache_file = cache_dir / "blocks.pkl"
+        entries = 0
+        size_bytes = 0
+
+        if cache_file.exists():
+            size_bytes = cache_file.stat().st_size
+            try:
+                import pickle
+                with open(cache_file, "rb") as f:
+                    data = pickle.load(f)
+                    entries = len(data) if isinstance(data, dict) else 0
+            except Exception as e:
+                return json.dumps({
+                    "status": "error",
+                    "message": f"Failed to read cache: {str(e)}",
+                })
+
+        return json.dumps({
+            "status": "ok",
+            "cache_dir": str(cache_dir),
+            "entries": entries,
+            "size_bytes": size_bytes,
+            "cache_file": str(cache_file) if cache_file.exists() else None,
+        })
+
+    except Exception as e:
+        logger.exception("Cache status check failed")
+        return json.dumps({"status": "error", "message": str(e)})
+
+
+@mcp.tool()
+def clear_cache(target: str) -> str:
+    """Clear the block-level cache for a repository.
+
+    Args:
+        target: Path to a local git repo
+
+    Returns:
+        Status message
+    """
+    try:
+        repo_path = Path(target)
+        cache_dir = _cache.cache_path_for(repo_path)
+
+        if not cache_dir.exists():
+            return json.dumps({
+                "status": "success",
+                "message": "No cache to clear",
+            })
+
+        # Remove cache files
+        import shutil
+        cache_file = cache_dir / "blocks.pkl"
+        if cache_file.exists():
+            cache_file.unlink()
+
+        # Remove directory if empty
+        try:
+            cache_dir.rmdir()
+        except OSError:
+            pass  # Directory not empty, that's ok
+
+        return json.dumps({
+            "status": "success",
+            "message": f"Cleared cache in {cache_dir}",
+        })
+
+    except Exception as e:
+        logger.exception("Cache clear failed")
+        return json.dumps({"status": "error", "message": str(e)})
+
+
+@mcp.tool()
+def analyze_classes(
+    target: str,
+    filter: str | None = None,
+) -> str:
+    """Analyze classes and their methods in Python files (file/class/method granularity).
+
+    Args:
+        target: Path to a local git repo
+        filter: Comma-separated glob patterns to filter files
+
+    Returns:
+        JSON list with file, class, and method information including metrics
+    """
+    try:
+        repo_path = Path(target)
+
+        # Build filter config
+        cfg = _config.DEFAULTS.copy()
+        if filter:
+            cfg["filter"] = [f.strip() for f in filter.split(",")]
+
+        # Discover and filter files
+        with discovery.resolve_target(target) as repo:
+            patterns = list(cfg["filter"])
+            if not cfg["no_default_filter"]:
+                patterns.append(cfg["default_filter"])
+
+            glob_keep = filtering.make_filter(patterns)
+            keep = filtering.make_tracked_path_predicate(
+                repo,
+                glob_keep=glob_keep,
+                ignore_directories=cfg["ignore_directories"],
+                respect_gitignore=cfg["respect_gitignore"],
+            )
+            files = [f for f in discovery.list_tracked_files(repo) if keep(f)]
+
+            # Extract class and method information
+            results = []
+            for file_path in files:
+                full_path = repo / file_path
+                try:
+                    src = full_path.read_text(encoding="utf-8")
+                    blocks = _blocks.extract_blocks(src)
+
+                    for block in blocks:
+                        # Parse block name to get class/method hierarchy
+                        parts = block.name.split(".")
+                        if len(parts) > 1:
+                            # It's a method (or nested function)
+                            class_name = parts[0] if len(parts) >= 1 else None
+                            method_name = parts[-1]
+                            parent = ".".join(parts[:-1])
+                        else:
+                            # Top-level function
+                            class_name = None
+                            method_name = parts[0]
+                            parent = None
+
+                        results.append({
+                            "file": str(file_path),
+                            "class": class_name,
+                            "method": method_name,
+                            "full_name": block.name,
+                            "start_line": block.start,
+                            "end_line": block.end,
+                            "lines": block.end - block.start + 1,
+                        })
+                except Exception as e:
+                    logger.warning(f"Failed to analyze {file_path}: {e}")
+
+        return json.dumps(results, indent=2)
+
+    except Exception as e:
+        logger.exception("Class analysis failed")
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def generate_cache(
+    target: str,
+    filter: str | None = None,
+    score_metrics: str = "churn_per_sloc,cyclomatic",
+) -> str:
+    """Generate comprehensive codebase cache (blocks + classes/methods).
+
+    Creates a complete snapshot including block-level metrics with churn data
+    and class/method structure analysis. Results are cached in
+    <repo>/.hotspottriage/cache/blocks.pkl.
+
+    Args:
+        target: Path to a local git repo
+        filter: Comma-separated glob patterns
+        score_metrics: Metrics to compute score from (default: churn_per_sloc,cyclomatic)
+
+    Returns:
+        JSON with complete cache including blocks, classes, and status
+    """
+    try:
+        cache_data = _cache_gen.generate_full_cache(
+            target=target,
+            filter=filter,
+            score_metrics=score_metrics,
+            verbose=False,
+        )
+        return json.dumps(cache_data, indent=2)
+    except Exception as e:
+        logger.exception("Cache generation failed")
         return json.dumps({"error": str(e)})
 
 
@@ -163,6 +436,60 @@ def _build_analyze_config(
         cfg["ignore_directories"] = [d.strip() for d in ignore_dir.split(",")]
 
     return cfg
+
+
+def _initialize_repository(target: str, cfg: dict[str, Any]) -> dict[str, Any]:
+    """Initialize repository cache with all metrics (blocks and churn).
+
+    Caches block-level metrics for fast subsequent analysis. Returns cache
+    statistics but not results.
+
+    Returns: {"cache_file": str, "entries": int, "size_bytes": int}
+    """
+    with discovery.resolve_target(target) as repo:
+        # Build filter predicates
+        patterns = list(cfg["filter"])
+        if not cfg["no_default_filter"]:
+            patterns.append(cfg["default_filter"])
+
+        glob_keep = filtering.make_filter(patterns)
+        keep = filtering.make_tracked_path_predicate(
+            repo,
+            glob_keep=glob_keep,
+            ignore_directories=cfg["ignore_directories"],
+            respect_gitignore=cfg["respect_gitignore"],
+        )
+        files = [f for f in discovery.list_tracked_files(repo) if keep(f)]
+        score_metrics = list(cfg["score_metrics"])
+
+        # Build block-level cache
+        stats.build_block_stats(
+            repo, files, score_metrics,
+            since=cfg["since"], until=cfg["until"],
+            workers=cfg.get("block_workers"),
+        )
+
+        # Return cache info
+        cache_dir = _cache.cache_path_for(repo)
+        cache_file = cache_dir / "blocks.pkl"
+        cache_size = cache_file.stat().st_size if cache_file.exists() else 0
+
+        # Count entries
+        entries = 0
+        if cache_file.exists():
+            try:
+                import pickle
+                with open(cache_file, "rb") as f:
+                    data = pickle.load(f)
+                    entries = len(data) if isinstance(data, dict) else 0
+            except Exception:
+                pass
+
+        return {
+            "cache_file": str(cache_file),
+            "entries": entries,
+            "size_bytes": cache_size,
+        }
 
 
 def _analyze_repository(target: str, cfg: dict[str, Any]) -> list[stats.Statistic]:
