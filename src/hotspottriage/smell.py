@@ -6,6 +6,7 @@ explicit set of smell-oriented rules and returns normalized smell records.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import token
 import tokenize
@@ -15,6 +16,8 @@ from typing import Any
 
 from radon.raw import analyze as raw_analyze
 
+from hotspottriage import blocks as _blocks
+from hotspottriage import complexity as _complexity
 from hotspottriage import config as _config
 
 PYLINT_CODES: tuple[str, ...] = (
@@ -52,6 +55,13 @@ def _default_thresholds() -> dict[str, int]:
         "min_public_methods": int(_config.DEFAULTS["smell_min_public_methods"]),
         "max_comment_ratio": float(_config.DEFAULTS["smell_max_comment_ratio"]),
         "max_comment_block_lines": int(_config.DEFAULTS["smell_max_comment_block_lines"]),
+        "data_class_min_attributes": int(_config.DEFAULTS["smell_data_class_min_attributes"]),
+        "middle_man_max_avg_method_sloc": float(
+            _config.DEFAULTS["smell_middle_man_max_avg_method_sloc"]
+        ),
+        "speculative_generality_min_hits": int(
+            _config.DEFAULTS["smell_speculative_generality_min_hits"]
+        ),
     }
 
 
@@ -71,32 +81,10 @@ def _build_pylint_command(path: Path, thresholds: dict[str, int]) -> list[str]:
     ]
 
 
-def _compute_pylint_smells(path: Path, thresholds: dict[str, int]) -> list[dict[str, Any]]:
+def _compute_pylint_smells(path: Path, raw_pylint: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return smell findings emitted by Pylint for one file."""
-    cmd = _build_pylint_command(path, thresholds)
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    except FileNotFoundError as e:
-        raise RuntimeError(
-            "pylint executable not found; install pylint to enable smell detection"
-        ) from e
-
-    raw = proc.stdout.strip()
-    if not raw:
-        return []
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"invalid pylint JSON output for {path}: {e}") from e
-
-    if not isinstance(data, list):
-        raise ValueError(f"unexpected pylint output type for {path}: {type(data).__name__}")
-
     out: list[dict[str, Any]] = []
-    for item in data:
-        if not isinstance(item, dict):
-            continue
+    for item in raw_pylint:
         code = str(item.get("message-id", ""))
         smell = SMELL_BY_CODE.get(code)
         if smell is None:
@@ -109,6 +97,115 @@ def _compute_pylint_smells(path: Path, thresholds: dict[str, int]) -> list[dict[
                 "message": str(item.get("message", "")),
             }
         )
+    return out
+
+
+def _run_pylint_raw(path: Path, thresholds: dict[str, int | float]) -> list[dict[str, Any]]:
+    """Return raw pylint json objects filtered to dict entries only."""
+    cmd = _build_pylint_command(path, thresholds)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "pylint executable not found; install pylint to enable smell detection"
+        ) from e
+    raw = proc.stdout.strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"invalid pylint JSON output for {path}: {e}") from e
+    if not isinstance(data, list):
+        raise ValueError(f"unexpected pylint output type for {path}: {type(data).__name__}")
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _parse_attribute_count(message: str) -> int:
+    match = re.search(r"\((\d+)/\d+\)", message)
+    return int(match.group(1)) if match else 0
+
+
+def _mean_method_sloc_for_class(src: str, class_name: str) -> float:
+    method_slocs: list[int] = []
+    for block in _blocks.extract_blocks(src):
+        if not block.name.startswith(f"{class_name}."):
+            continue
+        snippet = _complexity.slice_block(src, block.start, block.end)
+        method_slocs.append(int(_complexity.compute_for_source(snippet)["sloc"]))
+    if not method_slocs:
+        return 0.0
+    return sum(method_slocs) / len(method_slocs)
+
+
+def _compute_approximate_smells(
+    path: Path, src: str, raw_pylint: list[dict[str, Any]], thresholds: dict[str, int | float]
+) -> list[dict[str, Any]]:
+    """Approximate smells from pylint heuristics.
+
+    These signals are heuristic and intentionally include `confidence=approximate`.
+    """
+    out: list[dict[str, Any]] = []
+    by_code: dict[str, list[dict[str, Any]]] = {}
+    for item in raw_pylint:
+        code = str(item.get("message-id", ""))
+        by_code.setdefault(code, []).append(item)
+
+    few_methods_objs = {str(i.get("obj", "")): i for i in by_code.get("R0903", [])}
+    min_attrs = int(thresholds["data_class_min_attributes"])
+    for item in by_code.get("R0902", []):
+        class_name = str(item.get("obj", ""))
+        attrs = _parse_attribute_count(str(item.get("message", "")))
+        if class_name in few_methods_objs and attrs >= min_attrs:
+            out.append(
+                {
+                    "file": str(item.get("path", path)),
+                    "line": int(item.get("line") or 0),
+                    "smell": "data_class",
+                    "message": (
+                        f"Class '{class_name}' has few public methods and {attrs} instance "
+                        f"attributes (threshold: {min_attrs})"
+                    ),
+                    "confidence": "approximate",
+                }
+            )
+
+    max_avg_sloc = float(thresholds["middle_man_max_avg_method_sloc"])
+    for class_name, item in few_methods_objs.items():
+        if not class_name:
+            continue
+        avg_sloc = _mean_method_sloc_for_class(src, class_name)
+        if 0 < avg_sloc <= max_avg_sloc:
+            out.append(
+                {
+                    "file": str(item.get("path", path)),
+                    "line": int(item.get("line") or 0),
+                    "smell": "middle_man",
+                    "message": (
+                        f"Class '{class_name}' has few public methods and average method "
+                        f"SLOC {avg_sloc:.2f} (threshold: {max_avg_sloc:.2f})"
+                    ),
+                    "confidence": "approximate",
+                }
+            )
+
+    unused_imports = by_code.get("W0611", [])
+    unused_vars = by_code.get("W0612", [])
+    min_hits = int(thresholds["speculative_generality_min_hits"])
+    if len(unused_imports) >= min_hits and len(unused_vars) >= min_hits:
+        for item in [*unused_imports, *unused_vars]:
+            out.append(
+                {
+                    "file": str(item.get("path", path)),
+                    "line": int(item.get("line") or 0),
+                    "smell": "speculative_generality",
+                    "message": (
+                        "Unused imports and variables suggest over-generalized, unused "
+                        "abstractions"
+                    ),
+                    "confidence": "approximate",
+                }
+            )
     return out
 
 
@@ -191,6 +288,9 @@ def compute_smells(path: Path) -> list[dict[str, Any]]:
     - message: human-readable finding message
     """
     thresholds = _default_thresholds()
-    out = _compute_pylint_smells(path, thresholds)
+    src = path.read_text(encoding="utf-8", errors="replace")
+    raw_pylint = _run_pylint_raw(path, thresholds)
+    out = _compute_pylint_smells(path, raw_pylint)
+    out.extend(_compute_approximate_smells(path, src, raw_pylint, thresholds))
     out.extend(_compute_comment_smells(path, thresholds))
     return out
