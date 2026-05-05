@@ -303,34 +303,22 @@ def finding_applies_to_block(finding: dict[str, Any], block: _blocks.Block) -> b
     return block.start <= line <= block.end
 
 
-def smell_message_key(message: str) -> str:
-    """Normalize a smell message for deduplication: strip numeric literals, tidy spaces."""
-    stripped = re.sub(r"\d+(?:\.\d+)?", "", str(message))
-    collapsed = re.sub(r"\s+", " ", stripped).strip()
-    return collapsed if collapsed else "(no message)"
+def summarize_smells(findings: Iterable[dict[str, Any]]) -> dict[str, int]:
+    """Roll up raw findings by normalized smell id (e.g. ``long_method``, ``dead_code``).
 
-
-def summarize_smells(
-    findings: Iterable[dict[str, Any]],
-) -> dict[str, dict[str, int]]:
-    """Roll up raw findings by smell type and message template (numbers removed).
-
-    Returns ``{ smell_type: { message_key: occurrence_count } }`` so one file or
-    block row does not repeat identical pylint phrasing with different counts.
+    Returns ``{ smell_type: occurrence_count }`` for the file or block scope.
     """
-    out: dict[str, dict[str, int]] = {}
+    out: dict[str, int] = {}
     for item in findings:
         smell_type = str(item.get("smell") or "unknown")
-        key = smell_message_key(str(item.get("message") or ""))
-        bucket = out.setdefault(smell_type, {})
-        bucket[key] = bucket.get(key, 0) + 1
+        out[smell_type] = out.get(smell_type, 0) + 1
     return out
 
 
 def compute_smells(path: Path) -> list[dict[str, Any]]:
     """Return normalized smell findings for one Python file.
 
-    Output shape (one dict per occurrence; use ``summarize_smells`` for rollups):
+    Output shape (one dict per occurrence; ``summarize_smells`` counts by ``smell`` id):
     - file: file path as reported by Pylint
     - line: 1-indexed line number
     - smell: normalized smell family

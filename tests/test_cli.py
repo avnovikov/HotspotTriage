@@ -13,7 +13,9 @@ from tests.fixtures.build_block_repo import build_block_repo
 METRIC_COLS = (
     "sloc", "normalized_sloc", "cyclomatic", "halstead", "maintainability",
     "churn", "churn_per_sloc", "decayed_churn", "decayed_churn_per_sloc",
-    "smell_count", "smells", "score",
+    "smell_count", "smells",
+    "similarity_score", "similarity_band", "match_count",
+    "score",
 )
 
 
@@ -81,7 +83,9 @@ def test_cli_csv_has_all_metric_headers(tmp_path: Path):
         for col in ("sloc", "cyclomatic", "halstead", "maintainability", "churn"):
             int(row[col])
         int(row["smell_count"])
-        assert isinstance(json.loads(row["smells"]), dict)
+        smells = json.loads(row["smells"])
+        assert isinstance(smells, dict)
+        assert all(isinstance(k, str) and isinstance(v, int) for k, v in smells.items())
         # Float columns.
         for col in ("normalized_sloc", "churn_per_sloc", "decayed_churn", "decayed_churn_per_sloc", "score"):
             float(row[col])
