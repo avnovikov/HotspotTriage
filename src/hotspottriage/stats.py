@@ -23,7 +23,13 @@ from hotspottriage import complexity as _complexity
 # Every metric that may appear in the output and contribute to the score.
 # The default recipe lives in `config.DEFAULTS["score_metrics"]`; this module
 # only owns the validation set so it stays close to the data definitions.
-SCORE_METRICS: tuple[str, ...] = (*_complexity.METRICS, "churn", "churn_per_sloc")
+SCORE_METRICS: tuple[str, ...] = (
+    *_complexity.METRICS,
+    "churn",
+    "churn_per_sloc",
+    "decayed_churn",
+    "decayed_churn_per_sloc",
+)
 
 
 @dataclass(frozen=True)
@@ -35,6 +41,8 @@ class Statistic:
     maintainability: int
     churn: int
     churn_per_sloc: float
+    decayed_churn: float
+    decayed_churn_per_sloc: float
     score: float
 
     def as_dict(self) -> dict:
@@ -52,18 +60,61 @@ def _score(metrics: dict[str, float], score_metrics: Iterable[str]) -> float:
     return float(prod(metrics[m] for m in score_metrics))
 
 
+def _decayed_value(
+    value: float,
+    age_seconds: int,
+    half_life_seconds: int,
+) -> float:
+    """Apply exponential decay to a value based on its age.
+    
+    Formula: decayed = value * (0.5) ^ (age_seconds / half_life_seconds)
+    
+    Args:
+        value: Original value to decay
+        age_seconds: Age in seconds (current_time - event_time)
+        half_life_seconds: Half-life period in seconds
+    
+    Returns:
+        Decayed value
+    """
+    if half_life_seconds <= 0 or age_seconds <= 0:
+        return value
+    decay_factor = 0.5 ** (age_seconds / half_life_seconds)
+    return value * decay_factor
+
+
 def build_stats(
     repo: Path,
     files: Iterable[str],
     churn: dict[str, int],
     score_metrics: Iterable[str],
+    decay_half_life: int | None = None,
 ) -> list[Statistic]:
+    from hotspottriage import churn as _churn
+    from datetime import datetime
+    
     sm = list(score_metrics)
+    files_list = list(files)
+    
+    current_time = int(datetime.now().timestamp())
+    timestamps = _churn.get_file_timestamps(repo, files_list)
+    
     out: list[Statistic] = []
-    for rel in files:
+    for rel in files_list:
         m: dict[str, float] = dict(_complexity.compute_all(repo / rel))
         m["churn"] = churn.get(rel, 0)
         m["churn_per_sloc"] = _ratio(int(m["churn"]), int(m["sloc"]))
+        
+        age_seconds = current_time - timestamps.get(rel, current_time)
+        m["decayed_churn"] = (
+            _decayed_value(m["churn"], age_seconds, decay_half_life)
+            if decay_half_life
+            else m["churn"]
+        )
+        m["decayed_churn_per_sloc"] = _ratio(
+            int(m["decayed_churn"]), int(m["sloc"])
+        )
+        
         out.append(
             Statistic(
                 path=rel,
@@ -73,6 +124,8 @@ def build_stats(
                 maintainability=int(m["maintainability"]),
                 churn=int(m["churn"]),
                 churn_per_sloc=m["churn_per_sloc"],
+                decayed_churn=m["decayed_churn"],
+                decayed_churn_per_sloc=m["decayed_churn_per_sloc"],
                 score=_score(m, sm),
             )
         )
@@ -86,15 +139,22 @@ def build_block_stats(
     since: str | None = None,
     until: str | None = None,
     workers: int | None = None,
+    decay_half_life: int | None = None,
 ) -> list[Statistic]:
     """One Statistic per function/method (no class rows). Maintainability is
     inherited from the file. Churn is computed via `git log -L` per block,
     cached on disk by file blob SHA."""
+    from hotspottriage import churn as _churn
+    from datetime import datetime
+    
     sm = list(score_metrics)
     files = list(files)
 
     blob_shas = _block_churn.file_blob_shas(repo)
     cache = _cache.Cache(repo)
+    
+    current_time = int(datetime.now().timestamp())
+    timestamps = _churn.get_file_timestamps(repo, files)
 
     # Pass 1: extract blocks + compute file/snippet metrics.
     file_metrics: dict[str, dict[str, int]] = {}
@@ -128,12 +188,24 @@ def build_block_stats(
             continue
         src = file_sources[rel]
         file_mi = file_metrics[rel]["maintainability"]
+        age_seconds = current_time - timestamps.get(rel, current_time)
+        
         for b in file_blocks[rel]:
             snippet = _complexity.slice_block(src, b.start, b.end)
             m: dict[str, float] = dict(_complexity.compute_for_source(snippet))
             m["maintainability"] = file_mi
             m["churn"] = churns.get((rel, b.start, b.end), 0)
             m["churn_per_sloc"] = _ratio(int(m["churn"]), int(m["sloc"]))
+            
+            m["decayed_churn"] = (
+                _decayed_value(m["churn"], age_seconds, decay_half_life)
+                if decay_half_life
+                else m["churn"]
+            )
+            m["decayed_churn_per_sloc"] = _ratio(
+                int(m["decayed_churn"]), int(m["sloc"])
+            )
+            
             out.append(
                 Statistic(
                     path=f"{rel}::{b.name}",
@@ -143,6 +215,8 @@ def build_block_stats(
                     maintainability=int(m["maintainability"]),
                     churn=int(m["churn"]),
                     churn_per_sloc=m["churn_per_sloc"],
+                    decayed_churn=m["decayed_churn"],
+                    decayed_churn_per_sloc=m["decayed_churn_per_sloc"],
                     score=_score(m, sm),
                 )
             )
@@ -158,11 +232,11 @@ def aggregate_by_directory(
     stats: list[Statistic], score_metrics: Iterable[str]
 ) -> list[Statistic]:
     """For each ancestor directory, sum every additive metric across descendants
-    and recompute `churn_per_sloc` from the *summed* totals (not an average of
-    per-file ratios), then recompute the score."""
+    and recompute `churn_per_sloc` and `decayed_churn_per_sloc` from the *summed* 
+    totals (not an average of per-file ratios), then recompute the score."""
     sm = list(score_metrics)
-    sums: dict[str, dict[str, int]] = {}
-    additive = ("sloc", "cyclomatic", "halstead", "maintainability", "churn")
+    sums: dict[str, dict[str, int | float]] = {}
+    additive = ("sloc", "cyclomatic", "halstead", "maintainability", "churn", "decayed_churn")
     for s in stats:
         for d in _ancestors(s.path):
             entry = sums.setdefault(d, {k: 0 for k in additive})
@@ -172,7 +246,12 @@ def aggregate_by_directory(
     out: list[Statistic] = []
     for d, m in sums.items():
         cps = _ratio(m["churn"], m["sloc"])
-        full: dict[str, float] = {**m, "churn_per_sloc": cps}
+        dcps = _ratio(m["decayed_churn"], m["sloc"])
+        full: dict[str, float] = {
+            **m,
+            "churn_per_sloc": cps,
+            "decayed_churn_per_sloc": dcps,
+        }
         out.append(
             Statistic(
                 path=d,
@@ -182,6 +261,8 @@ def aggregate_by_directory(
                 maintainability=m["maintainability"],
                 churn=m["churn"],
                 churn_per_sloc=cps,
+                decayed_churn=m["decayed_churn"],
+                decayed_churn_per_sloc=dcps,
                 score=_score(full, sm),
             )
         )
