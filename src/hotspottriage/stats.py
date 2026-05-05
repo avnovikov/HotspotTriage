@@ -15,9 +15,10 @@ from dataclasses import asdict, dataclass
 from math import prod
 from pathlib import Path, PurePosixPath
 from statistics import mean, pstdev
-from typing import Iterable
+from typing import Any, Iterable
 
 from hotspottriage import block_churn as _block_churn
+from hotspottriage import block_similarity as _block_similarity
 from hotspottriage import blocks as _blocks
 from hotspottriage import cache as _cache
 from hotspottriage import complexity as _complexity
@@ -32,6 +33,8 @@ SCORE_METRICS: tuple[str, ...] = (
     "decayed_churn",
     "decayed_churn_per_sloc",
     "smell_count",
+    # Block-only (similarity_* columns); only meaningful when ``granularity: block``.
+    "similarity_score",
 )
 
 
@@ -48,7 +51,10 @@ class Statistic:
     decayed_churn: float
     decayed_churn_per_sloc: float
     smell_count: int
-    smells: dict[str, dict[str, int]]
+    smells: dict[str, int]
+    similarity_score: float
+    similarity_band: str
+    match_count: int
     score: float
 
     def as_dict(self) -> dict:
@@ -56,6 +62,21 @@ class Statistic:
 
 
 SORT_KEYS: tuple[str, ...] = ("score", "file")
+
+
+def block_similarity_kwargs_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Keyword arguments for :func:`build_block_stats` DeepCSIM integration."""
+    return {
+        "similarity_enabled": bool(cfg.get("similarity_enabled", True)),
+        "similarity_threshold": float(cfg.get("similarity_threshold", 80.0)),
+        "similarity_band_high": float(cfg.get("similarity_band_high", 85.0)),
+        "similarity_band_medium": float(cfg.get("similarity_band_medium", 70.0)),
+        "similarity_band_low": float(cfg.get("similarity_band_low", 50.0)),
+        "similarity_max_pairwise_blocks": int(
+            cfg.get("similarity_max_pairwise_blocks", 2500)
+        ),
+        "similarity_aggregate_row": bool(cfg.get("similarity_aggregate_row", True)),
+    }
 
 
 def _ratio(churn: int, sloc: int) -> float:
@@ -70,6 +91,10 @@ def _score(
         if metric == "smell_count":
             # Weighted so weight=0 is neutral (factor=1.0), preserving legacy scores.
             factors.append(1.0 + (smell_weight * metrics["smell_count"]))
+        elif metric == "similarity_score":
+            # Higher structural similarity increases score (optional metric).
+            s = float(metrics.get("similarity_score", 0.0))
+            factors.append(1.0 + s / 100.0)
         else:
             factors.append(metrics[metric])
     return float(prod(factors))
@@ -154,6 +179,7 @@ def build_stats(
             int(m["decayed_churn"]), int(m["sloc"])
         )
         
+        m["similarity_score"] = 0.0
         out.append(
             Statistic(
                 path=rel,
@@ -168,12 +194,41 @@ def build_stats(
                 decayed_churn_per_sloc=m["decayed_churn_per_sloc"],
                 smell_count=int(m["smell_count"]),
                 smells=smell_summary,
+                similarity_score=0.0,
+                similarity_band="n/a",
+                match_count=0,
                 score=_score(m, sm, smell_weight=smell_weight),
             )
         )
         if progress_callback:
             progress_callback(rel, idx, total_files)
     return out
+
+
+def _similarity_aggregate_statistic(agg: dict[str, Any]) -> Statistic:
+    """Synthetic row with repo-wide DeepCSIM summary (``path`` is reserved)."""
+    total_b = int(agg.get("blocks_total") or 0)
+    mean = float(agg.get("mean_similarity_score") or 0.0)
+    usages = int(agg.get("total_match_usages") or 0)
+    usable = int(agg.get("blocks_with_metrics") or 0)
+    return Statistic(
+        path="__aggregate_similarity__::repo",
+        sloc=total_b,
+        normalized_sloc=0.0,
+        cyclomatic=usable,
+        halstead=usages,
+        maintainability=0,
+        churn=0,
+        churn_per_sloc=0.0,
+        decayed_churn=0.0,
+        decayed_churn_per_sloc=0.0,
+        smell_count=0,
+        smells={},
+        similarity_score=mean,
+        similarity_band="aggregate",
+        match_count=usages,
+        score=mean,
+    )
 
 
 def build_block_stats(
@@ -186,6 +241,14 @@ def build_block_stats(
     decay_half_life: int | None = None,
     smell_weight: float = 0.0,
     progress_callback: Callable[[str, int, int], None] | None = None,
+    *,
+    similarity_enabled: bool = True,
+    similarity_threshold: float = 80.0,
+    similarity_band_high: float = 85.0,
+    similarity_band_medium: float = 70.0,
+    similarity_band_low: float = 50.0,
+    similarity_max_pairwise_blocks: int = 2500,
+    similarity_aggregate_row: bool = True,
 ) -> list[Statistic]:
     """One Statistic per function/method (no class rows). Maintainability is
     inherited from the file. Churn is computed via `git log -L` per block,
@@ -277,6 +340,17 @@ def build_block_stats(
             m["smells"] = block_summary
             rows.append((rel, b, m))
 
+    sim_agg = _block_similarity.attach_similarity_to_rows(
+        rows,
+        file_sources,
+        similarity_enabled=similarity_enabled,
+        similarity_threshold=similarity_threshold,
+        similarity_band_high=similarity_band_high,
+        similarity_band_medium=similarity_band_medium,
+        similarity_band_low=similarity_band_low,
+        similarity_max_pairwise_blocks=similarity_max_pairwise_blocks,
+    )
+
     normalized_slocs = _normalize_sloc([int(m["sloc"]) for _, _, m in rows])
     out: list[Statistic] = []
     total_rows = len(rows)
@@ -297,11 +371,21 @@ def build_block_stats(
                 decayed_churn_per_sloc=m["decayed_churn_per_sloc"],
                 smell_count=int(m["smell_count"]),
                 smells=m["smells"],
+                similarity_score=float(m.get("similarity_score", 0.0)),
+                similarity_band=str(m.get("similarity_band", "n/a")),
+                match_count=int(m.get("match_count", 0)),
                 score=_score(m, sm, smell_weight=smell_weight),
             )
         )
         if progress_callback:
             progress_callback(f"{rel}::{b.name}", i, total_rows)
+    if (
+        similarity_enabled
+        and similarity_aggregate_row
+        and sim_agg is not None
+        and int(sim_agg.get("blocks_total") or 0) > 0
+    ):
+        out.append(_similarity_aggregate_statistic(sim_agg))
     return out
 
 
@@ -331,6 +415,8 @@ def aggregate_by_directory(
         "smell_count",
     )
     for s in stats:
+        if s.path.startswith("__"):
+            continue
         for d in _ancestors(s.path):
             entry = sums.setdefault(d, {k: 0 for k in additive})
             for k in additive:
@@ -345,6 +431,7 @@ def aggregate_by_directory(
             "churn_per_sloc": cps,
             "decayed_churn_per_sloc": dcps,
             "smell_count": m["smell_count"],
+            "similarity_score": 0.0,
         }
         out.append(
             Statistic(
@@ -360,6 +447,9 @@ def aggregate_by_directory(
                 decayed_churn_per_sloc=dcps,
                 smell_count=int(m["smell_count"]),
                 smells={},
+                similarity_score=0.0,
+                similarity_band="n/a",
+                match_count=0,
                 score=_score(full, sm, smell_weight=smell_weight),
             )
         )
@@ -373,10 +463,12 @@ def sort_and_limit(
 ) -> list[Statistic]:
     if by not in SORT_KEYS:
         raise ValueError(f"unknown sort key: {by!r} (valid: {SORT_KEYS})")
+    meta = [s for s in stats if s.path.startswith("__")]
+    normal = [s for s in stats if not s.path.startswith("__")]
     if by == "file":
-        ordered = sorted(stats, key=lambda s: s.path)
+        ordered = sorted(normal, key=lambda s: s.path)
     else:
-        ordered = sorted(stats, key=lambda s: s.score, reverse=True)
+        ordered = sorted(normal, key=lambda s: s.score, reverse=True)
     if limit is not None and limit > 0:
         ordered = ordered[:limit]
-    return ordered
+    return ordered + meta

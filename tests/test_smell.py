@@ -301,21 +301,11 @@ def test_finding_applies_to_block_class_scope_does_not_match_wrong_prefix():
     assert not smell.finding_applies_to_block(finding, Block("FooBar.spam", 2, 9))
 
 
-def test_smell_message_key_strips_numeric_literals():
-    raw = "Too many branches (15/12) in function foo"
-    key = smell.smell_message_key(raw)
-    assert "/" in key
-    assert not any(c.isdigit() for c in key)
-
-
-def test_summarize_smells_counts_by_type_and_template():
+def test_summarize_smells_counts_by_smell_id():
     findings = [
-        {"smell": "long_method", "message": "Method has 51 statements (51/50)"},
-        {"smell": "long_method", "message": "Method has 60 statements (60/50)"},
+        {"smell": "long_method", "message": "a"},
+        {"smell": "long_method", "message": "b"},
+        {"smell": "long_parameter_list", "message": "c"},
     ]
     s = smell.summarize_smells(findings)
-    assert len(s["long_method"]) == 1
-    only_key = next(iter(s["long_method"]))
-    assert s["long_method"][only_key] == 2
-    assert not any(c.isdigit() for c in only_key)
-    assert "Method has" in only_key and "statements" in only_key
+    assert s == {"long_method": 2, "long_parameter_list": 1}

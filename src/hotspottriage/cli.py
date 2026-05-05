@@ -86,7 +86,8 @@ def _build_analyze_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "file: one row per Python file (default). "
-            "block: one row per function/method (slow on first run; cached)."
+            "block: one row per function/method (slow on first run; cached). "
+            "DeepCSIM similarity runs by default; use --no-similarity to skip."
         ),
     )
     p.add_argument(
@@ -96,7 +97,8 @@ def _build_analyze_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "per-function/method statistics (same as --granularity block); "
-            "omit --granularity when using this shorthand"
+            "omit --granularity when using this shorthand. "
+            "DeepCSIM similarity is on by default; use --no-similarity to disable."
         ),
     )
     p.add_argument(
@@ -145,6 +147,24 @@ def _build_analyze_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=None,
         help="disable progress output",
+    )
+    sim = p.add_mutually_exclusive_group()
+    sim.add_argument(
+        "--similarity",
+        dest="similarity",
+        action="store_true",
+        default=None,
+        help=(
+            "force DeepCSIM block similarity on (default is already on for block runs; "
+            "overrides config similarity_enabled: false)"
+        ),
+    )
+    sim.add_argument(
+        "--no-similarity",
+        dest="no_similarity",
+        action="store_true",
+        default=None,
+        help="disable DeepCSIM block similarity (overrides config defaults)",
     )
     return p
 
@@ -217,6 +237,10 @@ def _resolve_config(args: argparse.Namespace, target_path: Path | None) -> dict:
             raise ValueError("cannot combine --blocks with --granularity file")
         if getattr(args, "granularity", None) is None:
             merged["granularity"] = "block"
+    if getattr(args, "similarity", None):
+        merged["similarity_enabled"] = True
+    if getattr(args, "no_similarity", None):
+        merged["similarity_enabled"] = False
     _config.validate(merged)
     return merged
 
@@ -271,6 +295,7 @@ def main(argv: list[str] | None = None) -> int:
                         decay_half_life=decay_half_life,
                         smell_weight=smell_weight,
                         progress_callback=progress_cb,
+                        **stats.block_similarity_kwargs_from_config(cfg),
                     )
                 assert churn is not None
                 built = stats.build_stats(

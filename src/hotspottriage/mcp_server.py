@@ -36,6 +36,7 @@ def analyze_with_cache(
     until: str | None = None,
     respect_gitignore: bool = True,
     ignore_dir: str | None = None,
+    similarity: bool = True,
 ) -> str:
     """Analyze a repository with block-level caching.
 
@@ -51,6 +52,7 @@ def analyze_with_cache(
         until: Git --until date filter
         respect_gitignore: Apply .gitignore rules (default: true)
         ignore_dir: Comma-separated directory prefixes to skip
+        similarity: Whether to compute DeepCSIM similarity per block (default: true)
 
     Returns:
         JSON list of block-level statistics with cache metadata
@@ -69,6 +71,7 @@ def analyze_with_cache(
             respect_gitignore=respect_gitignore,
             ignore_dir=ignore_dir,
         )
+        cfg["similarity_enabled"] = similarity
 
         # Run block-level analysis (which generates and caches metrics)
         results = _analyze_repository(target, cfg)
@@ -149,6 +152,7 @@ def analyze(
     until: str | None = None,
     respect_gitignore: bool = True,
     ignore_dir: str | None = None,
+    similarity: bool = True,
 ) -> str:
     """Analyze a git repository for code complexity and churn hotspots.
 
@@ -167,6 +171,7 @@ def analyze(
         until: Git --until date filter
         respect_gitignore: Apply .gitignore rules (default: true)
         ignore_dir: Comma-separated directory prefixes to skip
+        similarity: DeepCSIM similarity for block rows (default: true; ignored for file granularity)
 
     Returns:
         JSON-formatted analysis results
@@ -185,6 +190,7 @@ def analyze(
             respect_gitignore=respect_gitignore,
             ignore_dir=ignore_dir,
         )
+        cfg["similarity_enabled"] = similarity
 
         # Run analysis
         results = _analyze_repository(target, cfg)
@@ -493,6 +499,7 @@ def _initialize_repository(target: str, cfg: dict[str, Any]) -> dict[str, Any]:
 
     Returns: {"cache_file": str, "entries": int, "size_bytes": int}
     """
+    _config.validate(cfg)
     with discovery.resolve_target(target) as repo:
         # Build filter predicates
         patterns = list(cfg["filter"])
@@ -516,6 +523,7 @@ def _initialize_repository(target: str, cfg: dict[str, Any]) -> dict[str, Any]:
             workers=cfg.get("block_workers"),
             decay_half_life=cfg.get("decay_half_life"),
             smell_weight=float(cfg.get("smell_weight", 0.0)),
+            **stats.block_similarity_kwargs_from_config(cfg),
         )
 
         # Return cache info
@@ -546,6 +554,7 @@ def _analyze_repository(target: str, cfg: dict[str, Any]) -> list[stats.Statisti
 
     Mirrors the CLI flow from cli.py, using the same filtering and metrics computation.
     """
+    _config.validate(cfg)
     with discovery.resolve_target(target) as repo:
         # Build filter predicates
         patterns = list(cfg["filter"])
@@ -572,6 +581,7 @@ def _analyze_repository(target: str, cfg: dict[str, Any]) -> list[stats.Statisti
                 workers=cfg.get("block_workers"),
                 decay_half_life=decay_half_life,
                 smell_weight=smell_weight,
+                **stats.block_similarity_kwargs_from_config(cfg),
             )
         else:
             churn = _churn.compute_churn(

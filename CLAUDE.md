@@ -11,9 +11,11 @@ For each tracked `.py` file in a git repo, it computes:
 - **cyclomatic**: sum of McCabe complexity across all functions/methods/classes
 - **halstead**: Halstead volume
 - **maintainability**: `100 - radon's MI` (higher = worse)
-- **churn**: total lines added + deleted across commits
-- **churn_per_sloc**: `churn / sloc` — instability normalized by file size
-- **score**: product of user-selected metrics (default: `churn_per_sloc × cyclomatic`)
+- **churn** / **churn_per_sloc**: lines changed across git history; ratio normalizes by size
+- **decayed_churn** / **decayed_churn_per_sloc**: churn weighted by file age (`decay_half_life`)
+- **smell_count** / **smells**: Pylint + heuristic code smells (`smell.py`); `smells` is `{id: count}` on each row
+- **similarity_score** / **similarity_band** / **match_count**: DeepCSIM block similarity (on by default for block granularity; use `--no-similarity` / `similarity_enabled: false` to skip)
+- **score**: product of user-selected metrics (default: `decayed_churn_per_sloc × cyclomatic`)
 
 The default scoring targets refactor hotspots: files that are both unstable (frequently rewritten) and tangled (high cyclomatic complexity).
 
@@ -27,8 +29,12 @@ The default scoring targets refactor hotspots: files that are both unstable (fre
    - **Complexity** (`complexity.py`): Uses `radon` to extract AST metrics (sloc, cyclomatic, halstead, maintainability)
    - **Churn** (`churn.py`): Uses `git log` to compute lines added/deleted per file
    - **Block Churn** (`block_churn.py`): For `--granularity block`, computes churn per function/method via `git log -L` with optional caching
+   - **Smells** (`smell.py`): Pylint JSON + radon/comment heuristics + approximate class smells; rollups attach to `Statistic`
+   - **Block similarity** (`block_similarity.py`): DeepCSIM pairwise similarity over block snippets (default on for block runs)
 4. **Stats** (`stats.py`): Aggregates metrics into `Statistic` dataclasses; applies sorting, limiting, and score calculation
 5. **Output** (`output.py`): Formats results as table/JSON/CSV
+
+Optional **stderr progress** (`progress_report.py` + CLI `--progress`) runs alongside steps 3–4 without affecting stdout (table/CSV/JSON).
 
 ### Configuration System
 
@@ -55,9 +61,12 @@ The `init` subcommand scaffolds `.hotspottriage/` with example configs. Config k
 | `block_churn.py` | `git log -L` for function/method churn; threading; block-level cache invalidation |
 | `cache.py` | Pickle-based caching in `.hotspottriage/cache/`; SHA-keyed so changes auto-invalidate |
 | `blocks.py` | AST traversal to identify functions, methods, async functions; compute per-block metrics |
+| `smell.py` | Code-smell detection (Pylint + radon/comments + approximate class smells); `finding_applies_to_block` for block rows |
+| `block_similarity.py` | DeepCSIM integration: per-block `similarity_score`, bands, `match_count`; repo aggregate row |
 | `stats.py` | `Statistic` dataclass; aggregation (file vs. directory); sorting by score/file; limiting |
 | `output.py` | Formatting: table (tabulate), JSON, CSV |
-| `mcp_server.py` | FastMCP server exposing analyze, analyze_with_cache, analyze_classes, generate_cache, cache_status, clear_cache, and init_config as MCP tools |
+| `progress_report.py` | Rich stderr progress bar (optional; config `progress`) |
+| `mcp_server.py` | FastMCP server: analyze, analyze_with_cache, get_code_smells, analyze_classes, generate_cache, cache_status, clear_cache, init_config |
 | `cache_generator.py` | Comprehensive cache generation combining block-level metrics and class/method structure analysis |
 
 ### Granularity Modes
@@ -69,7 +78,7 @@ Block-level caching stores results in `.hotspottriage/cache/blocks.pkl`, keyed b
 
 ## Development Commands
 
-All commands use `uv` (fast Python package manager; see `pyproject.toml`).
+All commands use `uv` (fast Python package manager; see `pyproject.toml`). After changing dependencies, run **`uv lock`** so `uv.lock` stays aligned.
 
 ### Install & Run
 ```bash
@@ -124,9 +133,11 @@ The FastMCP server (`mcp_server.py`) exposes HotspotTriage as an MCP tool for Cl
 
 ### Available MCP Tools
 
-- **`analyze(target, ...options)`**: Run file-level repository analysis, returns JSON list of `Statistic` objects with metrics (sloc, cyclomatic, halstead, churn, score, etc.)
+- **`analyze(target, ...options)`**: Run repository analysis; returns JSON list of `Statistic` objects (file or block granularity). `similarity` defaults to true for block runs; pass `similarity=False` to skip DeepCSIM.
 
-- **`analyze_with_cache(target, ...options)`**: Run block-level (function/method) analysis with explicit cache generation. Cache stored in `<repo>/.hotspottriage/cache/blocks.pkl`.
+- **`analyze_with_cache(target, ...options)`**: Block-level analysis with cache generation in `<repo>/.hotspottriage/cache/blocks.pkl`. `similarity` defaults to true; pass `similarity=False` to skip.
+
+- **`get_code_smells(target, ...)`**: Flat smell findings per tracked file (`file`, `line`, `smell`, `message`, optional `confidence` / `scope`).
 
 - **`analyze_classes(target, filter)`**: Extract and analyze class and method definitions. Returns file/class/method hierarchy with line ranges.
 
@@ -156,7 +167,7 @@ The `tests/fixtures/` directory contains small test git repos with known structu
 
 ## Notes
 
-- **Python 3.10+** required (uses `match` statements, `|` union types).
+- **Python 3.11+** required (`requires-python` in `pyproject.toml`; `deepcsim` caps below 3.14).
 - The tool respects `.gitignore` by default (applies to **tracked** files to exclude accidentally-committed ignored trees). Use `--no-respect-gitignore` to analyze all tracked files.
 - **No network required** once the repo is local; can analyze remote git URLs (cloned to temp dir).
 - **Performance**: File-level analysis is fast; block-level analysis is slower (uses `git log -L` per function). Caching makes subsequent block-level runs instant.

@@ -293,6 +293,22 @@ def test_validate_rejects_unknown_sort():
         _config.validate(cfg)
 
 
+def test_validate_allows_similarity_enabled_with_file_granularity():
+    """similarity_enabled applies only when building block stats; file mode ignores it."""
+    cfg = {**_config.DEFAULTS, "similarity_enabled": True, "granularity": "file"}
+    _config.validate(cfg)
+
+
+def test_validate_rejects_similarity_score_metric_without_block():
+    cfg = {
+        **_config.DEFAULTS,
+        "granularity": "file",
+        "score_metrics": ["cyclomatic", "similarity_score"],
+    }
+    with pytest.raises(ValueError, match="similarity_score"):
+        _config.validate(cfg)
+
+
 def test_validate_rejects_unknown_granularity():
     cfg = {**_config.DEFAULTS, "granularity": "module"}
     with pytest.raises(ValueError, match="unknown granularity"):
