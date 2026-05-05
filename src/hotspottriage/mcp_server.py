@@ -372,8 +372,8 @@ def init_config(target: str = "", is_global: bool = False) -> str:
     try:
         if is_global:
             written = _config.init_config(scope="global")
-            # Global scope returns a list
-            files = [str(f) for f in written]
+            # init_config currently returns a single Path for global scope.
+            files = [str(written)] if isinstance(written, Path) else [str(f) for f in written]
             return json.dumps({
                 "status": "success",
                 "message": f"Initialized global config",

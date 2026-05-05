@@ -73,6 +73,7 @@ def generate_full_cache(
             result["blocks"] = {
                 "count": len(blocks_data.get("results", [])),
                 "cache": blocks_data.get("cache", {}),
+                "results": blocks_data.get("results", []),
             }
             if verbose:
                 print(f"    ✓ Cached {result['blocks']['count']} blocks")

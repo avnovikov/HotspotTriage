@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from math import prod
 from pathlib import Path, PurePosixPath
+from statistics import mean, pstdev
 from typing import Iterable
 
 from hotspottriage import block_churn as _block_churn
@@ -30,6 +31,7 @@ SCORE_METRICS: tuple[str, ...] = (*_complexity.METRICS, "churn", "churn_per_sloc
 class Statistic:
     path: str
     sloc: int
+    normalized_sloc: float
     cyclomatic: int
     halstead: int
     maintainability: int
@@ -52,6 +54,21 @@ def _score(metrics: dict[str, float], score_metrics: Iterable[str]) -> float:
     return float(prod(metrics[m] for m in score_metrics))
 
 
+def _normalize_sloc(values: list[int]) -> list[float]:
+    """Z-score normalization for block SLOC values.
+
+    Uses population standard deviation because we normalize the whole in-memory
+    set of computed blocks for this run.
+    """
+    if not values:
+        return []
+    mu = mean(values)
+    sigma = pstdev(values)
+    if sigma == 0:
+        return [0.0] * len(values)
+    return [(v - mu) / sigma for v in values]
+
+
 def build_stats(
     repo: Path,
     files: Iterable[str],
@@ -68,6 +85,7 @@ def build_stats(
             Statistic(
                 path=rel,
                 sloc=int(m["sloc"]),
+                normalized_sloc=0.0,
                 cyclomatic=int(m["cyclomatic"]),
                 halstead=int(m["halstead"]),
                 maintainability=int(m["maintainability"]),
@@ -122,7 +140,7 @@ def build_block_stats(
     cache.save()
 
     # Pass 3: assemble Statistic rows.
-    out: list[Statistic] = []
+    rows: list[tuple[str, _blocks.Block, dict[str, float]]] = []
     for rel in files:
         if rel not in file_blocks:
             continue
@@ -134,10 +152,16 @@ def build_block_stats(
             m["maintainability"] = file_mi
             m["churn"] = churns.get((rel, b.start, b.end), 0)
             m["churn_per_sloc"] = _ratio(int(m["churn"]), int(m["sloc"]))
-            out.append(
+            rows.append((rel, b, m))
+
+    normalized_slocs = _normalize_sloc([int(m["sloc"]) for _, _, m in rows])
+    out: list[Statistic] = []
+    for (rel, b, m), normalized_sloc in zip(rows, normalized_slocs):
+        out.append(
                 Statistic(
                     path=f"{rel}::{b.name}",
                     sloc=int(m["sloc"]),
+                    normalized_sloc=normalized_sloc,
                     cyclomatic=int(m["cyclomatic"]),
                     halstead=int(m["halstead"]),
                     maintainability=int(m["maintainability"]),
@@ -177,6 +201,7 @@ def aggregate_by_directory(
             Statistic(
                 path=d,
                 sloc=m["sloc"],
+                normalized_sloc=0.0,
                 cyclomatic=m["cyclomatic"],
                 halstead=m["halstead"],
                 maintainability=m["maintainability"],

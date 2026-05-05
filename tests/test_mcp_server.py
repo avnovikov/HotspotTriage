@@ -9,6 +9,7 @@ import pytest
 from hotspottriage.mcp_server import (
     analyze,
     analyze_classes,
+    generate_cache,
     analyze_with_cache,
     cache_status,
     clear_cache,
@@ -98,6 +99,7 @@ def test_analyze_basic(test_repo):
     first = data[0]
     assert "path" in first
     assert "sloc" in first
+    assert "normalized_sloc" in first
     assert "cyclomatic" in first
     assert "halstead" in first
     assert "maintainability" in first
@@ -245,6 +247,7 @@ def test_analyze_with_cache(test_repo):
     assert "cache" in data
     assert "entries" in data["cache"]
     assert len(data["results"]) > 0
+    assert "normalized_sloc" in data["results"][0]
 
 
 def test_analyze_classes(test_repo):
@@ -273,3 +276,14 @@ def test_analyze_classes_with_filter(test_repo):
     # Should return results
     assert isinstance(data, list)
     assert len(data) > 0
+
+
+def test_generate_cache_includes_normalized_sloc_in_block_results(test_repo):
+    """Comprehensive cache output should retain block metric fields."""
+    result = generate_cache(str(test_repo), score_metrics="cyclomatic")
+    data = json.loads(result)
+    assert data.get("metadata", {}).get("status") == "success"
+    blocks = data.get("blocks", {})
+    assert blocks.get("count", 0) > 0
+    assert "results" in blocks
+    assert "normalized_sloc" in blocks["results"][0]

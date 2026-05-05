@@ -11,7 +11,7 @@ from tests.fixtures.build_block_repo import build_block_repo
 
 
 METRIC_COLS = (
-    "sloc", "cyclomatic", "halstead", "maintainability",
+    "sloc", "normalized_sloc", "cyclomatic", "halstead", "maintainability",
     "churn", "churn_per_sloc", "score",
 )
 
@@ -79,7 +79,7 @@ def test_cli_csv_has_all_metric_headers(tmp_path: Path):
         for col in ("sloc", "cyclomatic", "halstead", "maintainability", "churn"):
             int(row[col])
         # Float columns.
-        for col in ("churn_per_sloc", "score"):
+        for col in ("normalized_sloc", "churn_per_sloc", "score"):
             float(row[col])
 
 
