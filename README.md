@@ -124,6 +124,22 @@ After `git ls-files` returns tracked paths, HotspotTriage applies, in order:
 
 When `--granularity block` is used, HotspotTriage computes metrics for each function, method, and async function (not class rows). The first run computes churn via `git log -L` for each block; subsequent runs reuse cached values in `<repo>/.hotspottriage/cache/blocks.pkl`, keyed by file blob SHA so changes invalidate automatically.
 
+#### Cache metadata and timestamps
+
+Cache metadata is stored in `<repo>/.hotspottriage/cache/metadata.json` and includes:
+- **generated_at**: Unix timestamp when cache was created
+- **entry_count**: Number of cached entries
+- **version**: Cache format version
+- **file_timestamps** (optional): Per-file analysis metadata including:
+  - **last_commit_timestamp**: Unix timestamp of last commit touching this file
+  - **analysis_timestamp**: Unix timestamp when metrics were computed
+  - **blob_sha**: Git object hash at analysis time (detects code changes)
+
+This enables:
+- Detecting when cached metrics are stale (by comparing file blob SHAs)
+- Calculating deltas between cache versions (added/changed/deleted files)
+- Estimating cache age and freshness
+
 Add `.hotspottriage/` to your `.gitignore` to avoid committing cached data:
 
 ```bash
