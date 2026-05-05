@@ -6,17 +6,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+from hotspottriage.config import DEFAULTS
+from hotspottriage.output import display_headers
+
 from tests.fixtures.build_repo import build_repo
 from tests.fixtures.build_block_repo import build_block_repo
 
 
-METRIC_COLS = (
-    "sloc", "normalized_sloc", "cyclomatic", "halstead", "maintainability",
-    "churn", "churn_per_sloc", "decayed_churn", "decayed_churn_per_sloc",
-    "smell_count", "smell_severity", "smell_burden", "smells",
-    "similarity_score", "similarity_band", "match_count",
-    "score",
-)
+METRIC_COLS = tuple(c for c in display_headers(DEFAULTS) if c != "path")
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess:
@@ -79,23 +76,23 @@ def test_cli_csv_has_all_metric_headers(tmp_path: Path):
     rows = list(reader)
     assert len(rows) == 3
     for row in rows:
-        # Int columns.
-        for col in ("sloc", "cyclomatic", "halstead", "maintainability", "churn"):
-            int(row[col])
-        int(row["smell_count"])
         smells = json.loads(row["smells"])
         assert isinstance(smells, dict)
         assert all(isinstance(k, str) and isinstance(v, int) for k, v in smells.items())
-        # Float columns.
-        for col in (
-            "normalized_sloc",
-            "churn_per_sloc",
-            "decayed_churn",
-            "decayed_churn_per_sloc",
-            "smell_severity",
-            "smell_burden",
-            "score",
-        ):
+        int_cols = (
+            "sloc",
+            "cyclomatic",
+            "halstead",
+            "maintainability",
+            "churn",
+            "smell_count",
+            "match_count",
+        )
+        for col in int_cols:
+            int(row[col])
+        for col in METRIC_COLS:
+            if col in int_cols or col in ("smells", "similarity_band"):
+                continue
             float(row[col])
 
 
