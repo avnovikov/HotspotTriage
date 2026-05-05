@@ -323,6 +323,12 @@ def test_validate_rejects_invalid_smell_threshold():
         _config.validate(cfg)
 
 
+def test_validate_rejects_invalid_comment_ratio_threshold():
+    cfg = {**_config.DEFAULTS, "smell_max_comment_ratio": 0}
+    with pytest.raises(ValueError, match="smell_max_comment_ratio must be a positive number"):
+        _config.validate(cfg)
+
+
 def test_validate_rejects_block_directories_combo():
     cfg = {**_config.DEFAULTS, "granularity": "block", "directories": True}
     with pytest.raises(ValueError, match="cannot be combined"):
