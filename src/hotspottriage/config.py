@@ -56,6 +56,7 @@ DEFAULTS: dict[str, Any] = {
     "cache_dir": None,
     "log_level": "warning",
     "decay_half_life": 2592000,  # 30 days in seconds
+    "smell_weight": 0.0,
     "smell_max_statements": 50,
     "smell_max_attributes": 10,
     "smell_max_public_methods": 20,
@@ -67,6 +68,8 @@ DEFAULTS: dict[str, Any] = {
     "smell_data_class_min_attributes": 8,
     "smell_middle_man_max_avg_method_sloc": 2.0,
     "smell_speculative_generality_min_hits": 1,
+    # null = auto (TTY stderr), true/false = force on/off
+    "progress": None,
 }
 
 _VALID_LOG_LEVELS = ("debug", "info", "warning", "error")
@@ -324,6 +327,11 @@ def validate(config: dict[str, Any]) -> None:
         raise ValueError(
             f"decay_half_life must be null or a positive int (seconds); got {decay_hl!r}"
         )
+    smell_weight = config.get("smell_weight")
+    if not isinstance(smell_weight, (int, float)) or smell_weight < 0:
+        raise ValueError(
+            f"smell_weight must be a non-negative number; got {smell_weight!r}"
+        )
 
     smell_keys = (
         "smell_max_statements",
@@ -352,6 +360,12 @@ def validate(config: dict[str, Any]) -> None:
         raise ValueError(
             "smell_middle_man_max_avg_method_sloc must be a positive number; "
             f"got {middle_man_avg_sloc!r}"
+        )
+
+    progress = config.get("progress")
+    if progress is not None and not isinstance(progress, bool):
+        raise ValueError(
+            f"progress must be null or a boolean; got {type(progress).__name__}: {progress!r}"
         )
 
 
@@ -415,6 +429,14 @@ log_level: warning
 # Recent changes weigh more heavily than old ones. Set to a larger value to
 # reduce the impact of aging, or disable via `decay_half_life: null`.
 decay_half_life: 2592000
+
+# Weight applied when score_metrics includes smell_count.
+# Score factor contribution: 1 + (smell_weight * smell_count)
+# Keep 0.0 for neutral behavior (legacy-compatible scoring).
+smell_weight: 0.0
+
+# Show Rich progress on stderr during analysis. null = auto (TTY only).
+progress: null
 
 # Drop any tracked path under these POSIX prefixes (after normalisation).
 # Example: ['vendor', 'generated/proto']

@@ -18,6 +18,7 @@ def _stat(path: str, **overrides) -> Statistic:
     base = dict(
         sloc=0, normalized_sloc=0.0, cyclomatic=0, halstead=0, maintainability=0,
         churn=0, churn_per_sloc=0.0, decayed_churn=0.0, decayed_churn_per_sloc=0.0,
+        smell_count=0, smells={},
         score=0.0,
     )
     base.update(overrides)

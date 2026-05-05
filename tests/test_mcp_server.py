@@ -11,6 +11,7 @@ from hotspottriage.mcp_server import (
     analyze_classes,
     generate_cache,
     analyze_with_cache,
+    get_code_smells,
     cache_status,
     clear_cache,
     init_config,
@@ -105,6 +106,8 @@ def test_analyze_basic(test_repo):
     assert "maintainability" in first
     assert "churn" in first
     assert "churn_per_sloc" in first
+    assert "smell_count" in first
+    assert "smells" in first
     assert "score" in first
 
 
@@ -287,3 +290,15 @@ def test_generate_cache_includes_normalized_sloc_in_block_results(test_repo):
     assert blocks.get("count", 0) > 0
     assert "results" in blocks
     assert "normalized_sloc" in blocks["results"][0]
+
+
+def test_get_code_smells_returns_smell_rows(test_repo):
+    result = get_code_smells(str(test_repo))
+    data = json.loads(result)
+    assert isinstance(data, list)
+    if data:
+        first = data[0]
+        assert "file" in first
+        assert "line" in first
+        assert "smell" in first
+        assert "message" in first
