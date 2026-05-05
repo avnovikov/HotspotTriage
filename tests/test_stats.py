@@ -3,6 +3,7 @@ from statistics import mean
 
 import pytest
 
+from hotspottriage.config import DEFAULTS
 from hotspottriage.stats import (
     Statistic,
     aggregate_by_directory,
@@ -126,6 +127,7 @@ def test_block_stats_sets_normalized_sloc_zscore(tmp_path: Path):
         score_metrics=["cyclomatic"],
         similarity_enabled=False,
         similarity_aggregate_row=False,
+        merged_config=DEFAULTS,
     )
     assert stats
     assert all(s.similarity_band == "off" for s in stats)
@@ -134,6 +136,10 @@ def test_block_stats_sets_normalized_sloc_zscore(tmp_path: Path):
     assert mean(normalized) == pytest.approx(0.0, abs=1e-9)
     # With varied block sizes in fixture, at least one row should be non-zero.
     assert any(abs(v) > 0 for v in normalized)
+    for s in stats:
+        assert 0.0 <= s.score <= 1.0
+        assert s.score_band in ("low", "medium", "high", "critical")
+        assert "complexity_burden" in s.score_subscores
 
 
 def test_decay_reduces_churn_over_time():
