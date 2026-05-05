@@ -155,7 +155,7 @@ DEFAULTS: dict[str, Any] = {
             "method": "piecewise",
             "breakpoints": [[0, 0.0], [1, 0.3], [3, 0.7], [5, 1.0]],
         },
-        "similarity_score": {"method": "identity"},
+        "similarity_score": {"method": "piecewise", "breakpoints": [[0, 0.0], [100, 1.0]]},
     },
 }
 

@@ -66,3 +66,9 @@ def test_statistic_to_output_dict_empty_normalization_skips_norm():
     s = _minimal_stat()
     d = statistic_to_output_dict(s, {"metric_normalization": {}})
     assert "norm_cyclomatic" not in d
+
+
+def test_norm_similarity_score_is_raw_over_100():
+    s = _minimal_stat(similarity_score=50.0)
+    d = statistic_to_output_dict(s, DEFAULTS)
+    assert d["norm_similarity_score"] == pytest.approx(0.5)
