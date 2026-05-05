@@ -99,3 +99,75 @@ def test_build_command_contains_threshold_flags():
     assert "--max-args=7" in cmd
     assert "--max-branches=15" in cmd
     assert "--min-public-methods=1" in cmd
+
+
+def test_compute_smells_adds_excessive_comments(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    target = tmp_path / "comments.py"
+    target.write_text(
+        "# c1\n"
+        "# c2\n"
+        "# c3\n"
+        "x = 1\n"
+        "# c4\n"
+    )
+
+    def fake_run(*_args, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(smell.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        smell,
+        "_default_thresholds",
+        lambda: {
+            "max_statements": 50,
+            "max_attributes": 10,
+            "max_public_methods": 20,
+            "max_args": 5,
+            "max_branches": 12,
+            "min_public_methods": 2,
+            "max_comment_ratio": 0.1,
+            "max_comment_block_lines": 15,
+        },
+    )
+
+    out = smell.compute_smells(target)
+    finding = next(f for f in out if f["smell"] == "excessive_comments")
+    assert finding["file"] == str(target)
+    assert finding["line"] == 1
+    assert "exceeds threshold" in finding["message"]
+
+
+def test_compute_smells_adds_large_comment_block(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    target = tmp_path / "block.py"
+    target.write_text(
+        "# a\n"
+        "# b\n"
+        "# c\n"
+        "# d\n"
+        "x = 1\n"
+    )
+
+    def fake_run(*_args, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(smell.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        smell,
+        "_default_thresholds",
+        lambda: {
+            "max_statements": 50,
+            "max_attributes": 10,
+            "max_public_methods": 20,
+            "max_args": 5,
+            "max_branches": 12,
+            "min_public_methods": 2,
+            "max_comment_ratio": 99.0,
+            "max_comment_block_lines": 2,
+        },
+    )
+
+    out = smell.compute_smells(target)
+    finding = next(f for f in out if f["smell"] == "large_comment_block")
+    assert finding["file"] == str(target)
+    assert finding["line"] == 1
+    assert "length 4" in finding["message"]
