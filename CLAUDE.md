@@ -66,6 +66,7 @@ The `init` subcommand scaffolds `.hotspottriage/` with example configs. Config k
 | `block_similarity.py` | DeepCSIM integration: per-block `similarity_score`, bands, `match_count`; repo aggregate row |
 | `stats.py` | `Statistic` dataclass; aggregation (file vs. directory); sorting by score/file; limiting |
 | `normalize.py` | Configurable metric normalization (zscore, piecewise, inverse_piecewise, identity) to ``[0,1]`` |
+| `score.py` | Block-level aggregated risk score (0–1), subscores, bands; weights under ``score_aggregation`` |
 | `output.py` | Formatting: table (tabulate), JSON, CSV |
 | `progress_report.py` | Rich stderr progress bar (optional; config `progress`) |
 | `mcp_server.py` | FastMCP server: analyze, analyze_with_cache, get_code_smells, analyze_classes, generate_cache, cache_status, clear_cache, init_config |

@@ -157,6 +157,39 @@ DEFAULTS: dict[str, Any] = {
         },
         "similarity_score": {"method": "piecewise", "breakpoints": [[0, 0.0], [100, 1.0]]},
     },
+    # Block-only: weighted combination of normalized subscores into score (0–1).
+    # Ignored for file-level runs. See hotspottriage.score.compute_score.
+    "score_aggregation": {
+        "enabled": True,
+        "complexity_weights": {
+            "cyclomatic": 0.40,
+            "halstead": 0.25,
+            "normalized_sloc": 0.35,
+        },
+        "churn_weights": {
+            "churn": 0.10,
+            "churn_per_sloc": 0.20,
+            "decayed_churn": 0.25,
+            "decayed_churn_per_sloc": 0.45,
+        },
+        "smell_weights": {
+            "smell_count": 0.50,
+            "smell_severity": 0.50,
+        },
+        "similarity_weights": {
+            "similarity_score": 0.80,
+            "match_count": 0.20,
+        },
+        "final_weights": {
+            "complexity_burden": 0.30,
+            "churn_burden": 0.25,
+            "maintainability_burden": 0.20,
+            "smell_burden": 0.15,
+            "similarity_burden": 0.10,
+        },
+        "band_edges": [0.30, 0.60, 0.80],
+        "band_names": ["low", "medium", "high", "critical"],
+    },
 }
 
 _VALID_LOG_LEVELS = ("debug", "info", "warning", "error")
@@ -532,6 +565,10 @@ def validate(config: dict[str, Any]) -> None:
         )
 
     _normalize.validate_metric_normalization(config)
+
+    from hotspottriage import score as _score_validation
+
+    _score_validation.validate_score_aggregation(config)
 
 
 # --- Template generation (`init` subcommand) -----------------------------

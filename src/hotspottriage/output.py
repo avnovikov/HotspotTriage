@@ -41,6 +41,8 @@ HEADERS: tuple[str, ...] = (
     "similarity_band",
     "match_count",
     "score",
+    "score_band",
+    "score_subscores",
 )
 
 
@@ -93,6 +95,8 @@ def _row_tuple(s: Statistic, merged_config: dict[str, Any] | None) -> tuple[Any,
         s.similarity_band,
         s.match_count,
         s.score,
+        s.score_band,
+        json.dumps(s.score_subscores, sort_keys=True),
     )
     if not _metric_normalization(merged_config):
         return base
@@ -146,6 +150,8 @@ def render_csv(stats: Iterable[Statistic], merged_config: dict[str, Any] | None 
             s.similarity_band,
             s.match_count,
             _fmt_float(s.score),
+            s.score_band,
+            json.dumps(s.score_subscores, sort_keys=True),
         )
         if not mn:
             w.writerow(base)

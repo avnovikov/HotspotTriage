@@ -1,9 +1,11 @@
 """Statistic dataclass + aggregation, sorting, limiting.
 
 Every Statistic carries every metric so a single CSV/JSON dump can be re-sorted
-later without rerunning. The `score` column is the product of a user-chosen
-subset of metrics (`-s` on the CLI), so the same run can answer different
-questions ("which files are unstable AND complex?", "which are just complex?").
+later without rerunning. For **file** rows, ``score`` is the product of
+``score_metrics`` (``-s`` on the CLI). For **block** rows, when
+``score_aggregation.enabled`` is true (default), ``score`` is the configured
+0–1 risk aggregate from :mod:`hotspottriage.score`; otherwise the product recipe
+applies. ``score_band`` and ``score_subscores`` are set for block aggregated runs.
 
 `churn_per_sloc` is derived: `churn / sloc` — instability normalized by file
 size, so a small, frequently-rewritten file outranks a big, rarely-touched one.
@@ -11,7 +13,7 @@ size, so a small, frequently-rewritten file outranks a big, rarely-touched one.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 from math import prod
 from pathlib import Path, PurePosixPath
 from statistics import mean, pstdev
@@ -22,6 +24,7 @@ from hotspottriage import block_similarity as _block_similarity
 from hotspottriage import blocks as _blocks
 from hotspottriage import cache as _cache
 from hotspottriage import complexity as _complexity
+from hotspottriage import score as _risk_score
 
 # Every metric that may appear in the output and contribute to the score.
 # The default recipe lives in `config.DEFAULTS["score_metrics"]`; this module
@@ -60,6 +63,8 @@ class Statistic:
     similarity_band: str
     match_count: int
     score: float
+    score_band: str = "n/a"
+    score_subscores: dict[str, float] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -272,6 +277,8 @@ def _similarity_aggregate_statistic(agg: dict[str, Any]) -> Statistic:
         similarity_band="aggregate",
         match_count=usages,
         score=mean,
+        score_band="aggregate",
+        score_subscores={},
     )
 
 
@@ -432,6 +439,35 @@ def build_block_stats(
         )
         if progress_callback:
             progress_callback(f"{rel}::{b.name}", i, total_rows)
+
+    cfg = merged_config if merged_config is not None else {}
+    if _risk_score.score_aggregation_enabled(cfg):
+        for idx, st in enumerate(out):
+            if st.path.startswith("__"):
+                continue
+            rec = {
+                "normalized_sloc": float(st.normalized_sloc),
+                "cyclomatic": float(st.cyclomatic),
+                "halstead": float(st.halstead),
+                "maintainability": float(st.maintainability),
+                "churn": float(st.churn),
+                "churn_per_sloc": float(st.churn_per_sloc),
+                "decayed_churn": float(st.decayed_churn),
+                "decayed_churn_per_sloc": float(st.decayed_churn_per_sloc),
+                "smell_count": float(st.smell_count),
+                "smell_severity": float(st.smell_severity),
+                "similarity_score": float(st.similarity_score),
+                "match_count": float(st.match_count),
+            }
+            enriched = _risk_score.compute_score(
+                rec, cfg, similarity_available=similarity_enabled
+            )
+            out[idx] = replace(
+                st,
+                score=float(enriched["score"]),
+                score_band=str(enriched["score_band"]),
+                score_subscores=dict(enriched["score_subscores"]),
+            )
     if (
         similarity_enabled
         and similarity_aggregate_row

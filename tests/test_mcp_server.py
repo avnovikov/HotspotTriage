@@ -114,6 +114,8 @@ def test_analyze_basic(test_repo):
     assert "similarity_band" in first
     assert "match_count" in first
     assert "score" in first
+    assert "score_band" in first
+    assert "score_subscores" in first
     assert "norm_cyclomatic" in first
     assert "norm_similarity_score" in first
 
