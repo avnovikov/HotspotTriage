@@ -33,6 +33,8 @@ SCORE_METRICS: tuple[str, ...] = (
     "decayed_churn",
     "decayed_churn_per_sloc",
     "smell_count",
+    "smell_severity",
+    "smell_burden",
     # Block-only (similarity_* columns); only meaningful when ``granularity: block``.
     "similarity_score",
 )
@@ -51,6 +53,8 @@ class Statistic:
     decayed_churn: float
     decayed_churn_per_sloc: float
     smell_count: int
+    smell_severity: float
+    smell_burden: float
     smells: dict[str, int]
     similarity_score: float
     similarity_band: str
@@ -91,6 +95,10 @@ def _score(
         if metric == "smell_count":
             # Weighted so weight=0 is neutral (factor=1.0), preserving legacy scores.
             factors.append(1.0 + (smell_weight * metrics["smell_count"]))
+        elif metric == "smell_severity":
+            factors.append(1.0 + float(metrics.get("smell_severity", 0.0)))
+        elif metric == "smell_burden":
+            factors.append(1.0 + float(metrics.get("smell_burden", 0.0)))
         elif metric == "similarity_score":
             # Higher structural similarity increases score (optional metric).
             s = float(metrics.get("similarity_score", 0.0))
@@ -98,6 +106,25 @@ def _score(
         else:
             factors.append(metrics[metric])
     return float(prod(factors))
+
+
+def _finalize_smell_burden(metrics_dicts: list[dict[str, Any]]) -> None:
+    """Set ``smell_burden`` on each metrics dict using per-run count normalization.
+
+    ``norm(smell_count)`` is ``count / max(1, max count in this batch)`` so values
+    stay in ``[0, 1]`` within one analysis run. Formula::
+
+        smell_burden = 0.5 * norm(smell_count) + 0.5 * smell_severity
+    """
+    if not metrics_dicts:
+        return
+    max_c = max(int(m["smell_count"]) for m in metrics_dicts)
+    denom = max(1, max_c)
+    for m in metrics_dicts:
+        cnt = int(m["smell_count"])
+        norm = cnt / denom
+        sev = float(m.get("smell_severity", 0.0))
+        m["smell_burden"] = 0.5 * norm + 0.5 * sev
 
 
 def _normalize_sloc(values: list[int]) -> list[float]:
@@ -146,29 +173,37 @@ def build_stats(
     decay_half_life: int | None = None,
     smell_weight: float = 0.0,
     progress_callback: Callable[[str, int, int], None] | None = None,
+    merged_config: dict[str, Any] | None = None,
 ) -> list[Statistic]:
     from hotspottriage import churn as _churn
     from hotspottriage import smell as _smell
     from datetime import datetime
-    
+
     sm = list(score_metrics)
     files_list = list(files)
     total_files = len(files_list)
     if progress_callback:
         progress_callback("Analyzing files", 0, total_files)
-    
+
     current_time = int(datetime.now().timestamp())
     timestamps = _churn.get_file_timestamps(repo, files_list)
-    
-    out: list[Statistic] = []
+
+    pending_metrics: list[dict[str, Any]] = []
+    pending_meta: list[tuple[str, dict[str, int]]] = []
     for idx, rel in enumerate(files_list, start=1):
-        raw_smells = _smell.compute_smells(repo / rel)
+        raw_smells = _smell.compute_smells(repo / rel, merged_config)
         smell_summary = _smell.summarize_smells(raw_smells)
-        m: dict[str, float] = dict(_complexity.compute_all(repo / rel))
+        m: dict[str, Any] = dict(_complexity.compute_all(repo / rel))
         m["churn"] = churn.get(rel, 0)
         m["churn_per_sloc"] = _ratio(int(m["churn"]), int(m["sloc"]))
-        m["smell_count"] = float(len(raw_smells))
-        
+        n_smells = len(raw_smells)
+        m["smell_count"] = float(n_smells)
+        m["smell_severity"] = (
+            sum(float(x.get("severity", 0.0)) for x in raw_smells) / max(1, n_smells)
+            if raw_smells
+            else 0.0
+        )
+
         age_seconds = current_time - timestamps.get(rel, current_time)
         m["decayed_churn"] = (
             _decayed_value(m["churn"], age_seconds, decay_half_life)
@@ -178,8 +213,17 @@ def build_stats(
         m["decayed_churn_per_sloc"] = _ratio(
             int(m["decayed_churn"]), int(m["sloc"])
         )
-        
+
         m["similarity_score"] = 0.0
+        pending_metrics.append(m)
+        pending_meta.append((rel, smell_summary))
+        if progress_callback:
+            progress_callback(rel, idx, total_files)
+
+    _finalize_smell_burden(pending_metrics)
+
+    out: list[Statistic] = []
+    for (rel, smell_summary), m in zip(pending_meta, pending_metrics):
         out.append(
             Statistic(
                 path=rel,
@@ -189,10 +233,12 @@ def build_stats(
                 halstead=int(m["halstead"]),
                 maintainability=int(m["maintainability"]),
                 churn=int(m["churn"]),
-                churn_per_sloc=m["churn_per_sloc"],
-                decayed_churn=m["decayed_churn"],
-                decayed_churn_per_sloc=m["decayed_churn_per_sloc"],
+                churn_per_sloc=float(m["churn_per_sloc"]),
+                decayed_churn=float(m["decayed_churn"]),
+                decayed_churn_per_sloc=float(m["decayed_churn_per_sloc"]),
                 smell_count=int(m["smell_count"]),
+                smell_severity=float(m["smell_severity"]),
+                smell_burden=float(m["smell_burden"]),
                 smells=smell_summary,
                 similarity_score=0.0,
                 similarity_band="n/a",
@@ -200,8 +246,6 @@ def build_stats(
                 score=_score(m, sm, smell_weight=smell_weight),
             )
         )
-        if progress_callback:
-            progress_callback(rel, idx, total_files)
     return out
 
 
@@ -223,6 +267,8 @@ def _similarity_aggregate_statistic(agg: dict[str, Any]) -> Statistic:
         decayed_churn=0.0,
         decayed_churn_per_sloc=0.0,
         smell_count=0,
+        smell_severity=0.0,
+        smell_burden=0.0,
         smells={},
         similarity_score=mean,
         similarity_band="aggregate",
@@ -241,6 +287,7 @@ def build_block_stats(
     decay_half_life: int | None = None,
     smell_weight: float = 0.0,
     progress_callback: Callable[[str, int, int], None] | None = None,
+    merged_config: dict[str, Any] | None = None,
     *,
     similarity_enabled: bool = True,
     similarity_threshold: float = 80.0,
@@ -282,7 +329,7 @@ def build_block_stats(
             continue
         file_sources[rel] = src
         file_metrics[rel] = _complexity.compute_all(repo / rel)
-        file_smells[rel] = _smell.compute_smells(repo / rel)
+        file_smells[rel] = _smell.compute_smells(repo / rel, merged_config)
         bs = _blocks.extract_blocks(src)
         file_blocks[rel] = bs
         for b in bs:
@@ -336,9 +383,17 @@ def build_block_stats(
                 if _smell.finding_applies_to_block(s, b)
             ]
             block_summary = _smell.summarize_smells(block_raw)
-            m["smell_count"] = float(len(block_raw))
+            n_blk = len(block_raw)
+            m["smell_count"] = float(n_blk)
+            m["smell_severity"] = (
+                sum(float(s.get("severity", 0.0)) for s in block_raw) / max(1, n_blk)
+                if block_raw
+                else 0.0
+            )
             m["smells"] = block_summary
             rows.append((rel, b, m))
+
+    _finalize_smell_burden([m for _, _, m in rows])
 
     sim_agg = _block_similarity.attach_similarity_to_rows(
         rows,
@@ -370,6 +425,8 @@ def build_block_stats(
                 decayed_churn=m["decayed_churn"],
                 decayed_churn_per_sloc=m["decayed_churn_per_sloc"],
                 smell_count=int(m["smell_count"]),
+                smell_severity=float(m["smell_severity"]),
+                smell_burden=float(m["smell_burden"]),
                 smells=m["smells"],
                 similarity_score=float(m.get("similarity_score", 0.0)),
                 similarity_band=str(m.get("similarity_band", "n/a")),
@@ -414,38 +471,64 @@ def aggregate_by_directory(
         "decayed_churn",
         "smell_count",
     )
+
+    def _empty_dir_entry() -> dict[str, int | float]:
+        row = {k: 0 for k in additive}
+        row["weighted_smell_sev"] = 0.0
+        row["weighted_smell_bur"] = 0.0
+        return row
+
     for s in stats:
         if s.path.startswith("__"):
             continue
         for d in _ancestors(s.path):
-            entry = sums.setdefault(d, {k: 0 for k in additive})
+            entry = sums.setdefault(d, _empty_dir_entry())
             for k in additive:
                 entry[k] += getattr(s, k)
+            sc = int(s.smell_count)
+            entry["weighted_smell_sev"] = float(entry["weighted_smell_sev"]) + (
+                s.smell_severity * sc
+            )
+            entry["weighted_smell_bur"] = float(entry["weighted_smell_bur"]) + (
+                s.smell_burden * sc
+            )
 
     out: list[Statistic] = []
     for d, m in sums.items():
         cps = _ratio(m["churn"], m["sloc"])
         dcps = _ratio(m["decayed_churn"], m["sloc"])
+        tot_smell = int(m["smell_count"])
+        smell_sev = float(m["weighted_smell_sev"]) / max(1, tot_smell)
+        smell_bur = float(m["weighted_smell_bur"]) / max(1, tot_smell)
         full: dict[str, float] = {
-            **m,
+            "sloc": float(m["sloc"]),
+            "cyclomatic": float(m["cyclomatic"]),
+            "halstead": float(m["halstead"]),
+            "maintainability": float(m["maintainability"]),
+            "churn": float(m["churn"]),
+            "decayed_churn": float(m["decayed_churn"]),
             "churn_per_sloc": cps,
             "decayed_churn_per_sloc": dcps,
-            "smell_count": m["smell_count"],
+            "smell_count": float(m["smell_count"]),
+            "smell_severity": smell_sev,
+            "smell_burden": smell_bur,
             "similarity_score": 0.0,
         }
         out.append(
             Statistic(
                 path=d,
-                sloc=m["sloc"],
+                sloc=int(m["sloc"]),
                 normalized_sloc=0.0,
-                cyclomatic=m["cyclomatic"],
-                halstead=m["halstead"],
-                maintainability=m["maintainability"],
-                churn=m["churn"],
+                cyclomatic=int(m["cyclomatic"]),
+                halstead=int(m["halstead"]),
+                maintainability=int(m["maintainability"]),
+                churn=int(m["churn"]),
                 churn_per_sloc=cps,
                 decayed_churn=m["decayed_churn"],
                 decayed_churn_per_sloc=dcps,
-                smell_count=int(m["smell_count"]),
+                smell_count=tot_smell,
+                smell_severity=smell_sev,
+                smell_burden=smell_bur,
                 smells={},
                 similarity_score=0.0,
                 similarity_band="n/a",

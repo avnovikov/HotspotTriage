@@ -295,6 +295,7 @@ def main(argv: list[str] | None = None) -> int:
                         decay_half_life=decay_half_life,
                         smell_weight=smell_weight,
                         progress_callback=progress_cb,
+                        merged_config=cfg,
                         **stats.block_similarity_kwargs_from_config(cfg),
                     )
                 assert churn is not None
@@ -306,6 +307,7 @@ def main(argv: list[str] | None = None) -> int:
                     decay_half_life=decay_half_life,
                     smell_weight=smell_weight,
                     progress_callback=progress_cb,
+                    merged_config=cfg,
                 )
                 if cfg["directories"]:
                     return stats.aggregate_by_directory(

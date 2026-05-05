@@ -107,6 +107,8 @@ def test_analyze_basic(test_repo):
     assert "churn" in first
     assert "churn_per_sloc" in first
     assert "smell_count" in first
+    assert "smell_severity" in first
+    assert "smell_burden" in first
     assert "smells" in first
     assert "similarity_score" in first
     assert "similarity_band" in first

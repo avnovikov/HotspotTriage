@@ -42,20 +42,16 @@ def test_compute_smells_maps_enabled_messages(monkeypatch: pytest.MonkeyPatch, t
 
     monkeypatch.setattr(smell.subprocess, "run", fake_run)
     out = smell.compute_smells(target)
-    assert out == [
-        {
-            "file": str(target),
-            "line": 1,
-            "smell": "long_parameter_list",
-            "message": "Too many arguments (6/5)",
-        },
-        {
-            "file": str(target),
-            "line": 2,
-            "smell": "dead_code",
-            "message": "Unused variable 'x'",
-        },
-    ]
+    assert len(out) == 2
+    arg_issue = next(x for x in out if x["smell"] == "long_parameter_list")
+    assert arg_issue["file"] == str(target)
+    assert arg_issue["line"] == 1
+    assert arg_issue["pylint_code"] == "R0913"
+    assert arg_issue["severity"] == pytest.approx(0.6)
+    dead = next(x for x in out if x["smell"] == "dead_code")
+    assert dead["line"] == 2
+    assert dead["pylint_code"] == "W0612"
+    assert dead["severity"] == pytest.approx(0.65)
 
 
 def test_compute_smells_returns_empty_on_no_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -309,3 +305,26 @@ def test_summarize_smells_counts_by_smell_id():
     ]
     s = smell.summarize_smells(findings)
     assert s == {"long_method": 2, "long_parameter_list": 1}
+
+
+def test_resolve_smell_severity_rule_overrides_category():
+    cfg = smell.smell_resolution_cfg()
+    cfg["smell_rule_weights"] = {"dead_code": 0.11}
+    finding = {"smell": "dead_code", "pylint_code": "W0612", "message": "x"}
+    assert smell.resolve_smell_severity(finding, cfg) == pytest.approx(0.11)
+
+
+def test_resolve_smell_severity_category_fallback():
+    cfg = smell.smell_resolution_cfg()
+    cfg["smell_rule_weights"] = {}
+    finding = {"smell": "unknown_future_smell", "pylint_code": "E999", "message": "x"}
+    assert smell.resolve_smell_severity(finding, cfg) == pytest.approx(0.85)
+
+
+def test_resolve_smell_severity_default_when_no_rule_no_category():
+    cfg = smell.smell_resolution_cfg()
+    cfg["smell_rule_weights"] = {}
+    cfg["smell_category_weights"] = {}
+    cfg["smell_default_weight"] = 0.33
+    finding = {"smell": "mystery", "message": "x"}
+    assert smell.resolve_smell_severity(finding, cfg) == pytest.approx(0.33)
