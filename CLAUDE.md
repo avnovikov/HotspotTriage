@@ -32,7 +32,8 @@ The default scoring targets refactor hotspots: files that are both unstable (fre
    - **Smells** (`smell.py`): Pylint JSON + radon/comment heuristics + approximate class smells; rollups attach to `Statistic`
    - **Block similarity** (`block_similarity.py`): DeepCSIM pairwise similarity over block snippets (default on for block runs)
 4. **Stats** (`stats.py`): Aggregates metrics into `Statistic` dataclasses; applies sorting, limiting, and score calculation
-5. **Output** (`output.py`): Formats results as table/JSON/CSV
+5. **Normalize** (`normalize.py`): Optional per-metric maps to ``[0,1]`` (``metric_normalization`` in config); ``normalize`` / ``normalize_record`` APIs
+6. **Output** (`output.py`): Formats results as table/JSON/CSV
 
 Optional **stderr progress** (`progress_report.py` + CLI `--progress`) runs alongside steps 3–4 without affecting stdout (table/CSV/JSON).
 
@@ -64,6 +65,7 @@ The `init` subcommand scaffolds `.hotspottriage/` with example configs. Config k
 | `smell.py` | Code-smell detection (Pylint + radon/comments + approximate class smells); `finding_applies_to_block` for block rows |
 | `block_similarity.py` | DeepCSIM integration: per-block `similarity_score`, bands, `match_count`; repo aggregate row |
 | `stats.py` | `Statistic` dataclass; aggregation (file vs. directory); sorting by score/file; limiting |
+| `normalize.py` | Configurable metric normalization (zscore, piecewise, inverse_piecewise, identity) to ``[0,1]`` |
 | `output.py` | Formatting: table (tabulate), JSON, CSV |
 | `progress_report.py` | Rich stderr progress bar (optional; config `progress`) |
 | `mcp_server.py` | FastMCP server: analyze, analyze_with_cache, get_code_smells, analyze_classes, generate_cache, cache_status, clear_cache, init_config |

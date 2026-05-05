@@ -26,6 +26,7 @@ from typing import Any
 import yaml
 
 from hotspottriage import filtering as _filtering
+from hotspottriage import normalize as _normalize
 from hotspottriage import output as _output
 from hotspottriage import stats as _stats
 
@@ -104,6 +105,58 @@ DEFAULTS: dict[str, Any] = {
     "similarity_band_low": 50.0,
     "similarity_max_pairwise_blocks": 2500,
     "similarity_aggregate_row": True,
+    # Per-metric normalization to [0,1] (higher = worse); see normalize.py.
+    "metric_normalization": {
+        "normalized_sloc": {
+            "method": "zscore",
+            "center": 0.0,
+            "scale": 1.0,
+            "clamp": [-2.5, 2.5],
+        },
+        "sloc": {
+            "method": "zscore",
+            "center": 0.0,
+            "scale": 1.0,
+            "clamp": [-2.5, 2.5],
+        },
+        "cyclomatic": {
+            "method": "piecewise",
+            "breakpoints": [[1, 0.0], [5, 0.1], [10, 0.5], [20, 1.0]],
+        },
+        "halstead": {
+            "method": "piecewise",
+            "breakpoints": [[20, 0.0], [100, 0.4], [200, 0.7], [400, 1.0]],
+        },
+        "maintainability": {
+            "method": "inverse_piecewise",
+            "breakpoints": [[85, 0.0], [65, 0.4], [40, 0.8], [20, 1.0]],
+        },
+        "churn": {
+            "method": "piecewise",
+            "breakpoints": [[0, 0.0], [5, 0.3], [20, 0.7], [50, 1.0]],
+        },
+        "churn_per_sloc": {
+            "method": "piecewise",
+            "breakpoints": [[0.0, 0.0], [0.10, 0.3], [0.30, 0.7], [0.60, 1.0]],
+        },
+        "decayed_churn": {
+            "method": "piecewise",
+            "breakpoints": [[0, 0.0], [3, 0.3], [10, 0.7], [25, 1.0]],
+        },
+        "decayed_churn_per_sloc": {
+            "method": "piecewise",
+            "breakpoints": [[0.0, 0.0], [0.05, 0.3], [0.20, 0.7], [0.40, 1.0]],
+        },
+        "smell_count": {
+            "method": "piecewise",
+            "breakpoints": [[0, 0.0], [2, 0.3], [5, 0.7], [10, 1.0]],
+        },
+        "match_count": {
+            "method": "piecewise",
+            "breakpoints": [[0, 0.0], [1, 0.3], [3, 0.7], [5, 1.0]],
+        },
+        "similarity_score": {"method": "identity"},
+    },
 }
 
 _VALID_LOG_LEVELS = ("debug", "info", "warning", "error")
@@ -478,6 +531,8 @@ def validate(config: dict[str, Any]) -> None:
             f"similarity_aggregate_row must be a boolean; got {type(sar).__name__}: {sar!r}"
         )
 
+    _normalize.validate_metric_normalization(config)
+
 
 # --- Template generation (`init` subcommand) -----------------------------
 
@@ -550,6 +605,10 @@ smell_weight: 0.0
 # smell_default_weight: 0.4
 # smell_category_weights: {F: 1.0, E: 0.85, W: 0.6, R: 0.45, C: 0.2}
 # smell_rule_weights: {long_method: 0.7, dead_code: 0.65, ...}
+
+# Optional: map raw metrics to [0,1] (higher = worse); see hotspottriage.normalize.
+# metric_normalization:
+#   cyclomatic: {method: piecewise, breakpoints: [[1, 0.0], [20, 1.0]]}
 
 # Show Rich progress on stderr during analysis. null = auto (TTY only).
 progress: null

@@ -83,8 +83,8 @@ def block_similarity_kwargs_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _ratio(churn: int, sloc: int) -> float:
-    return churn / sloc if sloc > 0 else 0.0
+def _ratio(churn: float | int, sloc: int) -> float:
+    return float(churn) / sloc if sloc > 0 else 0.0
 
 
 def _score(
@@ -210,9 +210,7 @@ def build_stats(
             if decay_half_life
             else m["churn"]
         )
-        m["decayed_churn_per_sloc"] = _ratio(
-            int(m["decayed_churn"]), int(m["sloc"])
-        )
+        m["decayed_churn_per_sloc"] = _ratio(m["decayed_churn"], int(m["sloc"]))
 
         m["similarity_score"] = 0.0
         pending_metrics.append(m)
@@ -374,9 +372,7 @@ def build_block_stats(
                 if decay_half_life
                 else m["churn"]
             )
-            m["decayed_churn_per_sloc"] = _ratio(
-                int(m["decayed_churn"]), int(m["sloc"])
-            )
+            m["decayed_churn_per_sloc"] = _ratio(m["decayed_churn"], int(m["sloc"]))
             block_raw = [
                 s
                 for s in file_smells.get(rel, [])
