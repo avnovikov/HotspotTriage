@@ -269,6 +269,36 @@ def test_validate_accepts_defaults():
     _config.validate(dict(_config.DEFAULTS))
 
 
+def test_validate_rejects_bad_dashboard_host():
+    cfg = {**_config.DEFAULTS, "dashboard": {**_config.DEFAULTS["dashboard"], "host": ""}}
+    with pytest.raises(ValueError, match="dashboard.host"):
+        _config.validate(cfg)
+
+
+def test_to_dashboard_snapshot_shape():
+    snap = _config.to_dashboard_snapshot(dict(_config.DEFAULTS), project_path="/tmp/r")
+    assert snap["version"]
+    assert snap["project"]["path"] == "/tmp/r"
+    assert "score_metrics" in snap and isinstance(snap["score_metrics"], list)
+    assert "dashboard" in snap and snap["dashboard"]["base_port"] == 9123
+
+
+def test_apply_mcp_dashboard_cli_overrides():
+    base = dict(_config.DEFAULTS)
+    out = _config.apply_mcp_dashboard_cli_overrides(
+        base,
+        no_dashboard=True,
+        dashboard_port=9200,
+        dashboard_host="0.0.0.0",
+        open_browser=True,
+    )
+    assert out["dashboard"]["enabled"] is False
+    assert out["dashboard"]["base_port"] == 9200
+    assert out["dashboard"]["host"] == "0.0.0.0"
+    assert out["dashboard"]["open_on_start"] is True
+    _config.validate(out)
+
+
 def test_validate_rejects_unknown_score_metric():
     cfg = {**_config.DEFAULTS, "score_metrics": ["bogus"]}
     with pytest.raises(ValueError, match="unknown score metric"):
