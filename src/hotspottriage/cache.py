@@ -4,6 +4,8 @@ Keyed by `(file_blob_sha, start, end, since, until)`. Because the key includes
 the file's blob SHA at HEAD, any commit that touches the file invalidates its
 cache entries automatically; commits that don't touch a file leave its cache
 entries valid.
+
+Cache metadata is stored in metadata.json with timestamps to detect staleness.
 """
 from __future__ import annotations
 
@@ -11,6 +13,8 @@ import os
 import pickle
 import tempfile
 from pathlib import Path
+
+from hotspottriage import timestamps
 
 
 def cache_path_for(repo: Path) -> Path:
@@ -61,6 +65,8 @@ class Cache:
             with os.fdopen(fd, "wb") as f:
                 pickle.dump(self.data, f)
             os.replace(tmp, cache_file)
+            # Save metadata with timestamp
+            self._save_metadata()
         except Exception:
             try:
                 os.unlink(tmp)
@@ -68,3 +74,31 @@ class Cache:
                 pass
             raise
         self.dirty = False
+
+    def _save_metadata(self) -> None:
+        """Save cache metadata including generation timestamp."""
+        metadata = {
+            "generated_at": timestamps.int_timestamp_now(),
+            "entry_count": len(self.data),
+            "version": 1,
+        }
+        timestamps.save_metadata_simple(self.dir, metadata)
+
+    def get_metadata(self) -> dict[str, int | str] | None:
+        """Get cache metadata.
+
+        Returns:
+            Dictionary with cache metadata, or None if not found
+        """
+        return timestamps.load_metadata_simple(self.dir)
+
+    def age_seconds(self) -> int | None:
+        """Get cache age in seconds since generation.
+
+        Returns:
+            Age in seconds, or None if metadata not found
+        """
+        metadata = self.get_metadata()
+        if not metadata or "generated_at" not in metadata:
+            return None
+        return timestamps.age_seconds(metadata["generated_at"])
