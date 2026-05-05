@@ -42,7 +42,7 @@ DEFAULTS: dict[str, Any] = {
     "filter": [],
     "no_default_filter": False,
     "default_filter": "**/*.py",
-    "score_metrics": ["churn_per_sloc", "cyclomatic"],
+    "score_metrics": ["decayed_churn_per_sloc", "cyclomatic"],
     "format": "table",
     "limit": None,
     "sort": "score",
@@ -335,9 +335,9 @@ filter: []
 no_default_filter: false
 
 # Which metrics multiply into the `score` column.
-# Valid: sloc, cyclomatic, halstead, maintainability, churn, churn_per_sloc
+# Valid: sloc, cyclomatic, halstead, maintainability, churn, churn_per_sloc, decayed_churn, decayed_churn_per_sloc
 score_metrics:
-  - churn_per_sloc
+  - decayed_churn_per_sloc
   - cyclomatic
 
 # Output format: table | json | csv
@@ -399,10 +399,10 @@ filter: []
 
 # Override the score recipe for this project, e.g. emphasize maintainability:
 # score_metrics:
-#   - churn_per_sloc
+#   - decayed_churn_per_sloc
 #   - maintainability
 score_metrics:
-  - churn_per_sloc
+  - decayed_churn_per_sloc
   - cyclomatic
 
 # Default output format for this project.
