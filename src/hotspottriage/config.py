@@ -64,6 +64,9 @@ DEFAULTS: dict[str, Any] = {
     "smell_min_public_methods": 2,
     "smell_max_comment_ratio": 0.5,
     "smell_max_comment_block_lines": 15,
+    "smell_data_class_min_attributes": 8,
+    "smell_middle_man_max_avg_method_sloc": 2.0,
+    "smell_speculative_generality_min_hits": 1,
 }
 
 _VALID_LOG_LEVELS = ("debug", "info", "warning", "error")
@@ -330,6 +333,8 @@ def validate(config: dict[str, Any]) -> None:
         "smell_max_branches",
         "smell_min_public_methods",
         "smell_max_comment_block_lines",
+        "smell_data_class_min_attributes",
+        "smell_speculative_generality_min_hits",
     )
     for key in smell_keys:
         value = config.get(key)
@@ -340,6 +345,13 @@ def validate(config: dict[str, Any]) -> None:
     if not isinstance(comment_ratio, (int, float)) or comment_ratio <= 0:
         raise ValueError(
             f"smell_max_comment_ratio must be a positive number; got {comment_ratio!r}"
+        )
+
+    middle_man_avg_sloc = config.get("smell_middle_man_max_avg_method_sloc")
+    if not isinstance(middle_man_avg_sloc, (int, float)) or middle_man_avg_sloc <= 0:
+        raise ValueError(
+            "smell_middle_man_max_avg_method_sloc must be a positive number; "
+            f"got {middle_man_avg_sloc!r}"
         )
 
 
