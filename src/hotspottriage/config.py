@@ -68,6 +68,32 @@ DEFAULTS: dict[str, Any] = {
     "smell_data_class_min_attributes": 8,
     "smell_middle_man_max_avg_method_sloc": 2.0,
     "smell_speculative_generality_min_hits": 1,
+    # Smell severity (0–1) for weighted burden: rule id → weight (overrides category).
+    "smell_default_weight": 0.4,
+    "smell_category_weights": {
+        "F": 1.0,
+        "E": 0.85,
+        "W": 0.6,
+        "R": 0.45,
+        "C": 0.2,
+    },
+    "smell_rule_weights": {
+        "duplicate_code": 0.8,
+        "switch_statements": 0.75,
+        "long_method": 0.7,
+        "too_many_statements": 0.7,
+        "long_parameter_list": 0.6,
+        "too_many_locals": 0.55,
+        "large_class": 0.75,
+        "dead_code": 0.65,
+        "lazy_class": 0.45,
+        "unused_parameters": 0.55,
+        "data_class": 0.45,
+        "middle_man": 0.5,
+        "speculative_generality": 0.55,
+        "excessive_comments": 0.25,
+        "large_comment_block": 0.3,
+    },
     # null = auto (TTY stderr), true/false = force on/off
     "progress": None,
     # DeepCSIM pairwise similarity for block runs (ignored for file granularity).
@@ -341,6 +367,41 @@ def validate(config: dict[str, Any]) -> None:
             f"smell_weight must be a non-negative number; got {smell_weight!r}"
         )
 
+    smell_default = config.get("smell_default_weight")
+    if not isinstance(smell_default, (int, float)) or not (0.0 <= float(smell_default) <= 1.0):
+        raise ValueError(
+            "smell_default_weight must be a number in [0.0, 1.0]; "
+            f"got {smell_default!r}"
+        )
+
+    scw = config.get("smell_category_weights")
+    if not isinstance(scw, dict) or not scw:
+        raise ValueError("smell_category_weights must be a non-empty dict")
+    allowed_cat = frozenset("FEWRC")
+    for key, val in scw.items():
+        if not isinstance(key, str) or len(key) != 1 or key.upper() not in allowed_cat:
+            raise ValueError(
+                "smell_category_weights keys must be a single letter in F, E, W, R, C; "
+                f"got {key!r}"
+            )
+        if not isinstance(val, (int, float)) or not (0.0 <= float(val) <= 1.0):
+            raise ValueError(
+                f"smell_category_weights[{key!r}] must be a number in [0.0, 1.0]; got {val!r}"
+            )
+
+    srw = config.get("smell_rule_weights")
+    if not isinstance(srw, dict):
+        raise ValueError(
+            f"smell_rule_weights must be a dict; got {type(srw).__name__}: {srw!r}"
+        )
+    for key, val in srw.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError(f"smell_rule_weights keys must be non-empty strings; got {key!r}")
+        if not isinstance(val, (int, float)) or not (0.0 <= float(val) <= 1.0):
+            raise ValueError(
+                f"smell_rule_weights[{key!r}] must be a number in [0.0, 1.0]; got {val!r}"
+            )
+
     smell_keys = (
         "smell_max_statements",
         "smell_max_attributes",
@@ -483,6 +544,12 @@ decay_half_life: 2592000
 # Score factor contribution: 1 + (smell_weight * smell_count)
 # Keep 0.0 for neutral behavior (legacy-compatible scoring).
 smell_weight: 0.0
+
+# Smell severity (0–1) per finding: rule id in smell_rule_weights, else Pylint
+# category letter (F/E/W/R/C) via smell_category_weights, else smell_default_weight.
+# smell_default_weight: 0.4
+# smell_category_weights: {F: 1.0, E: 0.85, W: 0.6, R: 0.45, C: 0.2}
+# smell_rule_weights: {long_method: 0.7, dead_code: 0.65, ...}
 
 # Show Rich progress on stderr during analysis. null = auto (TTY only).
 progress: null

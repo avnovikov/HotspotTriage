@@ -523,6 +523,7 @@ def _initialize_repository(target: str, cfg: dict[str, Any]) -> dict[str, Any]:
             workers=cfg.get("block_workers"),
             decay_half_life=cfg.get("decay_half_life"),
             smell_weight=float(cfg.get("smell_weight", 0.0)),
+            merged_config=cfg,
             **stats.block_similarity_kwargs_from_config(cfg),
         )
 
@@ -581,6 +582,7 @@ def _analyze_repository(target: str, cfg: dict[str, Any]) -> list[stats.Statisti
                 workers=cfg.get("block_workers"),
                 decay_half_life=decay_half_life,
                 smell_weight=smell_weight,
+                merged_config=cfg,
                 **stats.block_similarity_kwargs_from_config(cfg),
             )
         else:
@@ -594,6 +596,7 @@ def _analyze_repository(target: str, cfg: dict[str, Any]) -> list[stats.Statisti
                 score_metrics,
                 decay_half_life=decay_half_life,
                 smell_weight=smell_weight,
+                merged_config=cfg,
             )
             if cfg["directories"]:
                 results = stats.aggregate_by_directory(

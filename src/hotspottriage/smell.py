@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 import subprocess
 import token
 import tokenize
@@ -97,6 +98,7 @@ def _compute_pylint_smells(path: Path, raw_pylint: list[dict[str, Any]]) -> list
             "line": int(item.get("line") or 0),
             "smell": smell,
             "message": str(item.get("message", "")),
+            "pylint_code": code,
         }
         if code in _CLASS_SCOPED_PYLINT_CODES:
             sym = str(item.get("obj", "")).strip()
@@ -303,6 +305,46 @@ def finding_applies_to_block(finding: dict[str, Any], block: _blocks.Block) -> b
     return block.start <= line <= block.end
 
 
+def smell_resolution_cfg(merged_config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Slice of merged config used by :func:`compute_smells` for severity weights."""
+    src = merged_config if merged_config is not None else _config.DEFAULTS
+    base_rw = _config.DEFAULTS["smell_rule_weights"]
+    base_cw = _config.DEFAULTS["smell_category_weights"]
+    rw = src.get("smell_rule_weights")
+    cw = src.get("smell_category_weights")
+    return {
+        "smell_rule_weights": deepcopy(rw) if isinstance(rw, dict) else deepcopy(base_rw),
+        "smell_category_weights": deepcopy(cw) if isinstance(cw, dict) else deepcopy(base_cw),
+        "smell_default_weight": float(
+            src.get("smell_default_weight", _config.DEFAULTS["smell_default_weight"])
+        ),
+    }
+
+
+def resolve_smell_severity(finding: dict[str, Any], res_cfg: dict[str, Any]) -> float:
+    """Return severity in ``[0.0, 1.0]`` using rule → category → default order."""
+    rules: dict[str, Any] = res_cfg.get("smell_rule_weights") or {}
+    cats: dict[str, Any] = res_cfg.get("smell_category_weights") or {}
+    default = float(res_cfg.get("smell_default_weight", 0.4))
+
+    smell_id = str(finding.get("smell") or "").strip()
+    if smell_id and smell_id in rules:
+        return max(0.0, min(1.0, float(rules[smell_id])))
+
+    code = finding.get("pylint_code")
+    if isinstance(code, str) and code:
+        ch = code[0].upper()
+        if ch in cats:
+            return max(0.0, min(1.0, float(cats[ch])))
+
+    return max(0.0, min(1.0, default))
+
+
+def _attach_severities(findings: list[dict[str, Any]], res_cfg: dict[str, Any]) -> None:
+    for item in findings:
+        item["severity"] = resolve_smell_severity(item, res_cfg)
+
+
 def summarize_smells(findings: Iterable[dict[str, Any]]) -> dict[str, int]:
     """Roll up raw findings by normalized smell id (e.g. ``long_method``, ``dead_code``).
 
@@ -315,7 +357,9 @@ def summarize_smells(findings: Iterable[dict[str, Any]]) -> dict[str, int]:
     return out
 
 
-def compute_smells(path: Path) -> list[dict[str, Any]]:
+def compute_smells(
+    path: Path, merged_config: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
     """Return normalized smell findings for one Python file.
 
     Output shape (one dict per occurrence; ``summarize_smells`` counts by ``smell`` id):
@@ -323,6 +367,8 @@ def compute_smells(path: Path) -> list[dict[str, Any]]:
     - line: 1-indexed line number
     - smell: normalized smell family
     - message: human-readable finding message
+    - severity: float in ``[0.0, 1.0]`` from rule / Pylint category / default weights
+    - pylint_code: optional Pylint ``message-id`` (e.g. ``R0913``) for category fallback
     - scope: optional ``{"kind": "class", "symbol": qualname}`` for class-attributed
       findings (used by ``finding_applies_to_block`` so block rows stay aligned)
     """
@@ -332,4 +378,6 @@ def compute_smells(path: Path) -> list[dict[str, Any]]:
     out = _compute_pylint_smells(path, raw_pylint)
     out.extend(_compute_approximate_smells(path, src, raw_pylint, thresholds))
     out.extend(_compute_comment_smells(path, thresholds))
+    res_cfg = smell_resolution_cfg(merged_config)
+    _attach_severities(out, res_cfg)
     return out

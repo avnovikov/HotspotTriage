@@ -299,6 +299,15 @@ def test_validate_allows_similarity_enabled_with_file_granularity():
     _config.validate(cfg)
 
 
+def test_validate_rejects_smell_rule_weight_out_of_range():
+    cfg = {
+        **_config.DEFAULTS,
+        "smell_rule_weights": {**_config.DEFAULTS["smell_rule_weights"], "x": 1.5},
+    }
+    with pytest.raises(ValueError, match="smell_rule_weights"):
+        _config.validate(cfg)
+
+
 def test_validate_rejects_similarity_score_metric_without_block():
     cfg = {
         **_config.DEFAULTS,
