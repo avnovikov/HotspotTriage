@@ -19,6 +19,7 @@ this flag" from "user did not pass it".
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -189,6 +190,14 @@ DEFAULTS: dict[str, Any] = {
         },
         "band_edges": [0.30, 0.60, 0.80],
         "band_names": ["low", "medium", "high", "critical"],
+    },
+    # MCP web dashboard (see dashboard/server.py); overridden by hotspottriage-mcp flags.
+    "dashboard": {
+        "enabled": True,
+        "host": "127.0.0.1",
+        "base_port": 9123,
+        "open_on_start": False,
+        "max_log_records": 1000,
     },
 }
 
@@ -564,11 +573,89 @@ def validate(config: dict[str, Any]) -> None:
             f"similarity_aggregate_row must be a boolean; got {type(sar).__name__}: {sar!r}"
         )
 
+    _validate_dashboard_section(config)
+
     _normalize.validate_metric_normalization(config)
 
     from hotspottriage import score as _score_validation
 
     _score_validation.validate_score_aggregation(config)
+
+
+def _validate_dashboard_section(config: dict[str, Any]) -> None:
+    d = config.get("dashboard")
+    if not isinstance(d, dict):
+        raise ValueError(
+            f"dashboard must be a dict; got {type(d).__name__}: {d!r}"
+        )
+    if not isinstance(d.get("enabled"), bool):
+        raise ValueError(
+            "dashboard.enabled must be a boolean "
+            f"(got {type(d.get('enabled')).__name__}: {d.get('enabled')!r})"
+        )
+    host = d.get("host")
+    if not isinstance(host, str) or not host.strip():
+        raise ValueError(f"dashboard.host must be a non-empty string; got {host!r}")
+    bp = d.get("base_port")
+    if not isinstance(bp, int) or not (1 <= bp <= 65535):
+        raise ValueError(
+            f"dashboard.base_port must be an int in [1, 65535]; got {bp!r}"
+        )
+    if not isinstance(d.get("open_on_start"), bool):
+        raise ValueError(
+            "dashboard.open_on_start must be a boolean "
+            f"(got {type(d.get('open_on_start')).__name__}: {d.get('open_on_start')!r})"
+        )
+    ml = d.get("max_log_records")
+    if not isinstance(ml, int) or ml < 1:
+        raise ValueError(
+            f"dashboard.max_log_records must be a positive int; got {ml!r}"
+        )
+
+
+def apply_mcp_dashboard_cli_overrides(
+    config: dict[str, Any],
+    *,
+    no_dashboard: bool = False,
+    dashboard_port: int | None = None,
+    dashboard_host: str | None = None,
+    open_browser: bool = False,
+) -> dict[str, Any]:
+    """Return a copy of ``config`` with MCP ``hotspottriage-mcp`` dashboard flags applied."""
+    out = deepcopy(config)
+    dash = dict(out.get("dashboard") or deepcopy(DEFAULTS["dashboard"]))
+    if no_dashboard:
+        dash["enabled"] = False
+    if dashboard_port is not None:
+        dash["base_port"] = int(dashboard_port)
+    if dashboard_host is not None:
+        h = str(dashboard_host).strip()
+        if not h:
+            raise ValueError("dashboard_host must be a non-empty string")
+        dash["host"] = h
+    if open_browser:
+        dash["open_on_start"] = True
+    out["dashboard"] = dash
+    return out
+
+
+def to_dashboard_snapshot(
+    merged_config: dict[str, Any],
+    *,
+    project_path: str | None = None,
+) -> dict[str, Any]:
+    """JSON-serializable overview for the web dashboard ``/api/config`` endpoint."""
+    return {
+        "version": importlib.metadata.version("hotspottriage"),
+        "project": {"path": project_path},
+        "granularity": merged_config.get("granularity"),
+        "score_metrics": list(merged_config.get("score_metrics") or []),
+        "score_aggregation": deepcopy(merged_config.get("score_aggregation")),
+        "metric_normalization": deepcopy(merged_config.get("metric_normalization")),
+        "similarity_enabled": merged_config.get("similarity_enabled"),
+        "decay_half_life": merged_config.get("decay_half_life"),
+        "dashboard": deepcopy(merged_config.get("dashboard") or {}),
+    }
 
 
 # --- Template generation (`init` subcommand) -----------------------------
