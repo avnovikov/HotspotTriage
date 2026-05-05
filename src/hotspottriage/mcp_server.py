@@ -20,7 +20,7 @@ from hotspottriage import cache_generator as _cache_gen
 from hotspottriage import config as _config
 from hotspottriage import blocks as _blocks
 from hotspottriage import smell as _smell
-from hotspottriage import discovery, filtering, output, stats
+from hotspottriage import discovery, filtering, output as _output, stats
 
 logger = logging.getLogger(__name__)
 mcp = FastMCP("hotspottriage")
@@ -80,7 +80,7 @@ def analyze_with_cache(
         cache_info = _initialize_repository(target, cfg)
 
         # Format results with cache metadata
-        results_list = [r.as_dict() for r in results]
+        results_list = [_output.statistic_to_output_dict(r, cfg) for r in results]
         response = {
             "results": results_list,
             "cache": cache_info,
@@ -195,8 +195,8 @@ def analyze(
         # Run analysis
         results = _analyze_repository(target, cfg)
 
-        # Format results
-        results_list = [r.as_dict() for r in results]
+        # Format results (includes norm_* when metric_normalization is configured)
+        results_list = [_output.statistic_to_output_dict(r, cfg) for r in results]
         return json.dumps(results_list, indent=2)
 
     except Exception as e:

@@ -325,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
             results = stats.sort_and_limit(
                 results, by=cfg["sort"], limit=cfg["limit"]
             )
-            print(output.render(results, cfg["format"]))
+            print(output.render(results, cfg["format"], cfg))
         return 0
     except (NotADirectoryError, RuntimeError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
