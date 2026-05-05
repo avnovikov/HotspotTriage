@@ -19,6 +19,7 @@ FORMATS: tuple[Format, ...] = ("table", "json", "csv")
 HEADERS: tuple[str, ...] = (
     "path",
     "sloc",
+    "normalized_sloc",
     "cyclomatic",
     "halstead",
     "maintainability",
@@ -34,6 +35,7 @@ def _row(s: Statistic) -> tuple:
     return (
         s.path,
         s.sloc,
+        s.normalized_sloc,
         s.cyclomatic,
         s.halstead,
         s.maintainability,
@@ -71,6 +73,7 @@ def render_csv(stats: Iterable[Statistic]) -> str:
             (
                 s.path,
                 s.sloc,
+                _fmt_float(s.normalized_sloc),
                 s.cyclomatic,
                 s.halstead,
                 s.maintainability,

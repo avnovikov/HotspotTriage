@@ -1,19 +1,22 @@
 from pathlib import Path
+from statistics import mean
 
 import pytest
 
 from hotspottriage.stats import (
     Statistic,
     aggregate_by_directory,
+    build_block_stats,
     build_stats,
     sort_and_limit,
 )
+from tests.fixtures.build_block_repo import build_block_repo
 from tests.fixtures.build_repo import build_repo
 
 
 def _stat(path: str, **overrides) -> Statistic:
     base = dict(
-        sloc=0, cyclomatic=0, halstead=0, maintainability=0,
+        sloc=0, normalized_sloc=0.0, cyclomatic=0, halstead=0, maintainability=0,
         churn=0, churn_per_sloc=0.0, decayed_churn=0.0, decayed_churn_per_sloc=0.0,
         score=0.0,
     )
@@ -92,6 +95,17 @@ def test_limit_applies_after_sort():
 def test_unknown_sort_raises():
     with pytest.raises(ValueError, match="unknown sort key"):
         sort_and_limit([], by="bogus")
+
+
+def test_block_stats_sets_normalized_sloc_zscore(tmp_path: Path):
+    repo = build_block_repo(tmp_path / "r")
+    stats = build_block_stats(repo, ["mod.py"], score_metrics=["cyclomatic"])
+    assert stats
+    normalized = [s.normalized_sloc for s in stats]
+    # Z-score normalization is centered around zero.
+    assert mean(normalized) == pytest.approx(0.0, abs=1e-9)
+    # With varied block sizes in fixture, at least one row should be non-zero.
+    assert any(abs(v) > 0 for v in normalized)
 
 
 def test_decay_reduces_churn_over_time():
