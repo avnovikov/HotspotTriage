@@ -12,6 +12,7 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Callable
 
 from hotspottriage.cache import Cache, cache_path_for
 
@@ -83,6 +84,7 @@ def compute_many(
     until: str | None,
     cache: Cache,
     workers: int | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[tuple[str, int, int], int]:
     """Compute churn for many blocks in parallel, cached by blob SHA."""
     workers = workers or min(16, (os.cpu_count() or 4) * 2)
@@ -106,9 +108,16 @@ def compute_many(
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = [ex.submit(task, *p) for p in pending]
+        done = 0
+        total = len(futures)
+        if on_progress:
+            on_progress(done, total)
         for fut in as_completed(futures):
             file_path, blob_sha, start, end, value = fut.result()
             results[(file_path, start, end)] = value
             cache.put(Cache.make_key(blob_sha, start, end, since, until), value)
+            done += 1
+            if on_progress:
+                on_progress(done, total)
 
     return results

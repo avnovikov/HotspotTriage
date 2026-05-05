@@ -337,6 +337,12 @@ def test_validate_rejects_invalid_middle_man_sloc_threshold():
         _config.validate(cfg)
 
 
+def test_validate_rejects_negative_smell_weight():
+    cfg = {**_config.DEFAULTS, "smell_weight": -0.1}
+    with pytest.raises(ValueError, match="smell_weight must be a non-negative number"):
+        _config.validate(cfg)
+
+
 def test_validate_rejects_block_directories_combo():
     cfg = {**_config.DEFAULTS, "granularity": "block", "directories": True}
     with pytest.raises(ValueError, match="cannot be combined"):

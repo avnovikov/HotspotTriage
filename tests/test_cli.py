@@ -12,7 +12,8 @@ from tests.fixtures.build_block_repo import build_block_repo
 
 METRIC_COLS = (
     "sloc", "normalized_sloc", "cyclomatic", "halstead", "maintainability",
-    "churn", "churn_per_sloc", "decayed_churn", "decayed_churn_per_sloc", "score",
+    "churn", "churn_per_sloc", "decayed_churn", "decayed_churn_per_sloc",
+    "smell_count", "smells", "score",
 )
 
 
@@ -79,9 +80,28 @@ def test_cli_csv_has_all_metric_headers(tmp_path: Path):
         # Int columns.
         for col in ("sloc", "cyclomatic", "halstead", "maintainability", "churn"):
             int(row[col])
+        int(row["smell_count"])
+        assert isinstance(json.loads(row["smells"]), dict)
         # Float columns.
         for col in ("normalized_sloc", "churn_per_sloc", "decayed_churn", "decayed_churn_per_sloc", "score"):
             float(row[col])
+
+
+def test_cli_blocks_shorthand_runs_block_granularity(tmp_path: Path):
+    repo = build_block_repo(tmp_path / "block_r")
+    r = _run([str(repo), "--blocks", "-f", "json"])
+    assert r.returncode == 0, r.stderr
+    rows = json.loads(r.stdout)
+    paths = [row["path"] for row in rows]
+    assert all("::" in p for p in paths)
+    assert any(p.startswith("mod.py::") for p in paths)
+
+
+def test_cli_blocks_conflicts_with_granularity_file(tmp_path: Path):
+    repo = build_repo(tmp_path / "r")
+    r = _run([str(repo), "--blocks", "--granularity", "file", "-f", "json"])
+    assert r.returncode == 1
+    assert "cannot combine" in r.stderr
 
 
 def test_cli_directories_aggregates(tmp_path: Path):

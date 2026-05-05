@@ -10,6 +10,7 @@ size, so a small, frequently-rewritten file outranks a big, rarely-touched one.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from math import prod
 from pathlib import Path, PurePosixPath
@@ -30,6 +31,7 @@ SCORE_METRICS: tuple[str, ...] = (
     "churn_per_sloc",
     "decayed_churn",
     "decayed_churn_per_sloc",
+    "smell_count",
 )
 
 
@@ -45,6 +47,8 @@ class Statistic:
     churn_per_sloc: float
     decayed_churn: float
     decayed_churn_per_sloc: float
+    smell_count: int
+    smells: dict[str, dict[str, int]]
     score: float
 
     def as_dict(self) -> dict:
@@ -58,8 +62,17 @@ def _ratio(churn: int, sloc: int) -> float:
     return churn / sloc if sloc > 0 else 0.0
 
 
-def _score(metrics: dict[str, float], score_metrics: Iterable[str]) -> float:
-    return float(prod(metrics[m] for m in score_metrics))
+def _score(
+    metrics: dict[str, float], score_metrics: Iterable[str], *, smell_weight: float = 0.0
+) -> float:
+    factors: list[float] = []
+    for metric in score_metrics:
+        if metric == "smell_count":
+            # Weighted so weight=0 is neutral (factor=1.0), preserving legacy scores.
+            factors.append(1.0 + (smell_weight * metrics["smell_count"]))
+        else:
+            factors.append(metrics[metric])
+    return float(prod(factors))
 
 
 def _normalize_sloc(values: list[int]) -> list[float]:
@@ -106,21 +119,30 @@ def build_stats(
     churn: dict[str, int],
     score_metrics: Iterable[str],
     decay_half_life: int | None = None,
+    smell_weight: float = 0.0,
+    progress_callback: Callable[[str, int, int], None] | None = None,
 ) -> list[Statistic]:
     from hotspottriage import churn as _churn
+    from hotspottriage import smell as _smell
     from datetime import datetime
     
     sm = list(score_metrics)
     files_list = list(files)
+    total_files = len(files_list)
+    if progress_callback:
+        progress_callback("Analyzing files", 0, total_files)
     
     current_time = int(datetime.now().timestamp())
     timestamps = _churn.get_file_timestamps(repo, files_list)
     
     out: list[Statistic] = []
-    for rel in files_list:
+    for idx, rel in enumerate(files_list, start=1):
+        raw_smells = _smell.compute_smells(repo / rel)
+        smell_summary = _smell.summarize_smells(raw_smells)
         m: dict[str, float] = dict(_complexity.compute_all(repo / rel))
         m["churn"] = churn.get(rel, 0)
         m["churn_per_sloc"] = _ratio(int(m["churn"]), int(m["sloc"]))
+        m["smell_count"] = float(len(raw_smells))
         
         age_seconds = current_time - timestamps.get(rel, current_time)
         m["decayed_churn"] = (
@@ -144,9 +166,13 @@ def build_stats(
                 churn_per_sloc=m["churn_per_sloc"],
                 decayed_churn=m["decayed_churn"],
                 decayed_churn_per_sloc=m["decayed_churn_per_sloc"],
-                score=_score(m, sm),
+                smell_count=int(m["smell_count"]),
+                smells=smell_summary,
+                score=_score(m, sm, smell_weight=smell_weight),
             )
         )
+        if progress_callback:
+            progress_callback(rel, idx, total_files)
     return out
 
 
@@ -158,17 +184,21 @@ def build_block_stats(
     until: str | None = None,
     workers: int | None = None,
     decay_half_life: int | None = None,
+    smell_weight: float = 0.0,
+    progress_callback: Callable[[str, int, int], None] | None = None,
 ) -> list[Statistic]:
     """One Statistic per function/method (no class rows). Maintainability is
     inherited from the file. Churn is computed via `git log -L` per block,
     cached on disk by file blob SHA."""
     from hotspottriage import churn as _churn
+    from hotspottriage import smell as _smell
     from datetime import datetime
     
     sm = list(score_metrics)
     files = list(files)
-
     blob_shas = _block_churn.file_blob_shas(repo)
+    scan_total = sum(1 for f in files if f in blob_shas)
+    scan_done = 0
     cache = _cache.Cache(repo)
     
     current_time = int(datetime.now().timestamp())
@@ -178,6 +208,7 @@ def build_block_stats(
     file_metrics: dict[str, dict[str, int]] = {}
     file_blocks: dict[str, list[_blocks.Block]] = {}
     file_sources: dict[str, str] = {}
+    file_smells: dict[str, list[dict]] = {}
     requests: list[tuple[str, str, int, int]] = []
     for rel in files:
         if rel not in blob_shas:
@@ -188,14 +219,28 @@ def build_block_stats(
             continue
         file_sources[rel] = src
         file_metrics[rel] = _complexity.compute_all(repo / rel)
+        file_smells[rel] = _smell.compute_smells(repo / rel)
         bs = _blocks.extract_blocks(src)
         file_blocks[rel] = bs
         for b in bs:
             requests.append((rel, blob_shas[rel], b.start, b.end))
+        scan_done += 1
+        if progress_callback:
+            progress_callback(f"Scanning {rel}", scan_done, scan_total)
 
     # Pass 2: parallel git log -L for all blocks (cached).
+    def _churn_progress(done: int, total: int) -> None:
+        if progress_callback:
+            progress_callback("Block churn (git log -L)", done, total)
+
     churns = _block_churn.compute_many(
-        repo, requests, since, until, cache, workers=workers
+        repo,
+        requests,
+        since,
+        until,
+        cache,
+        workers=workers,
+        on_progress=_churn_progress if progress_callback else None,
     )
     cache.save()
 
@@ -222,26 +267,41 @@ def build_block_stats(
             m["decayed_churn_per_sloc"] = _ratio(
                 int(m["decayed_churn"]), int(m["sloc"])
             )
+            block_raw = [
+                s
+                for s in file_smells.get(rel, [])
+                if _smell.finding_applies_to_block(s, b)
+            ]
+            block_summary = _smell.summarize_smells(block_raw)
+            m["smell_count"] = float(len(block_raw))
+            m["smells"] = block_summary
             rows.append((rel, b, m))
 
     normalized_slocs = _normalize_sloc([int(m["sloc"]) for _, _, m in rows])
     out: list[Statistic] = []
-    for (rel, b, m), normalized_sloc in zip(rows, normalized_slocs):
+    total_rows = len(rows)
+    if progress_callback:
+        progress_callback("Building block rows", 0, total_rows)
+    for i, ((rel, b, m), normalized_sloc) in enumerate(zip(rows, normalized_slocs), start=1):
         out.append(
-                Statistic(
-                    path=f"{rel}::{b.name}",
-                    sloc=int(m["sloc"]),
-                    normalized_sloc=normalized_sloc,
-                    cyclomatic=int(m["cyclomatic"]),
-                    halstead=int(m["halstead"]),
-                    maintainability=int(m["maintainability"]),
-                    churn=int(m["churn"]),
-                    churn_per_sloc=m["churn_per_sloc"],
-                    decayed_churn=m["decayed_churn"],
-                    decayed_churn_per_sloc=m["decayed_churn_per_sloc"],
-                    score=_score(m, sm),
-                )
+            Statistic(
+                path=f"{rel}::{b.name}",
+                sloc=int(m["sloc"]),
+                normalized_sloc=normalized_sloc,
+                cyclomatic=int(m["cyclomatic"]),
+                halstead=int(m["halstead"]),
+                maintainability=int(m["maintainability"]),
+                churn=int(m["churn"]),
+                churn_per_sloc=m["churn_per_sloc"],
+                decayed_churn=m["decayed_churn"],
+                decayed_churn_per_sloc=m["decayed_churn_per_sloc"],
+                smell_count=int(m["smell_count"]),
+                smells=m["smells"],
+                score=_score(m, sm, smell_weight=smell_weight),
             )
+        )
+        if progress_callback:
+            progress_callback(f"{rel}::{b.name}", i, total_rows)
     return out
 
 
@@ -251,14 +311,25 @@ def _ancestors(path: str) -> list[str]:
 
 
 def aggregate_by_directory(
-    stats: list[Statistic], score_metrics: Iterable[str]
+    stats: list[Statistic],
+    score_metrics: Iterable[str],
+    *,
+    smell_weight: float = 0.0,
 ) -> list[Statistic]:
     """For each ancestor directory, sum every additive metric across descendants
     and recompute `churn_per_sloc` and `decayed_churn_per_sloc` from the *summed* 
     totals (not an average of per-file ratios), then recompute the score."""
     sm = list(score_metrics)
     sums: dict[str, dict[str, int | float]] = {}
-    additive = ("sloc", "cyclomatic", "halstead", "maintainability", "churn", "decayed_churn")
+    additive = (
+        "sloc",
+        "cyclomatic",
+        "halstead",
+        "maintainability",
+        "churn",
+        "decayed_churn",
+        "smell_count",
+    )
     for s in stats:
         for d in _ancestors(s.path):
             entry = sums.setdefault(d, {k: 0 for k in additive})
@@ -273,6 +344,7 @@ def aggregate_by_directory(
             **m,
             "churn_per_sloc": cps,
             "decayed_churn_per_sloc": dcps,
+            "smell_count": m["smell_count"],
         }
         out.append(
             Statistic(
@@ -286,7 +358,9 @@ def aggregate_by_directory(
                 churn_per_sloc=cps,
                 decayed_churn=m["decayed_churn"],
                 decayed_churn_per_sloc=dcps,
-                score=_score(full, sm),
+                smell_count=int(m["smell_count"]),
+                smells={},
+                score=_score(full, sm, smell_weight=smell_weight),
             )
         )
     return out

@@ -12,7 +12,7 @@ import token
 import tokenize
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from radon.raw import analyze as raw_analyze
 
@@ -31,6 +31,9 @@ PYLINT_CODES: tuple[str, ...] = (
     "W0611",  # unused-import
     "W0612",  # unused-variable
 )
+
+# Pylint codes whose primary location is the class line; map to blocks via `scope`.
+_CLASS_SCOPED_PYLINT_CODES: frozenset[str] = frozenset({"R0902", "R0903", "R0904"})
 
 SMELL_BY_CODE: dict[str, str] = {
     "R0915": "long_method",
@@ -89,14 +92,17 @@ def _compute_pylint_smells(path: Path, raw_pylint: list[dict[str, Any]]) -> list
         smell = SMELL_BY_CODE.get(code)
         if smell is None:
             continue
-        out.append(
-            {
-                "file": str(item.get("path", path)),
-                "line": int(item.get("line") or 0),
-                "smell": smell,
-                "message": str(item.get("message", "")),
-            }
-        )
+        rec: dict[str, Any] = {
+            "file": str(item.get("path", path)),
+            "line": int(item.get("line") or 0),
+            "smell": smell,
+            "message": str(item.get("message", "")),
+        }
+        if code in _CLASS_SCOPED_PYLINT_CODES:
+            sym = str(item.get("obj", "")).strip()
+            if sym:
+                rec["scope"] = {"kind": "class", "symbol": sym}
+        out.append(rec)
     return out
 
 
@@ -167,6 +173,7 @@ def _compute_approximate_smells(
                         f"attributes (threshold: {min_attrs})"
                     ),
                     "confidence": "approximate",
+                    "scope": {"kind": "class", "symbol": class_name},
                 }
             )
 
@@ -186,6 +193,7 @@ def _compute_approximate_smells(
                         f"SLOC {avg_sloc:.2f} (threshold: {max_avg_sloc:.2f})"
                     ),
                     "confidence": "approximate",
+                    "scope": {"kind": "class", "symbol": class_name},
                 }
             )
 
@@ -278,14 +286,57 @@ def _compute_comment_smells(path: Path, thresholds: dict[str, int | float]) -> l
     return out
 
 
+def finding_applies_to_block(finding: dict[str, Any], block: _blocks.Block) -> bool:
+    """True if a raw finding should count toward ``block`` in block-level stats.
+
+    Most findings use Pylint's 1-based ``line`` within ``[block.start, block.end]``.
+    Class-scoped rows (``scope.kind == "class"``) use Pylint's class line, which is
+    often *outside* method bodies, so we match every method block under that class
+    name (``Foo.bar``, ``Foo.Inner.baz``, …).
+    """
+    scope = finding.get("scope")
+    if isinstance(scope, dict) and scope.get("kind") == "class":
+        sym = str(scope.get("symbol") or "").strip()
+        if sym:
+            return block.name == sym or block.name.startswith(f"{sym}.")
+    line = int(finding.get("line") or 0)
+    return block.start <= line <= block.end
+
+
+def smell_message_key(message: str) -> str:
+    """Normalize a smell message for deduplication: strip numeric literals, tidy spaces."""
+    stripped = re.sub(r"\d+(?:\.\d+)?", "", str(message))
+    collapsed = re.sub(r"\s+", " ", stripped).strip()
+    return collapsed if collapsed else "(no message)"
+
+
+def summarize_smells(
+    findings: Iterable[dict[str, Any]],
+) -> dict[str, dict[str, int]]:
+    """Roll up raw findings by smell type and message template (numbers removed).
+
+    Returns ``{ smell_type: { message_key: occurrence_count } }`` so one file or
+    block row does not repeat identical pylint phrasing with different counts.
+    """
+    out: dict[str, dict[str, int]] = {}
+    for item in findings:
+        smell_type = str(item.get("smell") or "unknown")
+        key = smell_message_key(str(item.get("message") or ""))
+        bucket = out.setdefault(smell_type, {})
+        bucket[key] = bucket.get(key, 0) + 1
+    return out
+
+
 def compute_smells(path: Path) -> list[dict[str, Any]]:
     """Return normalized smell findings for one Python file.
 
-    Output shape:
+    Output shape (one dict per occurrence; use ``summarize_smells`` for rollups):
     - file: file path as reported by Pylint
     - line: 1-indexed line number
     - smell: normalized smell family
     - message: human-readable finding message
+    - scope: optional ``{"kind": "class", "symbol": qualname}`` for class-attributed
+      findings (used by ``finding_applies_to_block`` so block rows stay aligned)
     """
     thresholds = _default_thresholds()
     src = path.read_text(encoding="utf-8", errors="replace")
