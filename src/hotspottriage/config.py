@@ -70,6 +70,14 @@ DEFAULTS: dict[str, Any] = {
     "smell_speculative_generality_min_hits": 1,
     # null = auto (TTY stderr), true/false = force on/off
     "progress": None,
+    # DeepCSIM pairwise similarity for block runs (ignored for file granularity).
+    "similarity_enabled": True,
+    "similarity_threshold": 80.0,
+    "similarity_band_high": 85.0,
+    "similarity_band_medium": 70.0,
+    "similarity_band_low": 50.0,
+    "similarity_max_pairwise_blocks": 2500,
+    "similarity_aggregate_row": True,
 }
 
 _VALID_LOG_LEVELS = ("debug", "info", "warning", "error")
@@ -368,6 +376,47 @@ def validate(config: dict[str, Any]) -> None:
             f"progress must be null or a boolean; got {type(progress).__name__}: {progress!r}"
         )
 
+    if "similarity_score" in score_metrics and config.get("granularity") != "block":
+        raise ValueError(
+            "score_metrics cannot include similarity_score unless granularity is block"
+        )
+
+    sim_en = config.get("similarity_enabled")
+    if not isinstance(sim_en, bool):
+        raise ValueError(
+            f"similarity_enabled must be a boolean; got {type(sim_en).__name__}: {sim_en!r}"
+        )
+    st = config.get("similarity_threshold")
+    if not isinstance(st, (int, float)) or not (0 < st <= 100):
+        raise ValueError(
+            f"similarity_threshold must be between 0 and 100 (exclusive 0); got {st!r}"
+        )
+    for key in (
+        "similarity_band_high",
+        "similarity_band_medium",
+        "similarity_band_low",
+    ):
+        v = config.get(key)
+        if not isinstance(v, (int, float)) or not (0 < v <= 100):
+            raise ValueError(f"{key} must be a number in (0, 100]; got {v!r}")
+    bh = float(config["similarity_band_high"])
+    bm = float(config["similarity_band_medium"])
+    bl = float(config["similarity_band_low"])
+    if not (bh >= bm >= bl):
+        raise ValueError(
+            "similarity_band_high >= similarity_band_medium >= similarity_band_low is required"
+        )
+    smb = config.get("similarity_max_pairwise_blocks")
+    if not isinstance(smb, int) or smb < 2:
+        raise ValueError(
+            f"similarity_max_pairwise_blocks must be an int >= 2; got {smb!r}"
+        )
+    sar = config.get("similarity_aggregate_row")
+    if not isinstance(sar, bool):
+        raise ValueError(
+            f"similarity_aggregate_row must be a boolean; got {type(sar).__name__}: {sar!r}"
+        )
+
 
 # --- Template generation (`init` subcommand) -----------------------------
 
@@ -437,6 +486,12 @@ smell_weight: 0.0
 
 # Show Rich progress on stderr during analysis. null = auto (TTY only).
 progress: null
+
+# DeepCSIM block similarity (block granularity only; no-op for file rows). Adds
+# similarity_score, similarity_band, match_count per block and an optional aggregate row.
+# similarity_enabled: true
+# similarity_threshold: 80.0
+# similarity_aggregate_row: true
 
 # Drop any tracked path under these POSIX prefixes (after normalisation).
 # Example: ['vendor', 'generated/proto']
