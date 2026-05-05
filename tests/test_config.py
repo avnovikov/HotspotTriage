@@ -329,6 +329,14 @@ def test_validate_rejects_invalid_comment_ratio_threshold():
         _config.validate(cfg)
 
 
+def test_validate_rejects_invalid_middle_man_sloc_threshold():
+    cfg = {**_config.DEFAULTS, "smell_middle_man_max_avg_method_sloc": 0}
+    with pytest.raises(
+        ValueError, match="smell_middle_man_max_avg_method_sloc must be a positive number"
+    ):
+        _config.validate(cfg)
+
+
 def test_validate_rejects_block_directories_combo():
     cfg = {**_config.DEFAULTS, "granularity": "block", "directories": True}
     with pytest.raises(ValueError, match="cannot be combined"):
