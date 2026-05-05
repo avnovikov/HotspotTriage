@@ -467,6 +467,7 @@ def _initialize_repository(target: str, cfg: dict[str, Any]) -> dict[str, Any]:
             repo, files, score_metrics,
             since=cfg["since"], until=cfg["until"],
             workers=cfg.get("block_workers"),
+            decay_half_life=cfg.get("decay_half_life"),
         )
 
         # Return cache info
@@ -514,17 +515,21 @@ def _analyze_repository(target: str, cfg: dict[str, Any]) -> list[stats.Statisti
         score_metrics = list(cfg["score_metrics"])
 
         # Compute metrics
+        decay_half_life = cfg.get("decay_half_life")
         if cfg["granularity"] == "block":
             results = stats.build_block_stats(
                 repo, files, score_metrics,
                 since=cfg["since"], until=cfg["until"],
                 workers=cfg.get("block_workers"),
+                decay_half_life=decay_half_life,
             )
         else:
             churn = _churn.compute_churn(
                 repo, since=cfg["since"], until=cfg["until"]
             )
-            results = stats.build_stats(repo, files, churn, score_metrics)
+            results = stats.build_stats(
+                repo, files, churn, score_metrics, decay_half_life=decay_half_life
+            )
             if cfg["directories"]:
                 results = stats.aggregate_by_directory(results, score_metrics)
 

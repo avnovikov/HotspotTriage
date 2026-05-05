@@ -36,3 +36,32 @@ def compute_churn(
         except ValueError:
             continue
     return counts
+
+
+def get_file_timestamps(
+    repo: Path,
+    files: list[str],
+) -> dict[str, int]:
+    """Get the Unix timestamp of the last commit touching each file.
+    
+    Args:
+        repo: Repository root path
+        files: List of file paths relative to repo
+    
+    Returns:
+        Dict mapping file paths to Unix timestamps of last commit
+    """
+    timestamps: dict[str, int] = {}
+    for file_path in files:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(repo), "log", "-1", "--format=%ct", "--", file_path],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                timestamps[file_path] = int(result.stdout.strip())
+        except (ValueError, OSError):
+            timestamps[file_path] = 0
+    return timestamps

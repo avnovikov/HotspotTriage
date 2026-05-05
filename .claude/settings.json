@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(git add *)",
-      "Bash(gh issue *)"
+      "Bash(git commit *)",
+      "Bash(gh api -X POST repos/avnovikov/HotspotTriage/pulls -f 'title=feat: add timestamp tracking to cache system \\(Issue #7\\)' -f head=feature/timestamp-cache -f base=main -f 'body=Implements cache timestamp tracking as specified in Issue #7. Enables detection of stale cache entries and calculation of deltas between cache versions. *)",
+      "mcp__plugin_serena_serena__activate_project",
+      "mcp__plugin_serena_serena__list_dir",
+      "mcp__plugin_serena_serena__replace_symbol_body",
+      "mcp__plugin_serena_serena__insert_after_symbol",
+      "mcp__plugin_serena_serena__replace_content",
+      "Bash(uv run *)"
     ]
   }
 }

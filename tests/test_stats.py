@@ -17,7 +17,8 @@ from tests.fixtures.build_repo import build_repo
 def _stat(path: str, **overrides) -> Statistic:
     base = dict(
         sloc=0, normalized_sloc=0.0, cyclomatic=0, halstead=0, maintainability=0,
-        churn=0, churn_per_sloc=0.0, score=0.0,
+        churn=0, churn_per_sloc=0.0, decayed_churn=0.0, decayed_churn_per_sloc=0.0,
+        score=0.0,
     )
     base.update(overrides)
     return Statistic(path=path, **base)
@@ -105,3 +106,29 @@ def test_block_stats_sets_normalized_sloc_zscore(tmp_path: Path):
     assert mean(normalized) == pytest.approx(0.0, abs=1e-9)
     # With varied block sizes in fixture, at least one row should be non-zero.
     assert any(abs(v) > 0 for v in normalized)
+
+
+def test_decay_reduces_churn_over_time():
+    from hotspottriage.stats import _decayed_value
+    
+    # Original value
+    original = 100.0
+    half_life = 2592000  # 30 days in seconds
+    
+    # At time 0 (just created), decay should be minimal
+    age_0 = 0
+    decayed_0 = _decayed_value(original, age_0, half_life)
+    assert decayed_0 == pytest.approx(100.0)
+    
+    # At half-life, value should be 50% of original
+    age_half_life = half_life
+    decayed_half = _decayed_value(original, age_half_life, half_life)
+    assert decayed_half == pytest.approx(50.0)
+    
+    # At double half-life, value should be 25% of original
+    age_double = half_life * 2
+    decayed_double = _decayed_value(original, age_double, half_life)
+    assert decayed_double == pytest.approx(25.0)
+    
+    # Decay should be monotonic: older = smaller value
+    assert decayed_0 > decayed_half > decayed_double

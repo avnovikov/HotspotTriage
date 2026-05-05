@@ -25,6 +25,8 @@ HEADERS: tuple[str, ...] = (
     "maintainability",
     "churn",
     "churn_per_sloc",
+    "decayed_churn",
+    "decayed_churn_per_sloc",
     "score",
 )
 
@@ -39,6 +41,8 @@ def _row(s: Statistic) -> tuple:
         s.maintainability,
         s.churn,
         s.churn_per_sloc,
+        s.decayed_churn,
+        s.decayed_churn_per_sloc,
         s.score,
     )
 
@@ -75,6 +79,8 @@ def render_csv(stats: Iterable[Statistic]) -> str:
                 s.maintainability,
                 s.churn,
                 _fmt_float(s.churn_per_sloc),
+                _fmt_float(s.decayed_churn),
+                _fmt_float(s.decayed_churn_per_sloc),
                 _fmt_float(s.score),
             )
         )
