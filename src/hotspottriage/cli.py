@@ -15,22 +15,32 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from hotspottriage import churn as _churn
 from hotspottriage import config as _config
-from hotspottriage import discovery, filtering, output, stats
+from hotspottriage import discovery, filtering, output, progress_report, stats
+
+
+def _want_progress(cfg: dict) -> bool:
+    explicit = cfg.get("progress")
+    if explicit is True:
+        return True
+    if explicit is False:
+        return False
+    return progress_report.stderr_progress_enabled()
 
 
 def _build_analyze_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="hotspottriage",
         description=(
-            "Rank Python files by a composite score. Computes sloc, cyclomatic, "
-            "halstead, maintainability and churn for every tracked .py file. "
+            "Rank Python code by a composite score. Default: one row per tracked "
+            ".py file (sloc, cyclomatic, halstead, maintainability, churn). "
+            "Use --blocks (or --granularity block) for one row per function/method. "
             "Score = product of the metrics passed to -s. "
-            "Use `hotspottriage init --global|--project` to scaffold a "
-            "config file."
+            "Use `hotspottriage init --global|--project` to scaffold a config file."
         ),
     )
     p.add_argument("target", help="path to a local git repo, or a remote git URL")
@@ -80,6 +90,16 @@ def _build_analyze_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "-B",
+        "--blocks",
+        action="store_true",
+        default=None,
+        help=(
+            "per-function/method statistics (same as --granularity block); "
+            "omit --granularity when using this shorthand"
+        ),
+    )
+    p.add_argument(
         "--ignore-dir",
         dest="ignore_dir",
         action="append",
@@ -110,6 +130,21 @@ def _build_analyze_parser() -> argparse.ArgumentParser:
         "--no-config",
         action="store_true",
         help="ignore all config files; use built-in defaults plus CLI flags only",
+    )
+    prog = p.add_mutually_exclusive_group()
+    prog.add_argument(
+        "--progress",
+        dest="progress",
+        action="store_true",
+        default=None,
+        help="show progress on stderr (overrides config; useful for long runs)",
+    )
+    prog.add_argument(
+        "--no-progress",
+        dest="no_progress",
+        action="store_true",
+        default=None,
+        help="disable progress output",
     )
     return p
 
@@ -173,6 +208,15 @@ def _resolve_config(args: argparse.Namespace, target_path: Path | None) -> dict:
             explicit=args.config,
         )
     merged = _config.apply_cli_overrides(merged, args)
+    if getattr(args, "progress", None):
+        merged["progress"] = True
+    if getattr(args, "no_progress", None):
+        merged["progress"] = False
+    if getattr(args, "blocks", None):
+        if getattr(args, "granularity", None) == "file":
+            raise ValueError("cannot combine --blocks with --granularity file")
+        if getattr(args, "granularity", None) is None:
+            merged["granularity"] = "block"
     _config.validate(merged)
     return merged
 
@@ -204,23 +248,53 @@ def main(argv: list[str] | None = None) -> int:
             score_metrics = list(cfg["score_metrics"])
 
             decay_half_life = cfg.get("decay_half_life")
+            smell_weight = float(cfg.get("smell_weight", 0.0))
             
-            if cfg["granularity"] == "block":
-                results = stats.build_block_stats(
-                    repo, files, score_metrics,
-                    since=cfg["since"], until=cfg["until"],
-                    workers=cfg["block_workers"],
-                    decay_half_life=decay_half_life,
-                )
-            else:
+            show_progress = _want_progress(cfg)
+            churn = None
+            if cfg["granularity"] != "block":
                 churn = _churn.compute_churn(
                     repo, since=cfg["since"], until=cfg["until"]
                 )
-                results = stats.build_stats(
-                    repo, files, churn, score_metrics, decay_half_life=decay_half_life
+
+            def _run_analysis(
+                progress_cb: Callable[[str, int, int], None] | None,
+            ) -> list[stats.Statistic]:
+                if cfg["granularity"] == "block":
+                    return stats.build_block_stats(
+                        repo,
+                        files,
+                        score_metrics,
+                        since=cfg["since"],
+                        until=cfg["until"],
+                        workers=cfg["block_workers"],
+                        decay_half_life=decay_half_life,
+                        smell_weight=smell_weight,
+                        progress_callback=progress_cb,
+                    )
+                assert churn is not None
+                built = stats.build_stats(
+                    repo,
+                    files,
+                    churn,
+                    score_metrics,
+                    decay_half_life=decay_half_life,
+                    smell_weight=smell_weight,
+                    progress_callback=progress_cb,
                 )
                 if cfg["directories"]:
-                    results = stats.aggregate_by_directory(results, score_metrics)
+                    return stats.aggregate_by_directory(
+                        built, score_metrics, smell_weight=smell_weight
+                    )
+                return built
+
+            if show_progress:
+                with progress_report.progress_runner(
+                    True, description="Analyzing repository…"
+                ) as cb:
+                    results = _run_analysis(cb)
+            else:
+                results = _run_analysis(None)
             results = stats.sort_and_limit(
                 results, by=cfg["sort"], limit=cfg["limit"]
             )

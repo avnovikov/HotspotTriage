@@ -19,6 +19,7 @@ from hotspottriage import cache as _cache
 from hotspottriage import cache_generator as _cache_gen
 from hotspottriage import config as _config
 from hotspottriage import blocks as _blocks
+from hotspottriage import smell as _smell
 from hotspottriage import discovery, filtering, output, stats
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,52 @@ def analyze_with_cache(
 
     except Exception as e:
         logger.exception("Cache-backed analysis failed")
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def get_code_smells(
+    target: str,
+    filter: str | None = None,
+    respect_gitignore: bool = True,
+    ignore_dir: str | None = None,
+) -> str:
+    """Return code-smell findings for tracked files in a repository.
+
+    Results are a flat list with keys:
+    - file
+    - line
+    - smell
+    - message
+    - confidence (optional; present for approximate smells)
+    - scope (optional; ``{"kind": "class", "symbol": qualname}`` for class-attributed rows)
+    """
+    try:
+        cfg = _config.DEFAULTS.copy()
+        if filter:
+            cfg["filter"] = [f.strip() for f in filter.split(",")]
+        cfg["respect_gitignore"] = respect_gitignore
+        if ignore_dir:
+            cfg["ignore_directories"] = [d.strip() for d in ignore_dir.split(",")]
+
+        with discovery.resolve_target(target) as repo:
+            patterns = list(cfg["filter"])
+            if not cfg["no_default_filter"]:
+                patterns.append(cfg["default_filter"])
+            glob_keep = filtering.make_filter(patterns)
+            keep = filtering.make_tracked_path_predicate(
+                repo,
+                glob_keep=glob_keep,
+                ignore_directories=cfg["ignore_directories"],
+                respect_gitignore=cfg["respect_gitignore"],
+            )
+            files = [f for f in discovery.list_tracked_files(repo) if keep(f)]
+            findings: list[dict[str, Any]] = []
+            for rel in files:
+                findings.extend(_smell.compute_smells(repo / rel))
+            return json.dumps(findings, indent=2)
+    except Exception as e:
+        logger.exception("Smell analysis failed")
         return json.dumps({"error": str(e)})
 
 
@@ -468,6 +515,7 @@ def _initialize_repository(target: str, cfg: dict[str, Any]) -> dict[str, Any]:
             since=cfg["since"], until=cfg["until"],
             workers=cfg.get("block_workers"),
             decay_half_life=cfg.get("decay_half_life"),
+            smell_weight=float(cfg.get("smell_weight", 0.0)),
         )
 
         # Return cache info
@@ -516,22 +564,31 @@ def _analyze_repository(target: str, cfg: dict[str, Any]) -> list[stats.Statisti
 
         # Compute metrics
         decay_half_life = cfg.get("decay_half_life")
+        smell_weight = float(cfg.get("smell_weight", 0.0))
         if cfg["granularity"] == "block":
             results = stats.build_block_stats(
                 repo, files, score_metrics,
                 since=cfg["since"], until=cfg["until"],
                 workers=cfg.get("block_workers"),
                 decay_half_life=decay_half_life,
+                smell_weight=smell_weight,
             )
         else:
             churn = _churn.compute_churn(
                 repo, since=cfg["since"], until=cfg["until"]
             )
             results = stats.build_stats(
-                repo, files, churn, score_metrics, decay_half_life=decay_half_life
+                repo,
+                files,
+                churn,
+                score_metrics,
+                decay_half_life=decay_half_life,
+                smell_weight=smell_weight,
             )
             if cfg["directories"]:
-                results = stats.aggregate_by_directory(results, score_metrics)
+                results = stats.aggregate_by_directory(
+                    results, score_metrics, smell_weight=smell_weight
+                )
 
         # Sort and limit
         results = stats.sort_and_limit(

@@ -269,3 +269,53 @@ def test_compute_smells_speculative_generality_positive_and_negative(
     )
     out_negative = smell.compute_smells(target)
     assert not any(f["smell"] == "speculative_generality" for f in out_negative)
+
+
+def test_finding_applies_to_block_line_range():
+    from hotspottriage.blocks import Block
+
+    finding = {"line": 15, "smell": "long_method"}
+    assert smell.finding_applies_to_block(finding, Block("foo", 10, 20))
+    assert not smell.finding_applies_to_block(finding, Block("foo", 1, 5))
+
+
+def test_finding_applies_to_block_class_scope_matches_methods_not_file_line():
+    """Class-line pylint rows must still attach to each method block under that class."""
+    from hotspottriage.blocks import Block
+
+    finding = {
+        "line": 3,
+        "smell": "data_class",
+        "scope": {"kind": "class", "symbol": "Foo"},
+    }
+    assert smell.finding_applies_to_block(finding, Block("Foo.bar", 10, 25))
+    assert smell.finding_applies_to_block(finding, Block("Foo.baz", 30, 40))
+    assert not smell.finding_applies_to_block(finding, Block("top", 1, 5))
+    assert smell.finding_applies_to_block(finding, Block("Foo.Inner.m", 50, 60))
+
+
+def test_finding_applies_to_block_class_scope_does_not_match_wrong_prefix():
+    from hotspottriage.blocks import Block
+
+    finding = {"line": 1, "smell": "x", "scope": {"kind": "class", "symbol": "Foo"}}
+    assert not smell.finding_applies_to_block(finding, Block("FooBar.spam", 2, 9))
+
+
+def test_smell_message_key_strips_numeric_literals():
+    raw = "Too many branches (15/12) in function foo"
+    key = smell.smell_message_key(raw)
+    assert "/" in key
+    assert not any(c.isdigit() for c in key)
+
+
+def test_summarize_smells_counts_by_type_and_template():
+    findings = [
+        {"smell": "long_method", "message": "Method has 51 statements (51/50)"},
+        {"smell": "long_method", "message": "Method has 60 statements (60/50)"},
+    ]
+    s = smell.summarize_smells(findings)
+    assert len(s["long_method"]) == 1
+    only_key = next(iter(s["long_method"]))
+    assert s["long_method"][only_key] == 2
+    assert not any(c.isdigit() for c in only_key)
+    assert "Method has" in only_key and "statements" in only_key

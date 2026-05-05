@@ -12,6 +12,10 @@ For each tracked Python file in a git repo, it computes:
 | `maintainability` | `100 - radon's MI` (so higher = worse, like the others)                    |
 | `churn`           | total lines added + deleted across all commits (binary files excluded)     |
 | `churn_per_sloc`  | `churn / sloc` — instability normalized by file size                       |
+| `decayed_churn`   | churn with exponential decay by file age (see `decay_half_life` in config) |
+| `decayed_churn_per_sloc` | `decayed_churn / sloc`                                                |
+| `smell_count`     | total smell occurrences in the row’s scope (file or block)               |
+| `smells`          | JSON map: `smell_type → { message_without_numbers → count }`             |
 | `score`           | product of the metrics passed via `-s` (default: `churn_per_sloc × cyclomatic`) |
 
 `churn_per_sloc` removes the size effect from raw lines-changed: a small file rewritten many times gets a higher signal than a big file edited once. The default score `churn_per_sloc × cyclomatic` ≈ "how unstable is this file × how tangled is its control flow" — the classic refactor target.
@@ -24,7 +28,7 @@ uv run hotspottriage <repo> [options]
   --filter <globs>             comma-separated; AND semantics (e.g. 'src/**,!**/tests/**')
   --no-default-filter          disable the implicit **/*.py filter
   -s, --score <metrics>        comma-separated metrics whose product is the score
-                                metrics: sloc, cyclomatic, halstead, maintainability, churn, churn_per_sloc
+                                metrics: sloc, cyclomatic, halstead, maintainability, churn, churn_per_sloc, decayed_churn, decayed_churn_per_sloc, smell_count
                                 default: churn_per_sloc,cyclomatic
   -f, --format                 table | json | csv  (default: table)
   -l, --limit <N>
@@ -32,6 +36,7 @@ uv run hotspottriage <repo> [options]
   -u, --until <date>           passed to git log
   --sort                       score | file  (default: score)
   -d, --directories            aggregate by directory
+  -B, --blocks                 per function/method/async def (same as --granularity block)
   --granularity                file | block  (default: file)
   --ignore-dir <PREFIX>        repeatable; drop tracked paths under this POSIX prefix
   --no-respect-gitignore       skip .gitignore / nested .gitignore / .git/info/exclude when filtering
@@ -62,8 +67,9 @@ uv run hotspottriage ~/myrepo -f csv > complexity.csv
 # Aggregate by directory
 uv run hotspottriage ~/myrepo -d -l 10
 
-# Per-function/method analysis (cached in .hotspottriage/)
-uv run hotspottriage ~/myrepo --granularity block -s cyclomatic -l 10
+# Per-function/method analysis (cached under .hotspottriage/cache/)
+uv run hotspottriage ~/myrepo --blocks -s cyclomatic -l 10
+# equivalent: --granularity block
 ```
 
 The output always contains every metric, so a single CSV dump can be re-sorted later by any column you like.
@@ -99,6 +105,7 @@ no_default_filter: false         # set true to disable the implicit **/*.py filt
 score_metrics:                   # metrics whose product is the `score` column
   - churn_per_sloc
   - cyclomatic
+smell_weight: 0.0                # used when score_metrics includes smell_count (factor: 1 + smell_weight * smell_count)
 format: table                    # table | json | csv
 limit: null                      # max rows (null = unlimited)
 sort: score                      # score | file
@@ -112,6 +119,19 @@ block_workers: null              # block-churn thread pool size (default: 16)
 log_level: warning               # debug | info | warning | error
 ```
 
+## MCP tools
+
+The MCP server exposes analysis tools plus smell retrieval:
+
+- `analyze(...)`
+- `analyze_with_cache(...)`
+- `analyze_classes(...)`
+- `generate_cache(...)`
+- `cache_status(...)`
+- `clear_cache(...)`
+- `init_config(...)`
+- `get_code_smells(...)` → returns `{file, line, smell, message, confidence?}` findings
+
 ### Ignores (gitignore + directories)
 
 After `git ls-files` returns tracked paths, HotspotTriage applies, in order:
@@ -122,7 +142,9 @@ After `git ls-files` returns tracked paths, HotspotTriage applies, in order:
 
 ### Block-level granularity and caching
 
-When `--granularity block` is used, HotspotTriage computes metrics for each function, method, and async function (not class rows). The first run computes churn via `git log -L` for each block; subsequent runs reuse cached values in `<repo>/.hotspottriage/cache/blocks.pkl`, keyed by file blob SHA so changes invalidate automatically.
+When `--blocks` or `--granularity block` is used, HotspotTriage computes metrics for each function, method, and async function (not class rows). The first run computes churn via `git log -L` for each block; subsequent runs reuse cached values in `<repo>/.hotspottriage/cache/blocks.pkl`, keyed by file blob SHA so changes invalidate automatically.
+
+**Smells on block rows:** a finding is attached to a block when its Pylint `line` lies inside that block’s line range. Class-level messages (e.g. too many attributes on the `class` line) carry a `scope` marker so they are also counted on every method block under that class (`Foo.bar`, `Foo.Inner.baz`, …), not only on the class definition line. Module-wide comment smells stay on whichever block contains their reported line (often line 1).
 
 #### Cache metadata and timestamps
 
