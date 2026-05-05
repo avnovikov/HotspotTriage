@@ -33,7 +33,7 @@ The default scoring targets refactor hotspots: files that are both unstable (fre
    - **Block similarity** (`block_similarity.py`): DeepCSIM pairwise similarity over block snippets (default on for block runs)
 4. **Stats** (`stats.py`): Aggregates metrics into `Statistic` dataclasses; applies sorting, limiting, and score calculation
 5. **Normalize** (`normalize.py`): Optional per-metric maps to ``[0,1]`` (``metric_normalization`` in config); ``normalize`` / ``normalize_record`` APIs
-6. **Output** (`output.py`): Formats results as table/JSON/CSV
+6. **Output** (`output.py`): Formats results as table/JSON/CSV; appends ``norm_<metric>`` columns when ``metric_normalization`` is present in merged config
 
 Optional **stderr progress** (`progress_report.py` + CLI `--progress`) runs alongside steps 3–4 without affecting stdout (table/CSV/JSON).
 
