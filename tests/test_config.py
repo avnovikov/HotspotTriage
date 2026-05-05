@@ -317,6 +317,12 @@ def test_validate_rejects_zero_workers():
         _config.validate(cfg)
 
 
+def test_validate_rejects_invalid_smell_threshold():
+    cfg = {**_config.DEFAULTS, "smell_max_args": 0}
+    with pytest.raises(ValueError, match="smell_max_args must be a positive int"):
+        _config.validate(cfg)
+
+
 def test_validate_rejects_block_directories_combo():
     cfg = {**_config.DEFAULTS, "granularity": "block", "directories": True}
     with pytest.raises(ValueError, match="cannot be combined"):
