@@ -56,6 +56,12 @@ DEFAULTS: dict[str, Any] = {
     "cache_dir": None,
     "log_level": "warning",
     "decay_half_life": 2592000,  # 30 days in seconds
+    "smell_max_statements": 50,
+    "smell_max_attributes": 10,
+    "smell_max_public_methods": 20,
+    "smell_max_args": 5,
+    "smell_max_branches": 12,
+    "smell_min_public_methods": 2,
 }
 
 _VALID_LOG_LEVELS = ("debug", "info", "warning", "error")
@@ -313,6 +319,19 @@ def validate(config: dict[str, Any]) -> None:
         raise ValueError(
             f"decay_half_life must be null or a positive int (seconds); got {decay_hl!r}"
         )
+
+    smell_keys = (
+        "smell_max_statements",
+        "smell_max_attributes",
+        "smell_max_public_methods",
+        "smell_max_args",
+        "smell_max_branches",
+        "smell_min_public_methods",
+    )
+    for key in smell_keys:
+        value = config.get(key)
+        if not isinstance(value, int) or value < 1:
+            raise ValueError(f"{key} must be a positive int; got {value!r}")
 
 
 # --- Template generation (`init` subcommand) -----------------------------
