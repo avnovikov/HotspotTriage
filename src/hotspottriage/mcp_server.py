@@ -7,8 +7,10 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +26,50 @@ from hotspottriage import discovery, filtering, output as _output, stats
 
 logger = logging.getLogger(__name__)
 mcp = FastMCP("hotspottriage")
+
+# Populated in :func:`main` before ``mcp.run()`` (used by dashboard lifespan).
+_mcp_dashboard_cli: argparse.Namespace | None = None
+
+
+def get_mcp_dashboard_cli_args() -> argparse.Namespace | None:
+    """Return parsed ``hotspottriage-mcp`` dashboard flags, or ``None`` before :func:`main`."""
+    return _mcp_dashboard_cli
+
+
+def _parse_mcp_dashboard_argv() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="hotspottriage-mcp",
+        add_help=False,
+        description="HotspotTriage MCP server (stdio). Dashboard flags are listed below; "
+        "other arguments are forwarded to the MCP runtime.",
+    )
+    parser.add_argument(
+        "--no-dashboard",
+        action="store_true",
+        help="Disable the local web dashboard for this process.",
+    )
+    parser.add_argument(
+        "--dashboard-port",
+        type=int,
+        default=None,
+        metavar="PORT",
+        help="First TCP port to try for the dashboard (default from config).",
+    )
+    parser.add_argument(
+        "--dashboard-host",
+        type=str,
+        default=None,
+        metavar="HOST",
+        help="Dashboard bind address (default from config).",
+    )
+    parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="Open the dashboard in a browser when the server starts.",
+    )
+    args, rest = parser.parse_known_args()
+    sys.argv = [sys.argv[0], *rest]
+    return args
 
 
 @mcp.tool()
@@ -613,6 +659,8 @@ def _analyze_repository(target: str, cfg: dict[str, Any]) -> list[stats.Statisti
 
 def main() -> None:
     """Entry point for the FastMCP server."""
+    global _mcp_dashboard_cli
+    _mcp_dashboard_cli = _parse_mcp_dashboard_argv()
     logging.basicConfig(level=logging.INFO)
     mcp.run()
 
