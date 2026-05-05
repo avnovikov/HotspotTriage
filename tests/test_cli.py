@@ -12,7 +12,7 @@ from tests.fixtures.build_block_repo import build_block_repo
 
 METRIC_COLS = (
     "sloc", "cyclomatic", "halstead", "maintainability",
-    "churn", "churn_per_sloc", "score",
+    "churn", "churn_per_sloc", "decayed_churn", "decayed_churn_per_sloc", "score",
 )
 
 
