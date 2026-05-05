@@ -12,7 +12,7 @@ from tests.fixtures.build_block_repo import build_block_repo
 
 METRIC_COLS = (
     "sloc", "cyclomatic", "halstead", "maintainability",
-    "churn", "churn_per_sloc", "score",
+    "churn", "churn_per_sloc", "decayed_churn", "decayed_churn_per_sloc", "score",
 )
 
 
@@ -37,8 +37,9 @@ def test_cli_json_emits_all_metrics_including_per_sloc(tmp_path: Path):
             assert col in row
         if row["sloc"] > 0:
             assert row["churn_per_sloc"] == row["churn"] / row["sloc"]
-        # Default score = churn_per_sloc × cyclomatic.
-        assert row["score"] == row["churn_per_sloc"] * row["cyclomatic"]
+            assert row["decayed_churn_per_sloc"] == row["decayed_churn"] / row["sloc"]
+        # Default score = decayed_churn_per_sloc × cyclomatic.
+        assert row["score"] == row["decayed_churn_per_sloc"] * row["cyclomatic"]
 
 
 def test_cli_score_picks_metrics_to_multiply(tmp_path: Path):

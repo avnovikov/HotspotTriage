@@ -42,7 +42,7 @@ DEFAULTS: dict[str, Any] = {
     "filter": [],
     "no_default_filter": False,
     "default_filter": "**/*.py",
-    "score_metrics": ["churn_per_sloc", "cyclomatic"],
+    "score_metrics": ["decayed_churn_per_sloc", "cyclomatic"],
     "format": "table",
     "limit": None,
     "sort": "score",
@@ -55,6 +55,7 @@ DEFAULTS: dict[str, Any] = {
     "block_workers": None,
     "cache_dir": None,
     "log_level": "warning",
+    "decay_half_life": 2592000,  # 30 days in seconds
 }
 
 _VALID_LOG_LEVELS = ("debug", "info", "warning", "error")
@@ -307,6 +308,12 @@ def validate(config: dict[str, Any]) -> None:
             )
         _filtering.normalize_directory_prefix(entry)
 
+    decay_hl = config.get("decay_half_life")
+    if decay_hl is not None and (not isinstance(decay_hl, int) or decay_hl < 1):
+        raise ValueError(
+            f"decay_half_life must be null or a positive int (seconds); got {decay_hl!r}"
+        )
+
 
 # --- Template generation (`init` subcommand) -----------------------------
 
@@ -328,9 +335,9 @@ filter: []
 no_default_filter: false
 
 # Which metrics multiply into the `score` column.
-# Valid: sloc, cyclomatic, halstead, maintainability, churn, churn_per_sloc
+# Valid: sloc, cyclomatic, halstead, maintainability, churn, churn_per_sloc, decayed_churn, decayed_churn_per_sloc
 score_metrics:
-  - churn_per_sloc
+  - decayed_churn_per_sloc
   - cyclomatic
 
 # Output format: table | json | csv
@@ -364,6 +371,11 @@ cache_dir: null
 # Logging verbosity: debug | info | warning | error
 log_level: warning
 
+# Exponential decay half-life for churn, in seconds (default: 30 days).
+# Recent changes weigh more heavily than old ones. Set to a larger value to
+# reduce the impact of aging, or disable via `decay_half_life: null`.
+decay_half_life: 2592000
+
 # Drop any tracked path under these POSIX prefixes (after normalisation).
 # Example: ['vendor', 'generated/proto']
 ignore_directories: []
@@ -387,10 +399,10 @@ filter: []
 
 # Override the score recipe for this project, e.g. emphasize maintainability:
 # score_metrics:
-#   - churn_per_sloc
+#   - decayed_churn_per_sloc
 #   - maintainability
 score_metrics:
-  - churn_per_sloc
+  - decayed_churn_per_sloc
   - cyclomatic
 
 # Default output format for this project.
