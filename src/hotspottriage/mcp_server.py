@@ -8,6 +8,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from contextlib import asynccontextmanager
 import json
 import logging
 import sys
@@ -21,19 +22,70 @@ from hotspottriage import cache as _cache
 from hotspottriage import cache_generator as _cache_gen
 from hotspottriage import config as _config
 from hotspottriage import blocks as _blocks
+from hotspottriage.dashboard.log_handler import MemoryLogHandler
+from hotspottriage.dashboard.server import DashboardServer
+from hotspottriage.dashboard.stats import StatsCollector
 from hotspottriage import smell as _smell
 from hotspottriage import discovery, filtering, output as _output, stats
 
 logger = logging.getLogger(__name__)
-mcp = FastMCP("hotspottriage")
 
 # Populated in :func:`main` before ``mcp.run()`` (used by dashboard lifespan).
 _mcp_dashboard_cli: argparse.Namespace | None = None
+_dashboard_stats = StatsCollector()
+_dashboard_log_handler = MemoryLogHandler(
+    max_records=int(_config.DEFAULTS["dashboard"]["max_log_records"])
+)
+_dashboard_log_handler.setFormatter(
+    logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+)
+if _dashboard_log_handler not in logging.getLogger().handlers:
+    logging.getLogger().addHandler(_dashboard_log_handler)
 
 
 def get_mcp_dashboard_cli_args() -> argparse.Namespace | None:
     """Return parsed ``hotspottriage-mcp`` dashboard flags, or ``None`` before :func:`main`."""
     return _mcp_dashboard_cli
+
+
+def _effective_dashboard_config() -> dict[str, Any]:
+    cfg = dict(_config.DEFAULTS)
+    cli = get_mcp_dashboard_cli_args()
+    if cli is None:
+        return cfg
+    cfg = _config.apply_mcp_dashboard_cli_overrides(
+        cfg,
+        no_dashboard=bool(cli.no_dashboard),
+        dashboard_port=cli.dashboard_port,
+        dashboard_host=cli.dashboard_host,
+        open_browser=bool(cli.open_browser),
+    )
+    return cfg
+
+
+@asynccontextmanager
+async def _mcp_lifespan(_: Any):
+    dashboard: DashboardServer | None = None
+    cfg = _effective_dashboard_config()
+    dash_cfg = dict(cfg.get("dashboard") or {})
+    if bool(dash_cfg.get("enabled", True)):
+        try:
+            dashboard = DashboardServer(
+                config=_config.to_dashboard_snapshot(cfg),
+                stats=_dashboard_stats,
+                log_handler=_dashboard_log_handler,
+                host=str(dash_cfg.get("host", "127.0.0.1")),
+                base_port=int(dash_cfg.get("base_port", 9123)),
+                open_on_start=bool(dash_cfg.get("open_on_start", False)),
+            )
+            dashboard.start()
+            logger.info("HotspotTriage dashboard: %s/dashboard/", dashboard.base_url)
+        except Exception as e:  # pragma: no cover - defensive path
+            logger.warning("Dashboard startup failed: %s", e)
+    yield
+
+
+mcp = FastMCP("hotspottriage", lifespan=_mcp_lifespan)
 
 
 def _parse_mcp_dashboard_argv() -> argparse.Namespace:

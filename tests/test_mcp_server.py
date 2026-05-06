@@ -15,6 +15,8 @@ from hotspottriage.mcp_server import (
     cache_status,
     clear_cache,
     init_config,
+    _effective_dashboard_config,
+    _mcp_lifespan,
 )
 
 
@@ -311,3 +313,38 @@ def test_get_code_smells_returns_smell_rows(test_repo):
         assert "line" in first
         assert "smell" in first
         assert "message" in first
+
+
+def test_effective_dashboard_config_uses_cli_overrides(monkeypatch):
+    from argparse import Namespace
+    import hotspottriage.mcp_server as mcp_mod
+
+    monkeypatch.setattr(
+        mcp_mod,
+        "_mcp_dashboard_cli",
+        Namespace(
+            no_dashboard=True,
+            dashboard_port=9333,
+            dashboard_host="0.0.0.0",
+            open_browser=True,
+        ),
+    )
+    cfg = _effective_dashboard_config()
+    dash = cfg["dashboard"]
+    assert dash["enabled"] is False
+    assert dash["base_port"] == 9333
+    assert dash["host"] == "0.0.0.0"
+    assert dash["open_on_start"] is True
+
+
+@pytest.mark.anyio
+async def test_mcp_lifespan_dashboard_failure_is_non_fatal(monkeypatch):
+    import hotspottriage.mcp_server as mcp_mod
+
+    class _Boom:
+        def __init__(self, **_: object) -> None:
+            raise OSError("no free ports")
+
+    monkeypatch.setattr(mcp_mod, "DashboardServer", _Boom)
+    async with _mcp_lifespan(None):
+        assert True
