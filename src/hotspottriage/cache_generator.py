@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 def generate_full_cache(
     target: str,
     filter: str | None = None,
-    score_metrics: str = "churn_per_sloc,cyclomatic",
+    score_metrics: str | None = None,
     verbose: bool = False,
 ) -> dict[str, Any]:
     """Generate comprehensive cache for entire codebase.
@@ -36,7 +36,7 @@ def generate_full_cache(
     Args:
         target: Path to git repository
         filter: Comma-separated glob patterns (optional)
-        score_metrics: Metrics to compute score from
+        score_metrics: Optional metrics list override for legacy product scoring
         verbose: Print progress information
 
     Returns:
@@ -60,23 +60,30 @@ def generate_full_cache(
         # Step 1: Initialize repository cache (blocks + churn)
         if verbose:
             print("  📊 Initializing block-level cache...")
-        blocks_result = mcp_server.analyze_with_cache(
-            target=target,
+        cfg = mcp_server._build_analyze_config(
             filter=filter,
             score_metrics=score_metrics,
+            granularity="block",
+            limit=None,
+            directories=False,
+            sort="score",
+            since=None,
+            until=None,
+            respect_gitignore=True,
+            ignore_dir=None,
         )
-        blocks_data = json.loads(blocks_result)
+        cfg["similarity_enabled"] = True
+        block_stats = mcp_server._analyze_repository(target, cfg)
+        cache_info = mcp_server._initialize_repository(target, cfg)
+        block_rows = [mcp_server._output.statistic_to_output_dict(r, cfg) for r in block_stats]
 
-        if "error" in blocks_data:
-            result["blocks"] = {"error": blocks_data["error"]}
-        else:
-            result["blocks"] = {
-                "count": len(blocks_data.get("results", [])),
-                "cache": blocks_data.get("cache", {}),
-                "results": blocks_data.get("results", []),
-            }
-            if verbose:
-                print(f"    ✓ Cached {result['blocks']['count']} blocks")
+        result["blocks"] = {
+            "count": len(block_rows),
+            "cache": cache_info,
+            "results": block_rows,
+        }
+        if verbose:
+            print(f"    ✓ Cached {result['blocks']['count']} blocks")
 
         # Step 2: Analyze class/method structure
         if verbose:
@@ -199,8 +206,8 @@ def main() -> int:
     parser.add_argument(
         "-s",
         "--score",
-        default="churn_per_sloc,cyclomatic",
-        help="metrics for score computation (default: churn_per_sloc,cyclomatic)",
+        default=None,
+        help="optional metrics for legacy product scoring (defaults to config)",
     )
     parser.add_argument(
         "-q",
