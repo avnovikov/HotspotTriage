@@ -135,6 +135,40 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     .lvl-info { color: var(--fg); }
     .lvl-debug { color: var(--debug); }
     .muted { color: var(--muted); font-size: 0.78rem; }
+    input {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--fg);
+      padding: 0.35rem 0.5rem;
+      min-width: 140px;
+    }
+    .status-box {
+      margin-top: 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.45rem;
+      font-size: 0.78rem;
+      min-height: 2.2rem;
+      background: rgba(127, 127, 127, 0.06);
+    }
+    .progress-wrap {
+      margin-top: 0.45rem;
+      width: 100%;
+      height: 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(127, 127, 127, 0.12);
+    }
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), #14b8a6);
+      transition: width 0.25s ease;
+    }
+    .progress-bar.done { background: linear-gradient(90deg, var(--ok), #22c55e); }
+    .progress-bar.err { background: linear-gradient(90deg, var(--error), #ef4444); }
     .wide { grid-column: span 2; }
     @media (max-width: 860px) {
       main { grid-template-columns: 1fr; }
@@ -166,6 +200,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <span class="muted">Refreshes every 5s</span>
       </div>
       <div id="statsPanel" class="muted">No tool activity yet.</div>
+
+      <h2 style="margin-top: 0.9rem;">Cache Actions</h2>
+      <div class="toolbar" style="flex-wrap: wrap;">
+        <input id="cacheTargetInput" type="text" placeholder="../LexVox" />
+        <input id="cacheFilterInput" type="text" placeholder="filter (optional)" />
+        <input id="cacheScoreInput" type="text" placeholder="score metrics" value="churn_per_sloc,cyclomatic" />
+        <button id="checkCacheBtn" type="button">Check Cache</button>
+        <button id="generateCacheBtn" type="button">Generate Cache</button>
+      </div>
+      <div id="cacheContextPanel" class="mono" style="margin-top: 0.45rem;">
+Path: n/a
+Cache Status: unknown
+Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
+      </div>
+      <div id="cacheStatus" class="status-box muted">Idle</div>
+      <div class="progress-wrap"><div id="cacheProgress" class="progress-bar"></div></div>
     </section>
 
     <section class="wide">
@@ -184,9 +234,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       lastLogIdx: 0,
       pauseScroll: false,
       healthFailures: 0,
+      activeCacheJobId: null,
     };
 
     function $(id) { return document.getElementById(id); }
+
+    function updateCacheContext(statusText) {
+      const target = $("cacheTargetInput").value.trim() || "n/a";
+      const filter = $("cacheFilterInput").value.trim() || "<none>";
+      const score = $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic";
+      $("cacheContextPanel").textContent =
+`Path: ${target}
+Cache Status: ${statusText}
+Build Parameters: filter=${filter}, score_metrics=${score}`;
+    }
 
     function pretty(v) {
       if (v === null || v === undefined) return "n/a";
@@ -207,6 +268,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         const cfg = await res.json();
         const project = cfg.project || {};
         const dashboard = cfg.dashboard || {};
+        if (dashboard.default_target && !$("cacheTargetInput").value.trim()) {
+          $("cacheTargetInput").value = String(dashboard.default_target);
+        }
+        updateCacheContext("unknown");
         panel.innerHTML = "";
         const items = [
           ["Project Path", project.path],
@@ -226,6 +291,43 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
       } catch (err) {
         panel.innerHTML = `<div class="muted">Failed to load config: ${String(err)}</div>`;
+      }
+    }
+
+    async function loadCacheContext() {
+      try {
+        const res = await fetch("/api/cache/context");
+        if (!res.ok) return;
+        const ctx = await res.json();
+        if (!$("cacheTargetInput").value.trim() && ctx.last_target) {
+          $("cacheTargetInput").value = String(ctx.last_target);
+        }
+        if (!$("cacheFilterInput").value.trim() && ctx.last_filter) {
+          $("cacheFilterInput").value = String(ctx.last_filter);
+        }
+        if (ctx.last_score_metrics) {
+          $("cacheScoreInput").value = String(ctx.last_score_metrics);
+        }
+        updateCacheContext(ctx.last_target ? "restored" : "unknown");
+      } catch (_) {
+        // no-op: context restore is best-effort
+      }
+    }
+
+    async function saveCacheContext() {
+      const payload = {
+        target: $("cacheTargetInput").value.trim(),
+        filter: $("cacheFilterInput").value.trim(),
+        score_metrics: $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic",
+      };
+      try {
+        await fetch("/api/cache/context", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } catch (_) {
+        // no-op
       }
     }
 
@@ -321,6 +423,164 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       await refreshStats();
     }
 
+    async function generateCache() {
+      const target = $("cacheTargetInput").value.trim();
+      const filter = $("cacheFilterInput").value.trim();
+      const score = $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic";
+      const box = $("cacheStatus");
+      const bar = $("cacheProgress");
+      if (!target) {
+        box.textContent = "Target path is required.";
+        updateCacheContext("invalid target");
+        bar.classList.remove("done");
+        bar.classList.add("err");
+        bar.style.width = "100%";
+        return;
+      }
+      box.textContent = "Starting cache generation…";
+      bar.classList.remove("done", "err");
+      bar.style.width = "8%";
+      try {
+        const startRes = await fetch("/api/cache/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target,
+            filter: filter || null,
+            score_metrics: score
+          }),
+        });
+        const started = await startRes.json();
+        if (!startRes.ok) {
+          const msg = started?.detail || started?.error || "cache generation failed";
+          box.textContent = `Error: ${msg}`;
+          updateCacheContext(`error (${msg})`);
+          bar.classList.remove("done");
+          bar.classList.add("err");
+          bar.style.width = "100%";
+          return;
+        }
+        state.activeCacheJobId = started.job_id;
+        updateCacheContext(`running (job ${state.activeCacheJobId.slice(0, 8)})`);
+        await pollCacheJob(state.activeCacheJobId);
+      } catch (err) {
+        box.textContent = `Error: ${String(err)}`;
+        updateCacheContext(`error (${String(err)})`);
+        bar.classList.remove("done");
+        bar.classList.add("err");
+        bar.style.width = "100%";
+      }
+    }
+
+    async function checkCacheStatus() {
+      const target = $("cacheTargetInput").value.trim();
+      const box = $("cacheStatus");
+      const bar = $("cacheProgress");
+      if (!target) {
+        box.textContent = "Target path is required.";
+        updateCacheContext("invalid target");
+        bar.classList.remove("done");
+        bar.classList.add("err");
+        bar.style.width = "100%";
+        return;
+      }
+      box.textContent = "Checking cache…";
+      bar.classList.remove("done", "err");
+      bar.style.width = "25%";
+      try {
+        const res = await fetch("/api/cache/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target,
+            filter: $("cacheFilterInput").value.trim() || null,
+            score_metrics: $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic"
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          const msg = data?.detail || data?.error || "cache status failed";
+          box.textContent = `Error: ${msg}`;
+          updateCacheContext(`error (${msg})`);
+          bar.classList.remove("done");
+          bar.classList.add("err");
+          bar.style.width = "100%";
+          return;
+        }
+        if (!data.exists) {
+          box.textContent = `No cache yet at ${data.cache_dir}`;
+          updateCacheContext(`missing (${data.cache_dir})`);
+          bar.classList.remove("done");
+          bar.classList.add("err");
+          bar.style.width = "100%";
+          return;
+        }
+        box.textContent = `Cache exists: entries=${data.entries}, size=${data.size_bytes} bytes, dir=${data.cache_dir}`;
+        updateCacheContext(`ready (entries=${data.entries}, size=${data.size_bytes})`);
+        bar.classList.remove("err");
+        bar.classList.add("done");
+        bar.style.width = "100%";
+      } catch (err) {
+        box.textContent = `Error: ${String(err)}`;
+        updateCacheContext(`error (${String(err)})`);
+        bar.classList.remove("done");
+        bar.classList.add("err");
+        bar.style.width = "100%";
+      }
+    }
+
+    async function pollCacheJob(jobId) {
+      const box = $("cacheStatus");
+      const bar = $("cacheProgress");
+      while (true) {
+        const res = await fetch(`/api/cache/jobs/${jobId}`);
+        const data = await res.json();
+        if (!res.ok) {
+          const msg = data?.detail || data?.error || "cache job status failed";
+          box.textContent = `Error: ${msg}`;
+          updateCacheContext(`error (${msg})`);
+          bar.classList.remove("done");
+          bar.classList.add("err");
+          bar.style.width = "100%";
+          return;
+        }
+        const p = Math.max(0, Math.min(100, Number(data.progress || 0)));
+        bar.style.width = `${p}%`;
+        box.textContent = data.message || "Running cache job...";
+        if (data.status === "running") {
+          await new Promise((r) => setTimeout(r, 900));
+          continue;
+        }
+        if (data.status === "error") {
+          box.textContent = `Error: ${data.error || "cache generation failed"}`;
+          updateCacheContext(`error (${data.error || "cache generation failed"})`);
+          bar.classList.remove("done");
+          bar.classList.add("err");
+          bar.style.width = "100%";
+          return;
+        }
+        const result = data.result || {};
+        const meta = result.metadata || {};
+        const entries = result.cache_status?.entries ?? 0;
+        const blockErr = result.blocks?.error;
+        if (blockErr) {
+          box.textContent = `Completed with warning: ${blockErr}`;
+          updateCacheContext(`warning (${blockErr})`);
+          bar.classList.remove("done");
+          bar.classList.add("err");
+          bar.style.width = "100%";
+          return;
+        }
+        box.textContent =
+          `Done: blocks=${meta.blocks_cached ?? 0}, classes=${meta.classes_indexed ?? 0}, cache entries=${entries}`;
+        updateCacheContext(`ready (entries=${entries})`);
+        bar.classList.remove("err");
+        bar.classList.add("done");
+        bar.style.width = "100%";
+        return;
+      }
+    }
+
     function clearLogs() {
       $("logs").innerHTML = "";
       state.lastLogIdx = 0;
@@ -331,6 +591,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         setTheme(!document.body.classList.contains("dark"));
       });
       $("clearStatsBtn").addEventListener("click", clearStats);
+      $("checkCacheBtn").addEventListener("click", checkCacheStatus);
+      $("generateCacheBtn").addEventListener("click", generateCache);
+      ["cacheTargetInput", "cacheFilterInput", "cacheScoreInput"].forEach((id) => {
+        $(id).addEventListener("input", () => {
+          updateCacheContext("pending");
+          saveCacheContext();
+        });
+      });
       $("clearLogsBtn").addEventListener("click", clearLogs);
       $("pauseLogsBtn").addEventListener("click", () => {
         state.pauseScroll = !state.pauseScroll;
@@ -343,6 +611,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       setTheme(saved === "dark");
       initEvents();
       await loadConfig();
+      await loadCacheContext();
       await refreshStats();
       await refreshHealth();
       connectLogStream();
