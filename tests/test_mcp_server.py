@@ -98,28 +98,11 @@ def test_analyze_basic(test_repo):
     assert isinstance(data, list)
     assert len(data) > 0
 
-    # Check structure of first result
+    # Check minimal structure of first result
     first = data[0]
-    assert "path" in first
-    assert "sloc" in first
-    assert "normalized_sloc" in first
-    assert "cyclomatic" in first
-    assert "halstead" in first
-    assert "maintainability" in first
-    assert "churn" in first
-    assert "churn_per_sloc" in first
-    assert "smell_count" in first
-    assert "smell_severity" in first
-    assert "smell_burden" in first
-    assert "smells" in first
-    assert "similarity_score" in first
-    assert "similarity_band" in first
-    assert "match_count" in first
     assert "score" in first
     assert "score_band" in first
-    assert "score_subscores" in first
-    assert "norm_cyclomatic" in first
-    assert "norm_similarity_score" in first
+    assert set(first.keys()) == {"score", "score_band"}
 
 
 def test_analyze_with_limit(test_repo):
@@ -262,6 +245,8 @@ def test_analyze_with_cache(test_repo):
     assert "entries" in data["cache"]
     assert len(data["results"]) > 0
     assert "normalized_sloc" in data["results"][0]
+    assert "score" in data["results"][0]
+    assert "score_band" in data["results"][0]
 
 
 def test_analyze_classes(test_repo):
