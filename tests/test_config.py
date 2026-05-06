@@ -275,6 +275,15 @@ def test_validate_rejects_bad_dashboard_host():
         _config.validate(cfg)
 
 
+def test_validate_rejects_dashboard_default_target_non_string():
+    cfg = {
+        **_config.DEFAULTS,
+        "dashboard": {**_config.DEFAULTS["dashboard"], "default_target": 123},
+    }
+    with pytest.raises(ValueError, match="dashboard.default_target"):
+        _config.validate(cfg)
+
+
 def test_to_dashboard_snapshot_shape():
     snap = _config.to_dashboard_snapshot(dict(_config.DEFAULTS), project_path="/tmp/r")
     assert snap["version"]
