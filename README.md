@@ -202,3 +202,30 @@ uv run hotspottriage <repo> --config /path/to/team.yml
 ### uv lockfile
 
 If you use **`uv`** for development, run **`uv lock`** after editing `pyproject.toml` dependencies so `uv.lock` matches (the GitHub workflow installs with `pip install -e .` and does not require an up-to-date lock).
+
+### Cursor MCP runtime (deterministic setup)
+
+For reliable MCP behavior (including `pylint`-backed smell detection in `generate_cache`), run the MCP server from a dedicated project venv.
+
+1. Bootstrap dependencies in this repo:
+
+```bash
+cd /Users/alexei/HotspotTriage
+python3 -m venv .venv
+.venv/bin/python -m pip install -U pip
+.venv/bin/pip install -e .
+```
+
+2. Verify required executables resolve from this venv:
+
+```bash
+/Users/alexei/HotspotTriage/.venv/bin/hotspottriage-mcp --help
+/Users/alexei/HotspotTriage/.venv/bin/pylint --version
+```
+
+3. In Cursor, point MCP to the launcher script:
+
+- `.cursor/mcp.json` uses `scripts/run_hotspottriage_mcp.sh`
+- the script prepends `./.venv/bin` to `PATH` and execs `hotspottriage-mcp`
+
+This mirrors a Serena-style isolated MCP runtime: explicit command, explicit environment, no dependency leakage from the host shell.
