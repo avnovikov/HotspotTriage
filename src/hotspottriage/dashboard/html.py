@@ -170,6 +170,53 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     .progress-bar.done { background: linear-gradient(90deg, var(--ok), #22c55e); }
     .progress-bar.err { background: linear-gradient(90deg, var(--error), #ef4444); }
     .wide { grid-column: span 2; }
+    .heatmap-wrap { overflow-x: auto; }
+    .heatmap-toolbar { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; }
+    .heatmap-table th[data-sort-key] { cursor: pointer; }
+    .heatmap-table .heatmap-name { min-width: 280px; }
+    .heatmap-label { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .heatmap-indent-1 { padding-left: 1.2rem; }
+    .heatmap-indent-2 { padding-left: 2.2rem; }
+    .heatmap-toggle, .heatmap-toggle-placeholder {
+      width: 1.2rem;
+      margin-right: 0.2rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      background: transparent;
+      color: var(--fg);
+    }
+    .heatmap-toggle { cursor: pointer; }
+    .heatmap-hidden { display: none; }
+    .heatmap-score-bar {
+      position: relative;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      min-width: 76px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+    .heatmap-score-fill {
+      position: absolute;
+      inset: 0 auto 0 0;
+      opacity: 0.5;
+    }
+    .heatmap-score-bar span:last-child {
+      position: relative;
+      z-index: 1;
+    }
+    .heatmap-drawer {
+      margin-top: 0.7rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem;
+      background: rgba(127, 127, 127, 0.06);
+    }
+    .heatmap-drawer h3 { margin: 0 0 0.4rem; font-size: 0.88rem; color: var(--accent); }
+    .heatmap-drawer-body { margin: 0; white-space: pre-wrap; font-size: 0.75rem; }
+    .heatmap-empty { color: var(--muted); }
     @media (max-width: 860px) {
       main { grid-template-columns: 1fr; }
       .wide { grid-column: span 1; }
@@ -205,14 +252,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <div class="toolbar" style="flex-wrap: wrap;">
         <input id="cacheTargetInput" type="text" placeholder="../LexVox" />
         <input id="cacheFilterInput" type="text" placeholder="filter (optional)" />
-        <input id="cacheScoreInput" type="text" placeholder="score metrics" value="churn_per_sloc,cyclomatic" />
+        <input id="cacheScoreInput" type="text" placeholder="score metrics (optional)" value="" />
         <button id="checkCacheBtn" type="button">Check Cache</button>
+        <button id="rebuildHeatmapBtn" type="button">Rebuild Heatmap</button>
         <button id="generateCacheBtn" type="button">Generate Cache</button>
       </div>
       <div id="cacheContextPanel" class="mono" style="margin-top: 0.45rem;">
 Path: n/a
 Cache Status: unknown
-Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
+Build Parameters: filter=<none>, score_metrics=<default>
       </div>
       <div id="cacheStatus" class="status-box muted">Idle</div>
       <div class="progress-wrap"><div id="cacheProgress" class="progress-bar"></div></div>
@@ -226,6 +274,11 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
         <span class="muted">Live via SSE</span>
       </div>
       <div id="logs"></div>
+    </section>
+
+    <section class="wide">
+      <h2>Heatmap</h2>
+      <div id="heatmapContainer" class="heatmap-wrap muted">Loading heatmap…</div>
     </section>
   </main>
 
@@ -242,7 +295,7 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
     function updateCacheContext(statusText) {
       const target = $("cacheTargetInput").value.trim() || "n/a";
       const filter = $("cacheFilterInput").value.trim() || "<none>";
-      const score = $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic";
+      const score = $("cacheScoreInput").value.trim() || "<default>";
       $("cacheContextPanel").textContent =
 `Path: ${target}
 Cache Status: ${statusText}
@@ -318,7 +371,7 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
       const payload = {
         target: $("cacheTargetInput").value.trim(),
         filter: $("cacheFilterInput").value.trim(),
-        score_metrics: $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic",
+        score_metrics: $("cacheScoreInput").value.trim(),
       };
       try {
         await fetch("/api/cache/context", {
@@ -426,7 +479,7 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
     async function generateCache() {
       const target = $("cacheTargetInput").value.trim();
       const filter = $("cacheFilterInput").value.trim();
-      const score = $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic";
+      const score = $("cacheScoreInput").value.trim();
       const box = $("cacheStatus");
       const bar = $("cacheProgress");
       if (!target) {
@@ -447,7 +500,7 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
           body: JSON.stringify({
             target,
             filter: filter || null,
-            score_metrics: score
+            score_metrics: score || null
           }),
         });
         const started = await startRes.json();
@@ -459,6 +512,9 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
           bar.classList.add("err");
           bar.style.width = "100%";
           return;
+        }
+        if (started.target) {
+          $("cacheTargetInput").value = String(started.target);
         }
         state.activeCacheJobId = started.job_id;
         updateCacheContext(`running (job ${state.activeCacheJobId.slice(0, 8)})`);
@@ -494,7 +550,7 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
           body: JSON.stringify({
             target,
             filter: $("cacheFilterInput").value.trim() || null,
-            score_metrics: $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic"
+            score_metrics: $("cacheScoreInput").value.trim() || null
           }),
         });
         const data = await res.json();
@@ -507,6 +563,9 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
           bar.style.width = "100%";
           return;
         }
+        if (data.target) {
+          $("cacheTargetInput").value = String(data.target);
+        }
         if (!data.exists) {
           box.textContent = `No cache yet at ${data.cache_dir}`;
           updateCacheContext(`missing (${data.cache_dir})`);
@@ -517,6 +576,77 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
         }
         box.textContent = `Cache exists: entries=${data.entries}, size=${data.size_bytes} bytes, dir=${data.cache_dir}`;
         updateCacheContext(`ready (entries=${data.entries}, size=${data.size_bytes})`);
+        bar.classList.remove("err");
+        bar.classList.add("done");
+        bar.style.width = "100%";
+      } catch (err) {
+        box.textContent = `Error: ${String(err)}`;
+        updateCacheContext(`error (${String(err)})`);
+        bar.classList.remove("done");
+        bar.classList.add("err");
+        bar.style.width = "100%";
+      }
+    }
+
+    async function rebuildHeatmap() {
+      const target = $("cacheTargetInput").value.trim();
+      const box = $("cacheStatus");
+      const bar = $("cacheProgress");
+      if (!target) {
+        box.textContent = "Target path is required.";
+        updateCacheContext("invalid target");
+        bar.classList.remove("done");
+        bar.classList.add("err");
+        bar.style.width = "100%";
+        return;
+      }
+      box.textContent = "Rebuilding heatmap from cache…";
+      bar.classList.remove("done", "err");
+      bar.style.width = "40%";
+      try {
+        const res = await fetch("/api/heatmap/rebuild", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target,
+            filter: $("cacheFilterInput").value.trim() || null,
+            score_metrics: $("cacheScoreInput").value.trim() || null
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          const msg = data?.detail || data?.error || "heatmap rebuild failed";
+          box.textContent = `Error: ${msg}`;
+          updateCacheContext(`error (${msg})`);
+          bar.classList.remove("done");
+          bar.classList.add("err");
+          bar.style.width = "100%";
+          return;
+        }
+        if (data.target) {
+          $("cacheTargetInput").value = String(data.target);
+        }
+        if (!data.exists) {
+          const msg = data.heatmap_error || "cache file not found";
+          box.textContent = `Cannot rebuild heatmap: ${msg}`;
+          updateCacheContext(`missing (${msg})`);
+          bar.classList.remove("done");
+          bar.classList.add("err");
+          bar.style.width = "100%";
+          return;
+        }
+        if (!data.heatmap_updated) {
+          const msg = data.heatmap_error || "unknown error";
+          box.textContent = `Heatmap rebuild failed: ${msg}`;
+          updateCacheContext(`error (${msg})`);
+          bar.classList.remove("done");
+          bar.classList.add("err");
+          bar.style.width = "100%";
+          return;
+        }
+        await loadHeatmapFragment();
+        box.textContent = `Heatmap rebuilt from cache (${data.heatmap_rows ?? "?"} rows).`;
+        updateCacheContext("heatmap rebuilt");
         bar.classList.remove("err");
         bar.classList.add("done");
         bar.style.width = "100%";
@@ -577,7 +707,147 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
         bar.classList.remove("err");
         bar.classList.add("done");
         bar.style.width = "100%";
+        await loadHeatmapFragment();
         return;
+      }
+    }
+
+    function thresholdForFilter(filterName) {
+      if (filterName === "critical") return 0.8;
+      if (filterName === "high") return 0.6;
+      return 0.0;
+    }
+
+    function applyHeatmapVisibility(root, filterName) {
+      const threshold = thresholdForFilter(filterName);
+      const rows = Array.from(root.querySelectorAll("tbody tr.heatmap-row"));
+      const map = new Map(rows.map((row) => [row.dataset.rowId, row]));
+      for (const row of rows) {
+        const score = Number(row.dataset.score || 0);
+        const selfVisible = score >= threshold;
+        let ancestorVisible = true;
+        let parent = row.dataset.parent;
+        while (parent) {
+          const parentRow = map.get(parent);
+          if (!parentRow || parentRow.dataset.expanded !== "true" || parentRow.dataset.filteredOut === "true") {
+            ancestorVisible = false;
+            break;
+          }
+          parent = parentRow.dataset.parent || "";
+        }
+        row.dataset.filteredOut = selfVisible ? "false" : "true";
+        row.classList.toggle("heatmap-hidden", !(selfVisible && ancestorVisible));
+      }
+    }
+
+    function toggleHeatmapRow(root, rowId) {
+      const row = root.querySelector(`tr[data-row-id="${rowId}"]`);
+      if (!row) return;
+      const nextExpanded = row.dataset.expanded !== "true";
+      row.dataset.expanded = nextExpanded ? "true" : "false";
+      const toggle = row.querySelector(".heatmap-toggle");
+      if (toggle) toggle.textContent = nextExpanded ? "v" : ">";
+      const filterName = root.dataset.filter || "all";
+      applyHeatmapVisibility(root, filterName);
+    }
+
+    function compareRowsByKey(a, b, key) {
+      if (key === "name") {
+        const an = (a.querySelector(".heatmap-label")?.textContent || "").toLowerCase();
+        const bn = (b.querySelector(".heatmap-label")?.textContent || "").toLowerCase();
+        return an.localeCompare(bn);
+      }
+      const av = Number(a.dataset[key] || 0);
+      const bv = Number(b.dataset[key] || 0);
+      return bv - av;
+    }
+
+    function reorderHeatmapRows(root, key) {
+      const body = root.querySelector("tbody");
+      if (!body) return;
+      const rows = Array.from(body.querySelectorAll("tr.heatmap-row"));
+      const byParent = new Map();
+      for (const row of rows) {
+        const parent = row.dataset.parent || "__root__";
+        if (!byParent.has(parent)) byParent.set(parent, []);
+        byParent.get(parent).push(row);
+      }
+      for (const group of byParent.values()) {
+        group.sort((a, b) => compareRowsByKey(a, b, key));
+      }
+      const ordered = [];
+      const appendGroup = (parentId) => {
+        const group = byParent.get(parentId) || [];
+        for (const row of group) {
+          ordered.push(row);
+          appendGroup(row.dataset.rowId || "");
+        }
+      };
+      appendGroup("__root__");
+      for (const row of ordered) body.appendChild(row);
+      applyHeatmapVisibility(root, root.dataset.filter || "all");
+    }
+
+    function showHeatmapDetail(root, row) {
+      const drawer = root.querySelector(".heatmap-drawer");
+      const body = root.querySelector(".heatmap-drawer-body");
+      if (!drawer || !body) return;
+      const detail = row.dataset.detail ? JSON.parse(row.dataset.detail) : {
+        path: row.querySelector(".heatmap-label")?.textContent || "",
+        score: Number(row.dataset.score || 0),
+        score_band: row.dataset.scoreBand || "n/a",
+      };
+      body.textContent = JSON.stringify(detail, null, 2);
+      drawer.hidden = false;
+    }
+
+    function initHeatmapInteractions() {
+      const root = $("heatmapContainer").querySelector(".heatmap");
+      if (!root) return;
+      root.dataset.filter = root.dataset.filter || "all";
+      root.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        const filterBtn = target.closest(".heatmap-filter");
+        if (filterBtn) {
+          const filter = filterBtn.dataset.filter || "all";
+          root.dataset.filter = filter;
+          root.querySelectorAll(".heatmap-filter").forEach((button) => {
+            button.classList.toggle("is-active", button === filterBtn);
+          });
+          applyHeatmapVisibility(root, filter);
+          return;
+        }
+        const header = target.closest("th[data-sort-key]");
+        if (header) {
+          reorderHeatmapRows(root, header.dataset.sortKey || "score");
+          return;
+        }
+        const toggleBtn = target.closest(".heatmap-toggle");
+        if (toggleBtn) {
+          const row = toggleBtn.closest("tr.heatmap-row");
+          if (row?.dataset.rowId) {
+            toggleHeatmapRow(root, row.dataset.rowId);
+          }
+          return;
+        }
+        const row = target.closest("tr.heatmap-row");
+        if (row) {
+          showHeatmapDetail(root, row);
+        }
+      });
+      applyHeatmapVisibility(root, "all");
+    }
+
+    async function loadHeatmapFragment() {
+      const container = $("heatmapContainer");
+      try {
+        const res = await fetch(`/api/heatmap/fragment?ts=${Date.now()}`, { cache: "no-store" });
+        if (!res.ok) throw new Error("heatmap request failed");
+        container.innerHTML = await res.text();
+        initHeatmapInteractions();
+      } catch (err) {
+        container.innerHTML = `<div class="heatmap-empty">Failed to load heatmap: ${String(err)}</div>`;
       }
     }
 
@@ -592,6 +862,7 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
       });
       $("clearStatsBtn").addEventListener("click", clearStats);
       $("checkCacheBtn").addEventListener("click", checkCacheStatus);
+      $("rebuildHeatmapBtn").addEventListener("click", rebuildHeatmap);
       $("generateCacheBtn").addEventListener("click", generateCache);
       ["cacheTargetInput", "cacheFilterInput", "cacheScoreInput"].forEach((id) => {
         $(id).addEventListener("input", () => {
@@ -614,6 +885,7 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
       await loadCacheContext();
       await refreshStats();
       await refreshHealth();
+      await loadHeatmapFragment();
       connectLogStream();
       setInterval(refreshStats, 5000);
       setInterval(refreshHealth, 10000);
