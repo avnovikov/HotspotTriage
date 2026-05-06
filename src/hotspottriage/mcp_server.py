@@ -88,6 +88,20 @@ async def _mcp_lifespan(_: Any):
 mcp = FastMCP("hotspottriage", lifespan=_mcp_lifespan)
 
 
+def _compact_score_rows(results: list[stats.Statistic], cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return MCP-facing minimal rows for analysis responses."""
+    compact: list[dict[str, Any]] = []
+    for r in results:
+        row = _output.statistic_to_output_dict(r, cfg)
+        compact.append(
+            {
+                "score": float(row.get("score", 0.0)),
+                "score_band": str(row.get("score_band", "n/a")),
+            }
+        )
+    return compact
+
+
 def _parse_mcp_dashboard_argv() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="hotspottriage-mcp",
@@ -177,7 +191,7 @@ def analyze_with_cache(
         # Get cache info
         cache_info = _initialize_repository(target, cfg)
 
-        # Format results with cache metadata
+        # Keep full metric rows for cache-oriented workflows.
         results_list = [_output.statistic_to_output_dict(r, cfg) for r in results]
         response = {
             "results": results_list,
@@ -293,8 +307,8 @@ def analyze(
         # Run analysis
         results = _analyze_repository(target, cfg)
 
-        # Format results (includes norm_* when metric_normalization is configured)
-        results_list = [_output.statistic_to_output_dict(r, cfg) for r in results]
+        # Format results (minimal MCP payload).
+        results_list = _compact_score_rows(results, cfg)
         return json.dumps(results_list, indent=2)
 
     except Exception as e:
@@ -480,7 +494,7 @@ def analyze_classes(
 def generate_cache(
     target: str,
     filter: str | None = None,
-    score_metrics: str = "churn_per_sloc,cyclomatic",
+    score_metrics: str | None = None,
 ) -> str:
     """Generate comprehensive codebase cache (blocks + classes/methods).
 
@@ -491,7 +505,7 @@ def generate_cache(
     Args:
         target: Path to a local git repo
         filter: Comma-separated glob patterns
-        score_metrics: Metrics to compute score from (default: churn_per_sloc,cyclomatic)
+        score_metrics: Optional metrics override for legacy product scoring
 
     Returns:
         JSON with complete cache including blocks, classes, and status
