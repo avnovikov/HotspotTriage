@@ -198,6 +198,7 @@ DEFAULTS: dict[str, Any] = {
         "base_port": 9123,
         "open_on_start": False,
         "max_log_records": 1000,
+        "default_target": "",
     },
 }
 
@@ -610,6 +611,11 @@ def _validate_dashboard_section(config: dict[str, Any]) -> None:
     if not isinstance(ml, int) or ml < 1:
         raise ValueError(
             f"dashboard.max_log_records must be a positive int; got {ml!r}"
+        )
+    dt = d.get("default_target")
+    if not isinstance(dt, str):
+        raise ValueError(
+            f"dashboard.default_target must be a string; got {type(dt).__name__}: {dt!r}"
         )
 
 

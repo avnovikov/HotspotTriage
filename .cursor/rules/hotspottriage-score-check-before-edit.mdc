@@ -1,0 +1,30 @@
+---
+description: Check HotspotTriage score before editing existing code
+alwaysApply: true
+---
+
+# HotspotTriage Score Check Before Edits
+
+Before changing existing code, run a HotspotTriage MCP score check for the function/block you plan to edit.
+
+## Required workflow
+
+1. Identify the exact function or method you plan to modify.
+2. Use HotspotTriage MCP (`analyze` or `analyze_with_cache`) with block granularity for the target repo/path.
+3. Locate the matching block row (`path::symbol`) and capture:
+   - `score`
+   - `score_band`
+   - `score_subscores` (if present)
+4. Use that result to guide edit priority and risk framing in your plan/notes.
+
+## Minimum reporting in planning notes
+
+- Target symbol/path
+- Current score and band
+- One-line rationale based on score/subscores
+
+## Example
+
+- Target: `src/module.py::MyClass.process`
+- Score: `0.74` (`high`)
+- Rationale: high churn burden and maintainability burden; keep change minimal and add focused tests.
