@@ -237,3 +237,22 @@ def test_cli_no_respect_gitignore_includes_tracked_matches(tmp_path: Path):
     assert r.returncode == 0, r.stderr
     paths = {row["path"] for row in json.loads(r.stdout)}
     assert paths == {"a.py", "b.py", "c/d.py"}
+
+
+def test_cli_start_mcp_server_rewrites_argv_and_delegates(monkeypatch):
+    """`hotspottriage start-mcp-server` matches Serena's `serena start-mcp-server` layout."""
+    seen: dict[str, list[str]] = {}
+
+    def _capture_mcp_main() -> None:
+        seen["argv"] = sys.argv.copy()
+
+    monkeypatch.setattr("hotspottriage.mcp_server.main", _capture_mcp_main)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["/x/venv/bin/hotspottriage", "start-mcp-server", "--no-dashboard"],
+    )
+    from hotspottriage import cli
+
+    assert cli.main() == 0
+    assert seen["argv"] == ["/x/venv/bin/hotspottriage", "--no-dashboard"]

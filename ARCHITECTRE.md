@@ -2,7 +2,7 @@
 
 Detailed internal architecture covering data flow, caching layers, the
 dashboard server, MCP integration, and known redundancies. Complement to
-`CLAUDE.md` (high-level overview) and inline docstrings (per-function detail).
+the top-level [README](README.md) and inline docstrings (per-function detail).
 
 ---
 
@@ -389,7 +389,8 @@ synchronously. Background cache jobs run in separate daemon threads.
 | Command                | Module                 | What it does |
 |------------------------|------------------------|--------------|
 | `hotspottriage <repo>` | `cli.py`               | CLI analysis (file or block) |
-| `hotspottriage-mcp`    | `mcp_server.py:main`   | FastMCP server on stdio + optional dashboard |
+| `hotspottriage start-mcp-server` | `cli.py` → `mcp_server.py:main` | FastMCP server on stdio + optional dashboard (Serena-style) |
+| `hotspottriage-mcp`    | `mcp_server.py:main`   | Same as `start-mcp-server` (direct console script alias) |
 | `hotspottriage-cache`  | `cache_generator.py:main` | Comprehensive cache generation |
 
 All registered as `[project.scripts]` in `pyproject.toml`.
