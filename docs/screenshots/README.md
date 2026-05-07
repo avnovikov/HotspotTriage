@@ -1,18 +1,20 @@
 # Screenshots for GitHub
 
-GitHub renders images in `README.md` when you use **paths relative to the repository root** (for example `docs/screenshots/dashboard-overview.png`). Commit the image files; no hosting service is required.
+GitHub renders images in [`README.md`](../README.md) when you use **paths relative to the repository root** (for example `docs/screenshots/dashboard-overview.png`). Commit the PNGs in this folder; no external image host is required. Assets here are meant to be **actual captures** of the running app unless noted otherwise.
 
 ## Updating
 
-1. Run the MCP server with the dashboard, for example:  
+When the dashboard UI changes enough that the README should reflect it:
+
+1. Run the MCP server with the dashboard open, for example:  
    `uv run hotspottriage start-mcp-server --open-browser`
-2. Capture the browser window (or viewport) and export as PNG.
-3. Overwrite the files listed below (keep the same filenames so `README.md` stays valid).
+2. Capture the browser viewport (or window) and export as PNG.
+3. Replace the files below **in place** (same filenames so [`README.md`](../README.md) keeps working).
 
 ## Files referenced from the main README
 
 | File | Purpose |
 |------|---------|
-| `dashboard-overview.png` | Web dashboard (overview / typical layout) |
+| `dashboard-overview.png` | Authentic capture of the bundled dashboard (**Overview** route) |
 
-Optional extras you can add later: `heatmap.png`, `mcp-cursor.png`, etc.—then reference them from `README.md` with the same relative-path pattern.
+Optional extras: `heatmap.png`, `mcp-cursor.png`, etc.—add under this folder and reference them from [`README.md`](../README.md) with the same relative-path pattern.
