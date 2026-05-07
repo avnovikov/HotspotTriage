@@ -291,12 +291,17 @@ def analyze(
 
     Always runs the cache-backed block pipeline. Returns JSON
     ``{"results": [...], "cache": {...}}``.
-    By default each result row is only ``function``, ``score``, and ``risk_band``
-    (set ``compact`` to false for full metric dicts).
+    By default each result row is only ``function``, ``score``, and ``risk_band``.
+    Leaving ``compact`` unset keeps this default compact output; set
+    ``compact`` to false for full metric dicts.
 
     Args:
         target: Path to a local git repo or remote git URL
-        filter: Comma-separated filters. Globs use AND semantics ('!' negates); multiple literal file paths are treated as an include list.
+        filter: Comma-separated filters, matched against repo-relative POSIX paths.
+            Globs use AND semantics ('!' negates). Example: ``*dashboard/*.py``
+            only matches root-level ``<name>dashboard/<file>.py`` paths, while
+            ``**/dashboard/*.py`` matches dashboard directories at any depth.
+            Multiple literal file paths are treated as an include list.
         score_metrics: Comma-separated metrics for scoring (default: churn_per_sloc,cyclomatic)
         limit: Maximum number of block rows returned
         sort: 'score' (default) or 'file'
