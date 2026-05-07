@@ -741,6 +741,7 @@ def to_dashboard_snapshot(
         "similarity_enabled": merged_config.get("similarity_enabled"),
         "decay_half_life": merged_config.get("decay_half_life"),
         "dashboard": deepcopy(merged_config.get("dashboard") or {}),
+        "proposed_models": deepcopy(merged_config.get("proposed_models") or {}),
     }
 
 
