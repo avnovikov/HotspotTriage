@@ -200,6 +200,13 @@ DEFAULTS: dict[str, Any] = {
         "max_log_records": 1000,
         "default_target": "",
     },
+    # MCP-only: recommended free-text model names by risk band.
+    "proposed_models": {
+        "low": "",
+        "medium": "",
+        "high": "",
+        "critical": "",
+    },
 }
 
 _VALID_LOG_LEVELS = ("debug", "info", "warning", "error")
@@ -627,12 +634,33 @@ def validate(config: dict[str, Any]) -> None:
     _validate_similarity_settings(config)
 
     _validate_dashboard_section(config)
+    _validate_proposed_models(config)
 
     _normalize.validate_metric_normalization(config)
 
     from hotspottriage import score as _score_validation
 
     _score_validation.validate_score_aggregation(config)
+
+
+def _validate_proposed_models(config: dict[str, Any]) -> None:
+    models = config.get("proposed_models")
+    if not isinstance(models, dict):
+        raise ValueError(
+            f"proposed_models must be a dict; got {type(models).__name__}: {models!r}"
+        )
+    required_bands = ("low", "medium", "high", "critical")
+    for band in required_bands:
+        if band not in models:
+            raise ValueError(
+                f"proposed_models missing required key {band!r}; "
+                f"expected keys: {list(required_bands)}"
+            )
+        value = models[band]
+        if not isinstance(value, str):
+            raise ValueError(
+                f"proposed_models[{band!r}] must be a string; got {type(value).__name__}: {value!r}"
+            )
 
 
 def _validate_dashboard_section(config: dict[str, Any]) -> None:

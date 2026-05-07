@@ -220,10 +220,16 @@ def run_cached_block_analysis_dict(
 
     if compact:
         results_list = _mcp_compact_score_rows(
-            results, granularity="block"
+            results, granularity="block", merged_config=cfg
         )
     else:
-        results_list = [_output.statistic_to_output_dict(r, cfg) for r in results]
+        results_list = []
+        for row in results:
+            output_row = _output.statistic_to_output_dict(row, cfg)
+            output_row["proposed_model"] = _proposed_model_for_band(
+                str(row.score_band), cfg
+            )
+            results_list.append(output_row)
     return {
         "results": results_list,
         "cache": cache_info,
@@ -617,9 +623,9 @@ def _initialize_repository(
 
 
 def _mcp_compact_score_rows(
-    rows: list[stats.Statistic], *, granularity: str
+    rows: list[stats.Statistic], *, granularity: str, merged_config: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """One dict per row: function symbol, score, risk band (for MCP summaries)."""
+    """One dict per row: function symbol, score, risk band, proposed model."""
     out: list[dict[str, Any]] = []
     for r in rows:
         p = r.path
@@ -627,10 +633,24 @@ def _mcp_compact_score_rows(
             fn = p.split("::", 1)[1]
         else:
             fn = p
+        score_band = str(r.score_band)
         out.append(
-            {"function": fn, "score": float(r.score), "risk_band": str(r.score_band)}
+            {
+                "function": fn,
+                "score": float(r.score),
+                "risk_band": score_band,
+                "proposed_model": _proposed_model_for_band(score_band, merged_config),
+            }
         )
     return out
+
+
+def _proposed_model_for_band(score_band: str, merged_config: dict[str, Any]) -> str:
+    proposed = merged_config.get("proposed_models")
+    if not isinstance(proposed, dict):
+        return ""
+    model = proposed.get(score_band)
+    return model if isinstance(model, str) else ""
 
 
 def _publish_block_metrics_to_dashboard(

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from hotspottriage import config as _config
 from hotspottriage.mcp_server import (
     analyze,
     generate_cache,
@@ -320,7 +321,7 @@ def test_effective_dashboard_config_uses_cli_overrides(monkeypatch):
     assert dash["open_on_start"] is True
 
 
-def test_analyze_compact_default_returns_only_function_score_risk_band(monkeypatch, test_repo):
+def test_analyze_compact_default_returns_function_score_risk_band_and_model(monkeypatch, test_repo):
     monkeypatch.setattr(
         "hotspottriage.smell.compute_smells",
         lambda *args, **kwargs: [],
@@ -334,10 +335,45 @@ def test_analyze_compact_default_returns_only_function_score_risk_band(monkeypat
     rows = data["results"]
     assert isinstance(rows, list) and len(rows) >= 1
     first = rows[0]
-    assert set(first.keys()) == {"function", "score", "risk_band"}
+    assert set(first.keys()) == {"function", "score", "risk_band", "proposed_model"}
     assert isinstance(first["function"], str)
     assert isinstance(first["score"], float)
     assert isinstance(first["risk_band"], str)
+    assert isinstance(first["proposed_model"], str)
+
+
+def test_analyze_compact_uses_configured_proposed_models(monkeypatch, test_repo):
+    monkeypatch.setattr(
+        "hotspottriage.smell.compute_smells",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setitem(
+        _config.DEFAULTS,
+        "proposed_models",
+        {
+            "low": "gpt-4o-mini",
+            "medium": "gpt-4.1",
+            "high": "o3",
+            "critical": "o3-pro",
+        },
+    )
+
+    result = analyze(str(test_repo), score_metrics="cyclomatic")
+    data = json.loads(result)
+    rows = data["results"]
+    assert rows
+    expected_by_band = {
+        "low": "gpt-4o-mini",
+        "medium": "gpt-4.1",
+        "high": "o3",
+        "critical": "o3-pro",
+    }
+    for row in rows:
+        risk_band = row["risk_band"]
+        if risk_band in expected_by_band:
+            assert row["proposed_model"] == expected_by_band[risk_band]
+        else:
+            assert row["proposed_model"] == ""
 
 
 def test_ensure_root_logging_configured_lowers_warning_threshold():
