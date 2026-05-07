@@ -40,7 +40,7 @@ pip install -e .
 ```
 After install, `hotspottriage`, `hotspottriage-mcp`, and `hotspottriage-cache` are on your PATH.''
 
-**Run as an MCP Server**  The `hotspottriage-mcp` entry point is an alias. While MCP talks over stdio, the process can also bring up a local web dashboard (FastAPI: logs, cache actions, and block metrics). Use `--open-browser` to open it when the server starts, `--no-dashboard` to disable it, or `--dashboard-port` / `--dashboard-host` to tune binding. See [ARCHITECTURE.md](ARCHITECTURE.md) for dashboard wiring.
+**Run as an MCP Server**  The `hotspottriage-mcp` entry point is an alias. While MCP talks over stdio, the process can also bring up a local web dashboard (FastAPI: logs, cache actions, and block metrics). Use `--open-browser` to open it when the server starts, `--no-dashboard` to disable it, or `--dashboard-port` / `--dashboard-host` to tune binding. See [ARCHITECTRE.md](ARCHITECTRE.md) for dashboard wiring.
 ```bash
 uv run hotspottriage start-mcp-server --help
 ```
@@ -48,12 +48,12 @@ Ephemeral run from Git (can resync on upstream churn):
 ```bash
 uvx -p 3.13 --from git+https://github.com/avnovikov/HotspotTriage hotspottriage start-mcp-server
 ```
-Example MCP client config (matches this repo's `.cursor/mcp.json`; launcher injects `start-mcp-server` args—are dashboard flags such as `--open-browser`):
+Example MCP client config for **Cursor** (save as `.cursor/mcp.json` in your project, or merge into your editor’s MCP settings—the paths below are placeholders):
 ```json
 {
   "mcpServers": {
     "hotspottriage": {
-      "command": "path/to/HotspotTriage/scripts/run-hotspottriage-mcp.sh",
+      "command": "path/to/HotspotTriage/scripts/run_hotspottriage_mcp.sh",
       "args": ["--open-browser"],
       "env": {
         "PATH": "path/to/HotspotTriage/.venv/bin:$PATH"
@@ -76,15 +76,15 @@ Direct binary (same process, explicit subcommand):
   }
 }
 ```
-For predictable tooling (e.g., pylint for smells), run from a dedicated venv and put that `bin` first on `PATH`. `scripts/run-hotspottriage-mcp.sh` prepends the project venv and execs `hotspottriage start-mcp-server`.''
+For predictable tooling (e.g., pylint for smells), run from a dedicated venv and put that `bin` first on `PATH`. [`scripts/run_hotspottriage_mcp.sh`](scripts/run_hotspottriage_mcp.sh) prepends the project venv and execs `hotspottriage start-mcp-server`.''
 
 **Tools exposed over MCP**: `analyze`, `generatecache`, `cachestatus`, `clearcache`, and `initconfig`. Pass `compact=false` on `analyze` when you need full metric rows.''
 
 **Use with Claude Code**: discovers the server through its standard MCP config. From inside the cloned repo (so the launcher and venv resolve correctly):
 ```bash
-claude mcp add hotspottriage -- ./scripts/run-hotspottriage-mcp.sh --open-browser
+claude mcp add hotspottriage -- ./scripts/run_hotspottriage_mcp.sh --open-browser
 ```
-Or register it manually by adding the same block as above to `~/.claude.json` under `mcpServers` (the `.cursor/mcp.json` snippet works verbatim — Claude Code reads the same shape). Then in a Claude Code session:
+Or register it manually by adding the same JSON as above to `~/.claude.json` under `mcpServers` (same shape as Cursor’s MCP config). Then in a Claude Code session:
 
 ```text
 /mcp                                    # confirm "hotspottriage" is connected
@@ -107,5 +107,6 @@ Tips:
 | [ARCHITECTRE.md](ARCHITECTRE.md) | Pipeline, caching, dashboard, MCP wiring, module map |
 | [SCORES.md](SCORES.md) | Metrics, normalization, composite score, risk bands |
 | [docs/block-cache-model.md](docs/block-cache-model.md) | Block cache format and semantics |
+| [docs/agent-hotspottriage-score-check.md](docs/agent-hotspottriage-score-check.md) | MCP score check before editing hotspots (agent workflow) |
 
 Developing this repo: run **`uv lock`** after dependency changes in `pyproject.toml`. Run **`pytest`** (or `uv run pytest`) before merging; architecture notes live in [ARCHITECTRE.md](ARCHITECTRE.md) above.
