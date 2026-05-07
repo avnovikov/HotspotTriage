@@ -36,6 +36,28 @@ def _server(
     )
 
 
+def _high_raw_block_row(path: str = "x.py::f") -> dict:
+    return {
+        "path": path,
+        "sloc": 85,
+        "normalized_sloc": 2.5,
+        "cyclomatic": 24,
+        "halstead": 619,
+        "maintainability": 20,
+        "churn": 104,
+        "churn_per_sloc": 1.2,
+        "decayed_churn": 100.0,
+        "decayed_churn_per_sloc": 1.1,
+        "smell_count": 10,
+        "smell_severity": 1.0,
+        "smell_burden": 1.0,
+        "smells": {},
+        "similarity_score": 0.0,
+        "similarity_band": "off",
+        "match_count": 0,
+    }
+
+
 def test_find_free_port_returns_in_range():
     port = _find_free_port("127.0.0.1", 9300, span=3)
     assert 9300 <= port <= 9302
@@ -101,11 +123,14 @@ def test_generate_cache_endpoint(monkeypatch):
         score_metrics: str,
         verbose: bool,
         progress_callback=None,
+        config_overrides=None,
     ) -> dict:
         assert target == str((Path.cwd() / "../LexVox").resolve())
         assert filter is None
         assert score_metrics == "churn_per_sloc,cyclomatic"
         assert verbose is False
+        assert isinstance(config_overrides, dict)
+        assert "score_aggregation" in config_overrides
         return {
             "metadata": {"blocks_cached": 10, "classes_indexed": 5},
             "cache_status": {"entries": 10},
@@ -181,6 +206,9 @@ def test_cache_status_endpoint(monkeypatch, tmp_path):
     assert resp.status_code == 200
     data = resp.json()
     assert data["exists"] is True
+    assert data["usable"] is False
+    assert data["stale"] is True
+    assert "regenerate" in data["message"]
     assert data["entries"] == 7
 
 
@@ -200,8 +228,8 @@ def test_cache_status_hydrates_heatmap_rows_when_cache_exists(monkeypatch, tmp_p
     monkeypatch.setattr(
         "hotspottriage.dashboard.server._cache.load_block_results",
         lambda _repo: [
-            {"path": "x.py::f", "score": 0.8, "score_band": "high"},
-            {"path": "y.py::g", "score": 0.4, "score_band": "medium"},
+            _high_raw_block_row("x.py::f"),
+            _high_raw_block_row("y.py::g"),
         ],
     )
     status = client.post("/api/cache/status", json={"target": str(repo)})
@@ -365,6 +393,79 @@ def test_config_patch_persists_and_merges_get(tmp_path):
     assert merged["score_aggregation"]["complexity_weights"]["cyclomatic"] == 0.99
     assert merged["metric_normalization"]["cyclomatic"]["breakpoints"][1][0] == cyclo_before
     assert patch_path.exists()
+
+
+def test_generate_cache_uses_saved_score_config_patch(monkeypatch, tmp_path):
+    patch_path = tmp_path / ".hotspottriage" / "dashboard_config_patch.yml"
+    srv = _server(config_patch_path=patch_path)
+    client = TestClient(srv.app)
+    saved_edges = [0.2, 0.5, 0.7]
+    patch = client.post(
+        "/api/config/patch",
+        json={"score_aggregation": {"band_edges": saved_edges}},
+    )
+    assert patch.status_code == 200
+
+    captured: dict[str, dict] = {}
+
+    def _fake_generate_full_cache(
+        target: str,
+        filter: str | None,
+        score_metrics: str,
+        verbose: bool,
+        progress_callback=None,
+        config_overrides=None,
+    ) -> dict:
+        captured["config_overrides"] = config_overrides or {}
+        return {
+            "metadata": {"blocks_cached": 1, "classes_indexed": 0},
+            "cache_status": {"entries": 1},
+            "blocks": {
+                "count": 1,
+                "results": [_high_raw_block_row()],
+            },
+        }
+
+    monkeypatch.setattr(
+        "hotspottriage.cache_generator.generate_full_cache",
+        _fake_generate_full_cache,
+    )
+    start = client.post("/api/cache/generate", json={"target": str(tmp_path)})
+    assert start.status_code == 200
+    job_id = start.json()["job_id"]
+    for _ in range(10):
+        status = client.get(f"/api/cache/jobs/{job_id}")
+        assert status.status_code == 200
+        if status.json()["status"] != "running":
+            break
+    assert status.json()["status"] == "done"
+    assert captured["config_overrides"]["score_aggregation"]["band_edges"] == saved_edges
+    assert captured["config_overrides"]["metric_normalization"]
+
+
+def test_publish_latest_block_metrics_derives_bands_from_saved_config(tmp_path):
+    patch_path = tmp_path / ".hotspottriage" / "dashboard_config_patch.yml"
+    srv = _server(config_patch_path=patch_path)
+    client = TestClient(srv.app)
+    raw_rows = [_high_raw_block_row()]
+
+    resp = client.post(
+        "/api/config/patch",
+        json={"score_aggregation": {"band_edges": [0.2, 0.5, 0.95]}},
+    )
+    assert resp.status_code == 200
+    srv.publish_latest_block_metrics(raw_rows)
+    high_rows = client.get("/api/stats/heatmap").json()["rows"]
+    assert high_rows[0]["score_band"] == "high"
+
+    resp = client.post(
+        "/api/config/patch",
+        json={"score_aggregation": {"band_edges": [0.2, 0.5, 0.7]}},
+    )
+    assert resp.status_code == 200
+    srv.publish_latest_block_metrics(raw_rows)
+    critical_rows = client.get("/api/stats/heatmap").json()["rows"]
+    assert critical_rows[0]["score_band"] == "critical"
 
 
 def test_config_patch_validation_error():

@@ -10,6 +10,7 @@ from hotspottriage.stats import (
     aggregate_by_directory,
     build_block_stats,
     build_stats,
+    derive_block_statistics,
     sort_and_limit,
 )
 from tests.fixtures.build_block_repo import build_block_repo
@@ -170,6 +171,58 @@ def test_build_block_stats_preserves_unrelated_cache_rows_on_scoped_run(tmp_path
     )
     after_rows = _cache.load_block_results(repo) or []
     assert any(str(r.get("path", "")).startswith("a.py::") for r in after_rows)
+
+
+def test_build_block_stats_persists_raw_cache_rows(tmp_path: Path):
+    repo = build_repo(tmp_path / "r")
+    build_block_stats(
+        repo,
+        ["a.py", "b.py", "c/d.py"],
+        score_metrics=["cyclomatic"],
+        similarity_enabled=False,
+        similarity_aggregate_row=False,
+        merged_config=DEFAULTS,
+    )
+    rows = _cache.load_block_results(repo) or []
+    assert rows
+    derived_keys = {"score", "score_band", "score_subscores"}
+    for row in rows:
+        assert not derived_keys.intersection(row)
+        assert not any(str(key).startswith("norm_") for key in row)
+        assert {"path", "cyclomatic", "churn", "_blob_sha", "_start", "_end"} <= set(row)
+
+
+def test_derive_block_statistics_uses_active_normalization_config():
+    raw = {
+        "path": "x.py::f",
+        "sloc": 10,
+        "normalized_sloc": 0.0,
+        "cyclomatic": 10,
+        "halstead": 20,
+        "maintainability": 85,
+        "churn": 0,
+        "churn_per_sloc": 0.0,
+        "decayed_churn": 0.0,
+        "decayed_churn_per_sloc": 0.0,
+        "smell_count": 0,
+        "smell_severity": 0.0,
+        "smell_burden": 0.0,
+        "smells": {},
+        "similarity_score": 0.0,
+        "similarity_band": "off",
+        "match_count": 0,
+    }
+    high_complexity = {**DEFAULTS}
+    low_complexity = {**DEFAULTS}
+    low_complexity["metric_normalization"] = {
+        **DEFAULTS["metric_normalization"],
+        "cyclomatic": {"method": "piecewise", "breakpoints": [[1, 0.0], [20, 0.0]]},
+    }
+
+    high_score = derive_block_statistics([raw], high_complexity)[0].score
+    low_score = derive_block_statistics([raw], low_complexity)[0].score
+
+    assert low_score < high_score
 
 
 def test_decay_reduces_churn_over_time():
