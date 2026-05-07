@@ -201,6 +201,27 @@ keys, merged via `_config._deep_merge`.
 3. Starts dashboard on a free TCP port (daemon thread).
 4. On exit, clears `_dashboard_server_instance`.
 
+### 6.1.1 Startup argv (`main`)
+
+Before `FastMCP.run`, `main()` parses leading argv with `argparse` (`add_help=False`,
+`parse_known_args`): dashboard overrides (`--no-dashboard`, `--dashboard-port`,
+`--dashboard-host`, `--open-browser`) and **`--default-target PATH_OR_URL`**.
+Remaining argv is restored for the MCP runtime.
+
+`--default-target` sets `_mcp_default_target`. MCP tools that take a repo **`target`**
+(`analyze`, `generate_cache`, `cache_status`, `clear_cache`; project-scoped
+`init_config`) resolve an empty or whitespace **`target`** via `_resolve_mcp_target`.
+
+Repo **`scripts/run_hotspottriage_mcp.sh`** uses **`#!/bin/sh`**, discovers the
+HotspotTriage checkout from the script path, prepends **`.venv/bin`** and standard
+system dirs (**`/usr/bin`**, **`/bin`**, **`/usr/local/bin`**, **`/opt/homebrew/bin`**)
+to **`PATH`** (MCP hosts such as Cursor often spawn with a stripped **`PATH`**, which
+would otherwise make **`git`** unavailable), then **`exec`s `hotspottriage start-mcp-server "$@"`**. MCP **`args`** for that command
+should therefore include only flags meant for **`start-mcp-server`** (not a second
+`start-mcp-server` token). Clients that fail on shell wrappers should set **`command`**
+to **`.venv/bin/hotspottriage`** and put **`start-mcp-server`** first in **`args`**,
+merging the same system dirs into **`env.PATH`** if **`git`** is still missing.
+
 ### 6.2 Tool → Pipeline Mapping
 
 | MCP Tool              | Pipeline                                           | Notes |

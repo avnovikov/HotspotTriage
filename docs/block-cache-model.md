@@ -76,7 +76,7 @@ MCP tool **`clear_cache(target)`** deletes `blocks.pkl` (and attempts to remove 
 
 ## MCP-related entry points
 
-The stdio server process is **`hotspottriage start-mcp-server`** (Serena-style) or **`hotspottriage-mcp`**.
+The stdio server process is **`hotspottriage start-mcp-server`** (Serena-style) or **`hotspottriage-mcp`**. Optional startup flag **`--default-target PATH_OR_URL`** applies when MCP tools pass an empty **`target`** (`analyze`, cache helpers, project **`init_config`**).
 
 | Tool | Purpose |
 |------|---------|

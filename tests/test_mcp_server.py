@@ -492,6 +492,29 @@ def test_analyze_publishes_before_limit(monkeypatch, test_repo):
     assert len(data["results"]) <= len(rows)
 
 
+def test_analyze_empty_target_uses_default_target(monkeypatch, test_repo):
+    import hotspottriage.mcp_server as mcp_mod
+
+    monkeypatch.setattr(mcp_mod, "_mcp_default_target", str(test_repo))
+    monkeypatch.setattr(
+        "hotspottriage.smell.compute_smells",
+        lambda *args, **kwargs: [],
+    )
+    result = analyze("")
+    data = json.loads(result)
+    assert "results" in data and "cache" in data
+
+
+def test_analyze_empty_without_default_target_errors(monkeypatch):
+    import hotspottriage.mcp_server as mcp_mod
+
+    monkeypatch.setattr(mcp_mod, "_mcp_default_target", None)
+    result = analyze("")
+    data = json.loads(result)
+    assert "error" in data
+    assert "default-target" in data["error"].lower()
+
+
 @pytest.mark.anyio
 async def test_mcp_lifespan_dashboard_failure_is_non_fatal(monkeypatch):
     import hotspottriage.mcp_server as mcp_mod
