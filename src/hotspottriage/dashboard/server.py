@@ -399,6 +399,13 @@ class DashboardServer:
                 out["score_aggregation"] = _config._deep_merge(sa_base, sa_patch)
             else:
                 out["score_aggregation"] = deepcopy(sa_patch)
+        pm_patch = patch.get("proposed_models")
+        if isinstance(pm_patch, dict):
+            pm_base = out.get("proposed_models")
+            if isinstance(pm_base, dict):
+                out["proposed_models"] = _config._deep_merge(pm_base, pm_patch)
+            else:
+                out["proposed_models"] = deepcopy(pm_patch)
         return out
 
     def _analysis_config_overrides(self) -> dict[str, Any]:
@@ -430,8 +437,17 @@ class DashboardServer:
             sa_full = sa_base
         probe["score_aggregation"] = sa_full
 
+        pm_base = deepcopy(self._base_snapshot.get("proposed_models") or {})
+        pm_patch = merged_patch.get("proposed_models")
+        if isinstance(pm_patch, dict):
+            pm_full = _config._deep_merge(pm_base, pm_patch)
+        else:
+            pm_full = pm_base
+        probe["proposed_models"] = pm_full
+
         _normalize.validate_metric_normalization(probe)
         _score_mod.validate_score_aggregation(probe)
+        _config._validate_proposed_models(probe)
 
     def _save_local_state(self, updates: dict[str, Any]) -> dict[str, Any]:
         with self._state_lock:
@@ -494,7 +510,7 @@ class DashboardServer:
         @app.post("/api/config/patch")
         def patch_config(payload: dict[str, Any] | None = None) -> dict[str, Any]:
             body = payload if isinstance(payload, dict) else {}
-            allowed = {"metric_normalization", "score_aggregation"}
+            allowed = {"metric_normalization", "score_aggregation", "proposed_models"}
             extra = set(body.keys()) - allowed
             if extra:
                 raise HTTPException(
@@ -504,7 +520,7 @@ class DashboardServer:
             if not body:
                 raise HTTPException(
                     status_code=400,
-                    detail="patch body must include metric_normalization and/or score_aggregation",
+                    detail="patch body must include metric_normalization and/or score_aggregation and/or proposed_models",
                 )
             with dash_self._patch_lock:
                 current = dash_self._load_patch_unlocked()
