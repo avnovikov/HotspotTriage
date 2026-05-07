@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import asynccontextmanager
+from copy import deepcopy
 import json
 import logging
 import sys
@@ -181,6 +182,7 @@ def run_cached_block_analysis_dict(
     compact: bool = True,
     sort: str = "score",
     progress_callback: Callable[[str, int, int], None] | None = None,
+    config_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Block-level analysis + cache warm-up; returns ``results`` / ``cache`` dict (not JSON).
 
@@ -198,6 +200,7 @@ def run_cached_block_analysis_dict(
         until=until,
         respect_gitignore=respect_gitignore,
         ignore_dir=ignore_dir,
+        config_overrides=config_overrides,
     )
     cfg["similarity_enabled"] = similarity
 
@@ -286,7 +289,7 @@ def analyze(
 
     Args:
         target: Path to a local git repo or remote git URL
-        filter: Comma-separated glob patterns (AND semantics, '!' negates)
+        filter: Comma-separated filters. Globs use AND semantics ('!' negates); multiple literal file paths are treated as an include list.
         score_metrics: Comma-separated metrics for scoring (default: churn_per_sloc,cyclomatic)
         limit: Maximum number of block rows returned
         sort: 'score' (default) or 'file'
@@ -482,9 +485,10 @@ def _build_analyze_config(
     until: str | None = None,
     respect_gitignore: bool = True,
     ignore_dir: str | None = None,
+    config_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build analysis config from MCP tool arguments."""
-    cfg = _config.DEFAULTS.copy()
+    cfg = deepcopy(_config.DEFAULTS)
 
     if filter:
         cfg["filter"] = [f.strip() for f in filter.split(",")]
@@ -510,7 +514,60 @@ def _build_analyze_config(
     if ignore_dir:
         cfg["ignore_directories"] = [d.strip() for d in ignore_dir.split(",")]
 
+    if config_overrides:
+        cfg = _config._deep_merge(cfg, config_overrides)
+        if filter:
+            cfg["filter"] = [f.strip() for f in filter.split(",")]
+        if score_metrics:
+            cfg["score_metrics"] = [m.strip() for m in score_metrics.split(",")]
+
     return cfg
+
+
+def _is_literal_filter_path(pattern: str) -> bool:
+    """Return True when *pattern* looks like a concrete path, not a glob."""
+    token = pattern.strip()
+    if not token or token.startswith("!"):
+        return False
+    return not any(ch in token for ch in "*?[]{}")
+
+
+def _normalize_filter_path(path: str) -> str:
+    """Normalize a filter path to POSIX relative form for exact matching."""
+    normalized = path.strip().replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
+def _build_repo_keep_predicate(
+    repo: Path,
+    cfg: dict[str, Any],
+) -> Callable[[str], bool]:
+    """Build tracked-path predicate with MCP-friendly multi-file filter handling."""
+    raw_patterns = [p.strip() for p in cfg["filter"] if p and p.strip()]
+    use_literal_list = len(raw_patterns) > 1 and all(
+        _is_literal_filter_path(p) for p in raw_patterns
+    )
+
+    if use_literal_list:
+        allowed_paths = {_normalize_filter_path(p) for p in raw_patterns}
+
+        def glob_keep(rel_posix: str) -> bool:
+            return _normalize_filter_path(rel_posix) in allowed_paths
+
+    else:
+        patterns = list(cfg["filter"])
+        if not cfg["no_default_filter"]:
+            patterns.append(cfg["default_filter"])
+        glob_keep = filtering.make_filter(patterns)
+
+    return filtering.make_tracked_path_predicate(
+        repo,
+        glob_keep=glob_keep,
+        ignore_directories=cfg["ignore_directories"],
+        respect_gitignore=cfg["respect_gitignore"],
+    )
 
 
 def _initialize_repository(
@@ -527,18 +584,7 @@ def _initialize_repository(
     """
     _config.validate(cfg)
     with discovery.resolve_target(target) as repo:
-        # Build filter predicates
-        patterns = list(cfg["filter"])
-        if not cfg["no_default_filter"]:
-            patterns.append(cfg["default_filter"])
-
-        glob_keep = filtering.make_filter(patterns)
-        keep = filtering.make_tracked_path_predicate(
-            repo,
-            glob_keep=glob_keep,
-            ignore_directories=cfg["ignore_directories"],
-            respect_gitignore=cfg["respect_gitignore"],
-        )
+        keep = _build_repo_keep_predicate(repo, cfg)
         files = [f for f in discovery.list_tracked_files(repo) if keep(f)]
         score_metrics = list(cfg["score_metrics"])
 
@@ -628,18 +674,7 @@ def _analyze_repository(
     """
     _config.validate(cfg)
     with discovery.resolve_target(target) as repo:
-        # Build filter predicates
-        patterns = list(cfg["filter"])
-        if not cfg["no_default_filter"]:
-            patterns.append(cfg["default_filter"])
-
-        glob_keep = filtering.make_filter(patterns)
-        keep = filtering.make_tracked_path_predicate(
-            repo,
-            glob_keep=glob_keep,
-            ignore_directories=cfg["ignore_directories"],
-            respect_gitignore=cfg["respect_gitignore"],
-        )
+        keep = _build_repo_keep_predicate(repo, cfg)
         files = [f for f in discovery.list_tracked_files(repo) if keep(f)]
         score_metrics = list(cfg["score_metrics"])
 

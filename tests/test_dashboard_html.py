@@ -16,6 +16,7 @@ def test_dashboard_html_contains_required_panels():
     assert "Refresh data" in DASHBOARD_HTML
     assert "No data yet" in DASHBOARD_HTML
     assert "scoreWeightsPanel" in DASHBOARD_HTML
+    assert "scoreBandsPanel" in DASHBOARD_HTML
     assert "norm-metric-card" in DASHBOARD_HTML
     assert "weight-sum-badge" in DASHBOARD_HTML
     assert "heatmapUpdateBtn" in DASHBOARD_HTML
@@ -52,3 +53,13 @@ def test_dashboard_html_is_self_contained():
     assert "/api/cache/context" in DASHBOARD_HTML
     assert "/api/config/patch" in DASHBOARD_HTML
     assert "setInterval(refreshDistributionsOnly, 30000)" in DASHBOARD_HTML
+
+
+def test_dashboard_html_exposes_score_band_threshold_editor():
+    assert "Score band thresholds" in DASHBOARD_HTML
+    assert "Risk band handles" in DASHBOARD_HTML
+    assert "DEFAULT_BAND_EDGES" in DASHBOARD_HTML
+    assert "band_edges" in DASHBOARD_HTML
+    assert "band_names" in DASHBOARD_HTML
+    assert "renderScoreBands()" in DASHBOARD_HTML
+    assert 'data-role="band-slider"' in DASHBOARD_HTML
