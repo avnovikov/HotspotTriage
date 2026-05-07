@@ -378,13 +378,20 @@ def apply_cli_overrides(
     return out
 
 
-def validate(config: dict[str, Any]) -> None:
-    """Validate a fully-merged config. Raises ValueError on the first problem.
+_SMELL_POSITIVE_INT_CONFIG_KEYS: tuple[str, ...] = (
+    "smell_max_statements",
+    "smell_max_attributes",
+    "smell_max_public_methods",
+    "smell_max_args",
+    "smell_max_branches",
+    "smell_min_public_methods",
+    "smell_max_comment_block_lines",
+    "smell_data_class_min_attributes",
+    "smell_speculative_generality_min_hits",
+)
 
-    Defensive check: catches typos / bad values from any layer (file or CLI)
-    before they reach the analysis pipeline, where the failure mode is harder
-    to debug ("why is my output empty?").
-    """
+
+def _validate_score_metrics(config: dict[str, Any]) -> list[Any]:
     score_metrics = config.get("score_metrics") or []
     if not isinstance(score_metrics, list) or not score_metrics:
         raise ValueError("score_metrics must be a non-empty list")
@@ -394,17 +401,20 @@ def validate(config: dict[str, Any]) -> None:
             f"unknown score metric(s): {bad} "
             f"(valid: {list(_stats.SCORE_METRICS)})"
         )
+    return score_metrics
 
+
+def _validate_format_sort_granularity_log(config: dict[str, Any]) -> None:
     fmt = config.get("format")
     if fmt not in _output.FORMATS:
         raise ValueError(
             f"unknown format: {fmt!r} (valid: {list(_output.FORMATS)})"
         )
 
-    sort = config.get("sort")
-    if sort not in _stats.SORT_KEYS:
+    sort_key = config.get("sort")
+    if sort_key not in _stats.SORT_KEYS:
         raise ValueError(
-            f"unknown sort key: {sort!r} (valid: {list(_stats.SORT_KEYS)})"
+            f"unknown sort key: {sort_key!r} (valid: {list(_stats.SORT_KEYS)})"
         )
 
     granularity = config.get("granularity")
@@ -421,6 +431,8 @@ def validate(config: dict[str, Any]) -> None:
             f"(valid: {list(_VALID_LOG_LEVELS)})"
         )
 
+
+def _validate_limit_and_block_workers(config: dict[str, Any]) -> None:
     limit = config.get("limit")
     if limit is not None and (not isinstance(limit, int) or limit < 0):
         raise ValueError(f"limit must be null or a non-negative int; got {limit!r}")
@@ -431,9 +443,13 @@ def validate(config: dict[str, Any]) -> None:
             f"block_workers must be null or a positive int; got {workers!r}"
         )
 
+
+def _validate_block_directories_exclusion(config: dict[str, Any]) -> None:
     if config.get("granularity") == "block" and config.get("directories"):
         raise ValueError("`directories` cannot be combined with `granularity: block`")
 
+
+def _validate_gitignore_and_ignore_directories(config: dict[str, Any]) -> None:
     rg = config.get("respect_gitignore")
     if not isinstance(rg, bool):
         raise ValueError(
@@ -452,6 +468,8 @@ def validate(config: dict[str, Any]) -> None:
             )
         _filtering.normalize_directory_prefix(entry)
 
+
+def _validate_decay_half_life_and_smell_weight(config: dict[str, Any]) -> None:
     decay_hl = config.get("decay_half_life")
     if decay_hl is not None and (not isinstance(decay_hl, int) or decay_hl < 1):
         raise ValueError(
@@ -463,13 +481,19 @@ def validate(config: dict[str, Any]) -> None:
             f"smell_weight must be a non-negative number; got {smell_weight!r}"
         )
 
+
+def _validate_smell_default_weight(config: dict[str, Any]) -> None:
     smell_default = config.get("smell_default_weight")
-    if not isinstance(smell_default, (int, float)) or not (0.0 <= float(smell_default) <= 1.0):
+    if not isinstance(smell_default, (int, float)) or not (
+        0.0 <= float(smell_default) <= 1.0
+    ):
         raise ValueError(
             "smell_default_weight must be a number in [0.0, 1.0]; "
             f"got {smell_default!r}"
         )
 
+
+def _validate_smell_category_weights(config: dict[str, Any]) -> None:
     scw = config.get("smell_category_weights")
     if not isinstance(scw, dict) or not scw:
         raise ValueError("smell_category_weights must be a non-empty dict")
@@ -485,6 +509,8 @@ def validate(config: dict[str, Any]) -> None:
                 f"smell_category_weights[{key!r}] must be a number in [0.0, 1.0]; got {val!r}"
             )
 
+
+def _validate_smell_rule_weights(config: dict[str, Any]) -> None:
     srw = config.get("smell_rule_weights")
     if not isinstance(srw, dict):
         raise ValueError(
@@ -492,28 +518,23 @@ def validate(config: dict[str, Any]) -> None:
         )
     for key, val in srw.items():
         if not isinstance(key, str) or not key.strip():
-            raise ValueError(f"smell_rule_weights keys must be non-empty strings; got {key!r}")
+            raise ValueError(
+                f"smell_rule_weights keys must be non-empty strings; got {key!r}"
+            )
         if not isinstance(val, (int, float)) or not (0.0 <= float(val) <= 1.0):
             raise ValueError(
                 f"smell_rule_weights[{key!r}] must be a number in [0.0, 1.0]; got {val!r}"
             )
 
-    smell_keys = (
-        "smell_max_statements",
-        "smell_max_attributes",
-        "smell_max_public_methods",
-        "smell_max_args",
-        "smell_max_branches",
-        "smell_min_public_methods",
-        "smell_max_comment_block_lines",
-        "smell_data_class_min_attributes",
-        "smell_speculative_generality_min_hits",
-    )
-    for key in smell_keys:
+
+def _validate_smell_positive_int_thresholds(config: dict[str, Any]) -> None:
+    for key in _SMELL_POSITIVE_INT_CONFIG_KEYS:
         value = config.get(key)
         if not isinstance(value, int) or value < 1:
             raise ValueError(f"{key} must be a positive int; got {value!r}")
 
+
+def _validate_smell_comment_ratio_and_middle_man(config: dict[str, Any]) -> None:
     comment_ratio = config.get("smell_max_comment_ratio")
     if not isinstance(comment_ratio, (int, float)) or comment_ratio <= 0:
         raise ValueError(
@@ -527,17 +548,25 @@ def validate(config: dict[str, Any]) -> None:
             f"got {middle_man_avg_sloc!r}"
         )
 
+
+def _validate_progress_flag(config: dict[str, Any]) -> None:
     progress = config.get("progress")
     if progress is not None and not isinstance(progress, bool):
         raise ValueError(
             f"progress must be null or a boolean; got {type(progress).__name__}: {progress!r}"
         )
 
+
+def _validate_similarity_metric_vs_granularity(
+    config: dict[str, Any], score_metrics: list[Any]
+) -> None:
     if "similarity_score" in score_metrics and config.get("granularity") != "block":
         raise ValueError(
             "score_metrics cannot include similarity_score unless granularity is block"
         )
 
+
+def _validate_similarity_settings(config: dict[str, Any]) -> None:
     sim_en = config.get("similarity_enabled")
     if not isinstance(sim_en, bool):
         raise ValueError(
@@ -573,6 +602,29 @@ def validate(config: dict[str, Any]) -> None:
         raise ValueError(
             f"similarity_aggregate_row must be a boolean; got {type(sar).__name__}: {sar!r}"
         )
+
+
+def validate(config: dict[str, Any]) -> None:
+    """Validate a fully-merged config. Raises ValueError on the first problem.
+
+    Defensive check: catches typos / bad values from any layer (file or CLI)
+    before they reach the analysis pipeline, where the failure mode is harder
+    to debug ("why is my output empty?").
+    """
+    score_metrics = _validate_score_metrics(config)
+    _validate_format_sort_granularity_log(config)
+    _validate_limit_and_block_workers(config)
+    _validate_block_directories_exclusion(config)
+    _validate_gitignore_and_ignore_directories(config)
+    _validate_decay_half_life_and_smell_weight(config)
+    _validate_smell_default_weight(config)
+    _validate_smell_category_weights(config)
+    _validate_smell_rule_weights(config)
+    _validate_smell_positive_int_thresholds(config)
+    _validate_smell_comment_ratio_and_middle_man(config)
+    _validate_progress_flag(config)
+    _validate_similarity_metric_vs_granularity(config, score_metrics)
+    _validate_similarity_settings(config)
 
     _validate_dashboard_section(config)
 

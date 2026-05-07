@@ -6,11 +6,14 @@ explicit set of smell-oriented rules and returns normalized smell records.
 from __future__ import annotations
 
 import json
+import logging
 import re
-from copy import deepcopy
+import shutil
 import subprocess
+import sys
 import token
 import tokenize
+from copy import deepcopy
 from io import StringIO
 from pathlib import Path
 from typing import Any, Iterable
@@ -20,6 +23,11 @@ from radon.raw import analyze as raw_analyze
 from hotspottriage import blocks as _blocks
 from hotspottriage import complexity as _complexity
 from hotspottriage import config as _config
+
+logger = logging.getLogger(__name__)
+
+# Log once per process when Pylint cannot be run (missing binary / PATH).
+_PYLINT_SKIP_WARNED = False
 
 PYLINT_CODES: tuple[str, ...] = (
     "R0915",  # too-many-statements
@@ -69,9 +77,37 @@ def _default_thresholds() -> dict[str, int]:
     }
 
 
-def _build_pylint_command(path: Path, thresholds: dict[str, int]) -> list[str]:
+def _pylint_executable() -> str | None:
+    """Resolve ``pylint``: ``PATH``, then same directory as ``sys.executable`` (venv layout).
+
+    Do not ``resolve()`` the interpreter path: venv shims often symlink to a base
+    ``python3.x``; resolving would point at the framework ``bin`` where ``pylint``
+    is not installed even when ``.venv/bin/pylint`` exists.
+    """
+    which = shutil.which("pylint")
+    if which:
+        return which
+    candidate = Path(sys.executable).expanduser().parent / "pylint"
+    return str(candidate) if candidate.is_file() else None
+
+
+def _log_pylint_skip_once() -> None:
+    global _PYLINT_SKIP_WARNED
+    if _PYLINT_SKIP_WARNED:
+        return
+    _PYLINT_SKIP_WARNED = True
+    logger.warning(
+        "pylint executable not found; Pylint-backed smells are skipped (radon/comment "
+        "heuristics still run). Install pylint or run from the project venv so "
+        "`pylint` is on PATH or next to Python."
+    )
+
+
+def _build_pylint_command(
+    path: Path, thresholds: dict[str, int | float], pylint_exe: str
+) -> list[str]:
     return [
-        "pylint",
+        pylint_exe,
         str(path),
         "--output-format=json",
         "--disable=all",
@@ -110,13 +146,16 @@ def _compute_pylint_smells(path: Path, raw_pylint: list[dict[str, Any]]) -> list
 
 def _run_pylint_raw(path: Path, thresholds: dict[str, int | float]) -> list[dict[str, Any]]:
     """Return raw pylint json objects filtered to dict entries only."""
-    cmd = _build_pylint_command(path, thresholds)
+    exe = _pylint_executable()
+    if exe is None:
+        _log_pylint_skip_once()
+        return []
+    cmd = _build_pylint_command(path, thresholds, exe)
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    except FileNotFoundError as e:
-        raise RuntimeError(
-            "pylint executable not found; install pylint to enable smell detection"
-        ) from e
+    except FileNotFoundError:
+        _log_pylint_skip_once()
+        return []
     raw = proc.stdout.strip()
     if not raw:
         return []
@@ -381,3 +420,42 @@ def compute_smells(
     res_cfg = smell_resolution_cfg(merged_config)
     _attach_severities(out, res_cfg)
     return out
+
+
+def collect_repo_smell_findings(
+    target: str,
+    filter: str | None = None,
+    *,
+    respect_gitignore: bool = True,
+    ignore_dir: str | None = None,
+    merged_config: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Flat smell findings for tracked files under the same filters as the CLI/MCP used.
+
+    Not an MCP tool — for internal use and tests. Uses :func:`compute_smells` per file.
+    """
+    from hotspottriage import discovery, filtering
+
+    cfg = dict(_config.DEFAULTS)
+    if filter:
+        cfg["filter"] = [f.strip() for f in filter.split(",")]
+    cfg["respect_gitignore"] = respect_gitignore
+    if ignore_dir:
+        cfg["ignore_directories"] = [d.strip() for d in ignore_dir.split(",")]
+
+    findings: list[dict[str, Any]] = []
+    with discovery.resolve_target(target) as repo:
+        patterns = list(cfg["filter"])
+        if not cfg["no_default_filter"]:
+            patterns.append(cfg["default_filter"])
+        glob_keep = filtering.make_filter(patterns)
+        keep = filtering.make_tracked_path_predicate(
+            repo,
+            glob_keep=glob_keep,
+            ignore_directories=cfg["ignore_directories"],
+            respect_gitignore=cfg["respect_gitignore"],
+        )
+        files = [f for f in discovery.list_tracked_files(repo) if keep(f)]
+        for rel in files:
+            findings.extend(compute_smells(repo / rel, merged_config))
+    return findings

@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 import json
 import logging
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -21,11 +22,9 @@ from hotspottriage import churn as _churn
 from hotspottriage import cache as _cache
 from hotspottriage import cache_generator as _cache_gen
 from hotspottriage import config as _config
-from hotspottriage import blocks as _blocks
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.server import DashboardServer
 from hotspottriage.dashboard.stats import StatsCollector
-from hotspottriage import smell as _smell
 from hotspottriage import discovery, filtering, output as _output, stats
 
 logger = logging.getLogger(__name__)
@@ -33,6 +32,8 @@ logger = logging.getLogger(__name__)
 # Populated in :func:`main` before ``mcp.run()`` (used by dashboard lifespan).
 _mcp_dashboard_cli: argparse.Namespace | None = None
 _dashboard_stats = StatsCollector()
+# Live dashboard instance when MCP enables the FastAPI server (block metrics publishing).
+_dashboard_server_instance: DashboardServer | None = None
 _dashboard_log_handler = MemoryLogHandler(
     max_records=int(_config.DEFAULTS["dashboard"]["max_log_records"])
 )
@@ -65,6 +66,7 @@ def _effective_dashboard_config() -> dict[str, Any]:
 
 @asynccontextmanager
 async def _mcp_lifespan(_: Any):
+    global _dashboard_server_instance
     dashboard: DashboardServer | None = None
     cfg = _effective_dashboard_config()
     dash_cfg = dict(cfg.get("dashboard") or {})
@@ -78,28 +80,16 @@ async def _mcp_lifespan(_: Any):
                 base_port=int(dash_cfg.get("base_port", 9123)),
                 open_on_start=bool(dash_cfg.get("open_on_start", False)),
             )
+            _dashboard_server_instance = dashboard
             dashboard.start()
             logger.info("HotspotTriage dashboard: %s/dashboard/", dashboard.base_url)
         except Exception as e:  # pragma: no cover - defensive path
             logger.warning("Dashboard startup failed: %s", e)
     yield
+    _dashboard_server_instance = None
 
 
 mcp = FastMCP("hotspottriage", lifespan=_mcp_lifespan)
-
-
-def _compact_score_rows(results: list[stats.Statistic], cfg: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return MCP-facing minimal rows for analysis responses."""
-    compact: list[dict[str, Any]] = []
-    for r in results:
-        row = _output.statistic_to_output_dict(r, cfg)
-        compact.append(
-            {
-                "score": float(row.get("score", 0.0)),
-                "score_band": str(row.get("score_band", "n/a")),
-            }
-        )
-    return compact
 
 
 def _parse_mcp_dashboard_argv() -> argparse.Namespace:
@@ -138,9 +128,9 @@ def _parse_mcp_dashboard_argv() -> argparse.Namespace:
     return args
 
 
-@mcp.tool()
-def analyze_with_cache(
+def run_cached_block_analysis_dict(
     target: str,
+    *,
     filter: str | None = None,
     score_metrics: str | None = None,
     limit: int | None = None,
@@ -149,54 +139,82 @@ def analyze_with_cache(
     respect_gitignore: bool = True,
     ignore_dir: str | None = None,
     similarity: bool = True,
-) -> str:
-    """Analyze a repository with block-level caching.
+    compact: bool = True,
+    sort: str = "score",
+    progress_callback: Callable[[str, int, int], None] | None = None,
+) -> dict[str, Any]:
+    """Block-level analysis + cache warm-up; returns ``results`` / ``cache`` dict (not JSON).
 
-    Generates and caches block-level metrics (functions/methods) for faster
-    subsequent runs. The cache is stored in <repo>/.hotspottriage/cache/blocks.pkl.
-
-    Args:
-        target: Path to a local git repo
-        filter: Comma-separated glob patterns
-        score_metrics: Metrics to compute score from (default: churn_per_sloc,cyclomatic)
-        limit: Maximum results to return
-        since: Git --since date filter
-        until: Git --until date filter
-        respect_gitignore: Apply .gitignore rules (default: true)
-        ignore_dir: Comma-separated directory prefixes to skip
-        similarity: Whether to compute DeepCSIM similarity per block (default: true)
-
-    Returns:
-        JSON list of block-level statistics with cache metadata
+    Optional ``progress_callback(label, done, total)`` mirrors
+    :func:`hotspottriage.stats.build_block_stats` progress events.
     """
+    cfg = _build_analyze_config(
+        filter=filter,
+        score_metrics=score_metrics,
+        granularity="block",
+        limit=limit,
+        directories=False,
+        sort=sort,
+        since=since,
+        until=until,
+        respect_gitignore=respect_gitignore,
+        ignore_dir=ignore_dir,
+    )
+    cfg["similarity_enabled"] = similarity
+
+    results_full = _analyze_repository(
+        target, cfg, apply_limit=False, progress_callback=progress_callback
+    )
+    _publish_block_metrics_to_dashboard(results_full, cfg)
+    results = stats.sort_and_limit(
+        results_full, by=cfg["sort"], limit=cfg["limit"]
+    )
+
+    cache_info = _initialize_repository(
+        target, cfg, progress_callback=progress_callback
+    )
+
+    if compact:
+        results_list = _mcp_compact_score_rows(
+            results, granularity="block"
+        )
+    else:
+        results_list = [_output.statistic_to_output_dict(r, cfg) for r in results]
+    return {
+        "results": results_list,
+        "cache": cache_info,
+    }
+
+
+def _run_analyze_cached(
+    target: str,
+    *,
+    filter: str | None = None,
+    score_metrics: str | None = None,
+    limit: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    respect_gitignore: bool = True,
+    ignore_dir: str | None = None,
+    similarity: bool = True,
+    compact: bool = True,
+    sort: str = "score",
+) -> str:
+    """Block-level analysis with disk cache warm-up; returns JSON ``{results, cache}``."""
     try:
-        # Build config for block granularity analysis
-        cfg = _build_analyze_config(
+        response = run_cached_block_analysis_dict(
+            target,
             filter=filter,
             score_metrics=score_metrics,
-            granularity="block",
             limit=limit,
-            directories=False,
-            sort="score",
             since=since,
             until=until,
             respect_gitignore=respect_gitignore,
             ignore_dir=ignore_dir,
+            similarity=similarity,
+            compact=compact,
+            sort=sort,
         )
-        cfg["similarity_enabled"] = similarity
-
-        # Run block-level analysis (which generates and caches metrics)
-        results = _analyze_repository(target, cfg)
-
-        # Get cache info
-        cache_info = _initialize_repository(target, cfg)
-
-        # Keep full metric rows for cache-oriented workflows.
-        results_list = [_output.statistic_to_output_dict(r, cfg) for r in results]
-        response = {
-            "results": results_list,
-            "cache": cache_info,
-        }
         return json.dumps(response, indent=2)
 
     except Exception as e:
@@ -205,115 +223,55 @@ def analyze_with_cache(
 
 
 @mcp.tool()
-def get_code_smells(
-    target: str,
-    filter: str | None = None,
-    respect_gitignore: bool = True,
-    ignore_dir: str | None = None,
-) -> str:
-    """Return code-smell findings for tracked files in a repository.
-
-    Results are a flat list with keys:
-    - file
-    - line
-    - smell
-    - message
-    - confidence (optional; present for approximate smells)
-    - scope (optional; ``{"kind": "class", "symbol": qualname}`` for class-attributed rows)
-    """
-    try:
-        cfg = _config.DEFAULTS.copy()
-        if filter:
-            cfg["filter"] = [f.strip() for f in filter.split(",")]
-        cfg["respect_gitignore"] = respect_gitignore
-        if ignore_dir:
-            cfg["ignore_directories"] = [d.strip() for d in ignore_dir.split(",")]
-
-        with discovery.resolve_target(target) as repo:
-            patterns = list(cfg["filter"])
-            if not cfg["no_default_filter"]:
-                patterns.append(cfg["default_filter"])
-            glob_keep = filtering.make_filter(patterns)
-            keep = filtering.make_tracked_path_predicate(
-                repo,
-                glob_keep=glob_keep,
-                ignore_directories=cfg["ignore_directories"],
-                respect_gitignore=cfg["respect_gitignore"],
-            )
-            files = [f for f in discovery.list_tracked_files(repo) if keep(f)]
-            findings: list[dict[str, Any]] = []
-            for rel in files:
-                findings.extend(_smell.compute_smells(repo / rel))
-            return json.dumps(findings, indent=2)
-    except Exception as e:
-        logger.exception("Smell analysis failed")
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
 def analyze(
     target: str,
     filter: str | None = None,
     score_metrics: str | None = None,
-    granularity: str = "file",
     limit: int | None = None,
-    format: str = "json",
-    directories: bool = False,
     sort: str = "score",
     since: str | None = None,
     until: str | None = None,
     respect_gitignore: bool = True,
     ignore_dir: str | None = None,
     similarity: bool = True,
+    compact: bool = True,
 ) -> str:
-    """Analyze a git repository for code complexity and churn hotspots.
+    """Analyze a repository: block-level metrics, disk cache, and dashboard publish.
+
+    Always runs the cache-backed block pipeline. Returns JSON
+    ``{"results": [...], "cache": {...}}``.
+    By default each result row is only ``function``, ``score``, and ``risk_band``
+    (set ``compact`` to false for full metric dicts).
 
     Args:
         target: Path to a local git repo or remote git URL
         filter: Comma-separated glob patterns (AND semantics, '!' negates)
-        score_metrics: Comma-separated metrics to compute score from
-                      (default: churn_per_sloc,cyclomatic)
-                      Available: sloc, cyclomatic, halstead, maintainability, churn, churn_per_sloc
-        granularity: 'file' (default) or 'block' (per-function analysis)
-        limit: Maximum number of results to return
-        format: 'json' (default) or 'table'
-        directories: Aggregate by directory instead of file
+        score_metrics: Comma-separated metrics for scoring (default: churn_per_sloc,cyclomatic)
+        limit: Maximum number of block rows returned
         sort: 'score' (default) or 'file'
         since: Git --since date filter
         until: Git --until date filter
         respect_gitignore: Apply .gitignore rules (default: true)
         ignore_dir: Comma-separated directory prefixes to skip
-        similarity: DeepCSIM similarity for block rows (default: true; ignored for file granularity)
+        similarity: DeepCSIM similarity per block (default: true)
+        compact: When true (default), each row is only ``function``, ``score``, ``risk_band``
 
     Returns:
-        JSON-formatted analysis results
+        JSON object with ``results`` and ``cache`` keys, or ``{"error": ...}``
     """
-    try:
-        # Parse arguments into config
-        cfg = _build_analyze_config(
-            filter=filter,
-            score_metrics=score_metrics,
-            granularity=granularity,
-            limit=limit,
-            directories=directories,
-            sort=sort,
-            since=since,
-            until=until,
-            respect_gitignore=respect_gitignore,
-            ignore_dir=ignore_dir,
-        )
-        cfg["similarity_enabled"] = similarity
-
-        # Run analysis
-        results = _analyze_repository(target, cfg)
-
-        # Format results (minimal MCP payload).
-        results_list = _compact_score_rows(results, cfg)
-        return json.dumps(results_list, indent=2)
-
-    except Exception as e:
-        logger.exception("Analysis failed")
-        return json.dumps({"error": str(e)})
+    return _run_analyze_cached(
+        target,
+        filter=filter,
+        score_metrics=score_metrics,
+        limit=limit,
+        since=since,
+        until=until,
+        respect_gitignore=respect_gitignore,
+        ignore_dir=ignore_dir,
+        similarity=similarity,
+        compact=compact,
+        sort=sort,
+    )
 
 
 @mcp.tool()
@@ -339,23 +297,14 @@ def cache_status(target: str) -> str:
                 "size_bytes": 0,
             })
 
-        # Count cache entries and size
-        cache_file = cache_dir / "blocks.pkl"
+        cache_file = cache_dir / _cache._CACHE_FILE
         entries = 0
         size_bytes = 0
 
         if cache_file.exists():
             size_bytes = cache_file.stat().st_size
-            try:
-                import pickle
-                with open(cache_file, "rb") as f:
-                    data = pickle.load(f)
-                    entries = len(data) if isinstance(data, dict) else 0
-            except Exception as e:
-                return json.dumps({
-                    "status": "error",
-                    "message": f"Failed to read cache: {str(e)}",
-                })
+            rows = _cache.load_block_results(repo_path)
+            entries = len(rows) if rows else 0
 
         return json.dumps({
             "status": "ok",
@@ -390,9 +339,7 @@ def clear_cache(target: str) -> str:
                 "message": "No cache to clear",
             })
 
-        # Remove cache files
-        import shutil
-        cache_file = cache_dir / "blocks.pkl"
+        cache_file = cache_dir / _cache._CACHE_FILE
         if cache_file.exists():
             cache_file.unlink()
 
@@ -413,88 +360,10 @@ def clear_cache(target: str) -> str:
 
 
 @mcp.tool()
-def analyze_classes(
-    target: str,
-    filter: str | None = None,
-) -> str:
-    """Analyze classes and their methods in Python files (file/class/method granularity).
-
-    Args:
-        target: Path to a local git repo
-        filter: Comma-separated glob patterns to filter files
-
-    Returns:
-        JSON list with file, class, and method information including metrics
-    """
-    try:
-        repo_path = Path(target)
-
-        # Build filter config
-        cfg = _config.DEFAULTS.copy()
-        if filter:
-            cfg["filter"] = [f.strip() for f in filter.split(",")]
-
-        # Discover and filter files
-        with discovery.resolve_target(target) as repo:
-            patterns = list(cfg["filter"])
-            if not cfg["no_default_filter"]:
-                patterns.append(cfg["default_filter"])
-
-            glob_keep = filtering.make_filter(patterns)
-            keep = filtering.make_tracked_path_predicate(
-                repo,
-                glob_keep=glob_keep,
-                ignore_directories=cfg["ignore_directories"],
-                respect_gitignore=cfg["respect_gitignore"],
-            )
-            files = [f for f in discovery.list_tracked_files(repo) if keep(f)]
-
-            # Extract class and method information
-            results = []
-            for file_path in files:
-                full_path = repo / file_path
-                try:
-                    src = full_path.read_text(encoding="utf-8")
-                    blocks = _blocks.extract_blocks(src)
-
-                    for block in blocks:
-                        # Parse block name to get class/method hierarchy
-                        parts = block.name.split(".")
-                        if len(parts) > 1:
-                            # It's a method (or nested function)
-                            class_name = parts[0] if len(parts) >= 1 else None
-                            method_name = parts[-1]
-                            parent = ".".join(parts[:-1])
-                        else:
-                            # Top-level function
-                            class_name = None
-                            method_name = parts[0]
-                            parent = None
-
-                        results.append({
-                            "file": str(file_path),
-                            "class": class_name,
-                            "method": method_name,
-                            "full_name": block.name,
-                            "start_line": block.start,
-                            "end_line": block.end,
-                            "lines": block.end - block.start + 1,
-                        })
-                except Exception as e:
-                    logger.warning(f"Failed to analyze {file_path}: {e}")
-
-        return json.dumps(results, indent=2)
-
-    except Exception as e:
-        logger.exception("Class analysis failed")
-        return json.dumps({"error": str(e)})
-
-
-@mcp.tool()
 def generate_cache(
     target: str,
     filter: str | None = None,
-    score_metrics: str | None = None,
+    score_metrics: str = "churn_per_sloc,cyclomatic",
 ) -> str:
     """Generate comprehensive codebase cache (blocks + classes/methods).
 
@@ -505,7 +374,7 @@ def generate_cache(
     Args:
         target: Path to a local git repo
         filter: Comma-separated glob patterns
-        score_metrics: Optional metrics override for legacy product scoring
+        score_metrics: Metrics to compute score from (default: churn_per_sloc,cyclomatic)
 
     Returns:
         JSON with complete cache including blocks, classes, and status
@@ -603,7 +472,11 @@ def _build_analyze_config(
     return cfg
 
 
-def _initialize_repository(target: str, cfg: dict[str, Any]) -> dict[str, Any]:
+def _initialize_repository(
+    target: str,
+    cfg: dict[str, Any],
+    progress_callback: Callable[[str, int, int], None] | None = None,
+) -> dict[str, Any]:
     """Initialize repository cache with all metrics (blocks and churn).
 
     Caches block-level metrics for fast subsequent analysis. Returns cache
@@ -635,25 +508,17 @@ def _initialize_repository(target: str, cfg: dict[str, Any]) -> dict[str, Any]:
             workers=cfg.get("block_workers"),
             decay_half_life=cfg.get("decay_half_life"),
             smell_weight=float(cfg.get("smell_weight", 0.0)),
+            progress_callback=progress_callback,
             merged_config=cfg,
             **stats.block_similarity_kwargs_from_config(cfg),
         )
 
         # Return cache info
         cache_dir = _cache.cache_path_for(repo)
-        cache_file = cache_dir / "blocks.pkl"
+        cache_file = cache_dir / _cache._CACHE_FILE
         cache_size = cache_file.stat().st_size if cache_file.exists() else 0
-
-        # Count entries
-        entries = 0
-        if cache_file.exists():
-            try:
-                import pickle
-                with open(cache_file, "rb") as f:
-                    data = pickle.load(f)
-                    entries = len(data) if isinstance(data, dict) else 0
-            except Exception:
-                pass
+        rows = _cache.load_block_results(repo)
+        entries = len(rows) if rows else 0
 
         return {
             "cache_file": str(cache_file),
@@ -662,7 +527,43 @@ def _initialize_repository(target: str, cfg: dict[str, Any]) -> dict[str, Any]:
         }
 
 
-def _analyze_repository(target: str, cfg: dict[str, Any]) -> list[stats.Statistic]:
+def _mcp_compact_score_rows(
+    rows: list[stats.Statistic], *, granularity: str
+) -> list[dict[str, Any]]:
+    """One dict per row: function symbol, score, risk band (for MCP summaries)."""
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        p = r.path
+        if granularity == "block" and "::" in p:
+            fn = p.split("::", 1)[1]
+        else:
+            fn = p
+        out.append(
+            {"function": fn, "score": float(r.score), "risk_band": str(r.score_band)}
+        )
+    return out
+
+
+def _publish_block_metrics_to_dashboard(
+    rows: list[stats.Statistic],
+    cfg: dict[str, Any],
+) -> None:
+    """Push raw block rows to the dashboard for heatmap/histogram endpoints."""
+    if cfg.get("granularity") != "block":
+        return
+    dash = _dashboard_server_instance
+    if dash is None:
+        return
+    dash.publish_latest_block_metrics([r.as_dict() for r in rows])
+
+
+def _analyze_repository(
+    target: str,
+    cfg: dict[str, Any],
+    *,
+    apply_limit: bool = True,
+    progress_callback: Callable[[str, int, int], None] | None = None,
+) -> list[stats.Statistic]:
     """Run the full analysis pipeline.
 
     Mirrors the CLI flow from cli.py, using the same filtering and metrics computation.
@@ -694,6 +595,7 @@ def _analyze_repository(target: str, cfg: dict[str, Any]) -> list[stats.Statisti
                 workers=cfg.get("block_workers"),
                 decay_half_life=decay_half_life,
                 smell_weight=smell_weight,
+                progress_callback=progress_callback,
                 merged_config=cfg,
                 **stats.block_similarity_kwargs_from_config(cfg),
             )
@@ -715,12 +617,8 @@ def _analyze_repository(target: str, cfg: dict[str, Any]) -> list[stats.Statisti
                     results, score_metrics, smell_weight=smell_weight
                 )
 
-        # Sort and limit
-        results = stats.sort_and_limit(
-            results, by=cfg["sort"], limit=cfg["limit"]
-        )
-
-        return results
+        lim = cfg["limit"] if apply_limit else None
+        return stats.sort_and_limit(results, by=cfg["sort"], limit=lim)
 
 
 def main() -> None:

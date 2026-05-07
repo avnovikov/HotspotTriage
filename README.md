@@ -141,15 +141,14 @@ progress: null                   # null = stderr TTY auto | true | false
 
 The MCP server exposes analysis tools plus smell retrieval:
 
-- `analyze(...)`
-- `analyze_with_cache(...)`
-- `analyze_classes(...)`
+- `analyze(...)` — block-level metrics with disk cache warm-up; returns `{"results", "cache"}`. Defaults: `similarity=true`, `compact=true` (each row is `function`, `score`, `risk_band`; set `compact=false` for full metric dicts).
 - `generate_cache(...)`
 - `cache_status(...)`
 - `clear_cache(...)`
 - `init_config(...)`
-- `get_code_smells(...)` → flat findings: `{file, line, smell, message, confidence?, scope?}`
-- `analyze(..., similarity: bool = true)` / `analyze_with_cache(..., similarity: bool = true)` → set `similarity_enabled` for block runs (file granularity ignores it)
+- `analyze(..., similarity: bool = true)` → toggles DeepCSIM per block
+
+Repo-wide smell collection is internal: ``hotspottriage.smell.collect_repo_smell_findings`` (flat findings: ``file``, ``line``, ``smell``, ``message``, …).
 
 ### Ignores (gitignore + directories)
 
