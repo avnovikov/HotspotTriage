@@ -1,21 +1,18 @@
----
-description: Check HotspotTriage score before editing existing code
-alwaysApply: true
----
+# HotspotTriage score check before edits
 
-# HotspotTriage Score Check Before Edits
+Use this when an AI agent edits this codebase (formerly mirrored as a Cursor rule).
 
-Before changing existing code, run a HotspotTriage MCP score check for the function/block you plan to edit.
+Before changing existing code, run a HotspotTriage MCP score check for the function or block you plan to edit.
 
-## Required workflow
+## Workflow
 
 1. Identify the exact function or method you plan to modify.
-2. Use HotspotTriage MCP `analyze` (always block-level + cache) for the target repo/path; pass `compact=false` when you need full metric rows.
+2. Use HotspotTriage MCP **`analyze`** (block-level + cache) for the target repo/path; pass **`compact=false`** when you need full metric rows.
 3. Locate the matching block row (`path::symbol`) and capture:
    - `score`
    - `score_band`
    - `score_subscores` (if present)
-4. Use that result to guide edit priority and risk framing in your plan/notes.
+4. Use that result to guide edit priority and risk framing in your plan or notes.
 
 ## Minimum reporting in planning notes
 
