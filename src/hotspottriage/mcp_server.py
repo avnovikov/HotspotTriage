@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 import json
 import logging
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,9 @@ _mcp_dashboard_cli: argparse.Namespace | None = None
 _dashboard_stats = StatsCollector()
 # Live dashboard instance when MCP enables the FastAPI server (block metrics publishing).
 _dashboard_server_instance: DashboardServer | None = None
+# Per-repo BlockCacheManagers, keyed by resolved repo path string.
+_cache_managers: dict[str, _cache.BlockCacheManager] = {}
+_cache_managers_lock = threading.Lock()
 _dashboard_log_handler = MemoryLogHandler(
     max_records=int(_config.DEFAULTS["dashboard"]["max_log_records"])
 )
@@ -42,6 +46,40 @@ _dashboard_log_handler.setFormatter(
 )
 if _dashboard_log_handler not in logging.getLogger().handlers:
     logging.getLogger().addHandler(_dashboard_log_handler)
+
+
+def _get_cache_manager(repo: Path) -> _cache.BlockCacheManager:
+    """Return (or create) the BlockCacheManager for *repo* (thread-safe)."""
+    key = str(repo.resolve())
+    with _cache_managers_lock:
+        mgr = _cache_managers.get(key)
+        if mgr is None:
+            mgr = _cache.BlockCacheManager(repo, flush_interval_s=15.0)
+            mgr.start_periodic_flush()
+            _cache_managers[key] = mgr
+        return mgr
+
+
+def _shutdown_all_cache_managers() -> None:
+    """Stop periodic flush on all managers (called at MCP shutdown)."""
+    with _cache_managers_lock:
+        for mgr in _cache_managers.values():
+            mgr.stop()
+        _cache_managers.clear()
+
+
+def _ensure_root_logging_configured() -> None:
+    """Keep dashboard logs visible even when root already has a handler.
+
+    ``logging.basicConfig`` is a no-op when handlers already exist on the root
+    logger. Because the dashboard handler is attached at import time, we must
+    explicitly raise the root logger threshold from WARNING to INFO so routine
+    tool-call logs appear in the dashboard.
+    """
+    root = logging.getLogger()
+    if root.level > logging.INFO:
+        root.setLevel(logging.INFO)
+    logging.basicConfig(level=logging.INFO)
 
 
 def get_mcp_dashboard_cli_args() -> argparse.Namespace | None:
@@ -87,6 +125,7 @@ async def _mcp_lifespan(_: Any):
             logger.warning("Dashboard startup failed: %s", e)
     yield
     _dashboard_server_instance = None
+    _shutdown_all_cache_managers()
 
 
 mcp = FastMCP("hotspottriage", lifespan=_mcp_lifespan)
@@ -173,6 +212,8 @@ def run_cached_block_analysis_dict(
     cache_info = _initialize_repository(
         target, cfg, progress_callback=progress_callback
     )
+    # Publish live manager rows to dashboard after cache warm-up.
+    _publish_manager_rows_to_dashboard(target)
 
     if compact:
         results_list = _mcp_compact_score_rows(
@@ -502,6 +543,7 @@ def _initialize_repository(
         score_metrics = list(cfg["score_metrics"])
 
         # Build block-level cache
+        mgr = _get_cache_manager(repo)
         stats.build_block_stats(
             repo, files, score_metrics,
             since=cfg["since"], until=cfg["until"],
@@ -510,15 +552,16 @@ def _initialize_repository(
             smell_weight=float(cfg.get("smell_weight", 0.0)),
             progress_callback=progress_callback,
             merged_config=cfg,
+            cache_manager=mgr,
             **stats.block_similarity_kwargs_from_config(cfg),
         )
+        mgr.flush()
 
-        # Return cache info
+        # Return cache info from manager (live, not stale disk)
         cache_dir = _cache.cache_path_for(repo)
         cache_file = cache_dir / _cache._CACHE_FILE
         cache_size = cache_file.stat().st_size if cache_file.exists() else 0
-        rows = _cache.load_block_results(repo)
-        entries = len(rows) if rows else 0
+        entries = mgr.entry_count
 
         return {
             "cache_file": str(cache_file),
@@ -557,6 +600,21 @@ def _publish_block_metrics_to_dashboard(
     dash.publish_latest_block_metrics([r.as_dict() for r in rows])
 
 
+def _publish_manager_rows_to_dashboard(target: str) -> None:
+    """Push the live cache-manager rows to the dashboard."""
+    dash = _dashboard_server_instance
+    if dash is None:
+        return
+    try:
+        repo = Path(target).resolve()
+        mgr = _get_cache_manager(repo)
+        rows = mgr.get_all_rows()
+        if rows:
+            dash.publish_latest_block_metrics(rows)
+    except Exception:
+        pass
+
+
 def _analyze_repository(
     target: str,
     cfg: dict[str, Any],
@@ -588,6 +646,7 @@ def _analyze_repository(
         # Compute metrics
         decay_half_life = cfg.get("decay_half_life")
         smell_weight = float(cfg.get("smell_weight", 0.0))
+        mgr = _get_cache_manager(repo)
         if cfg["granularity"] == "block":
             results = stats.build_block_stats(
                 repo, files, score_metrics,
@@ -597,6 +656,7 @@ def _analyze_repository(
                 smell_weight=smell_weight,
                 progress_callback=progress_callback,
                 merged_config=cfg,
+                cache_manager=mgr,
                 **stats.block_similarity_kwargs_from_config(cfg),
             )
         else:
@@ -625,7 +685,7 @@ def main() -> None:
     """Entry point for the FastMCP server."""
     global _mcp_dashboard_cli
     _mcp_dashboard_cli = _parse_mcp_dashboard_argv()
-    logging.basicConfig(level=logging.INFO)
+    _ensure_root_logging_configured()
     mcp.run()
 
 

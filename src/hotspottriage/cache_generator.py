@@ -124,9 +124,13 @@ def generate_full_cache(
     }
 
     try:
+        if progress_callback:
+            progress_callback("Starting cache generation", 0, 1)
         # Step 1: Initialize repository cache (blocks + churn)
         if verbose:
             print("  📊 Initializing block-level cache...")
+        if progress_callback:
+            progress_callback("Initializing block-level cache", 0, 1)
         try:
             blocks_data = mcp_server.run_cached_block_analysis_dict(
                 target=target,
@@ -150,6 +154,8 @@ def generate_full_cache(
         # Step 2: Analyze class/method structure
         if verbose:
             print("  🏛️  Analyzing class/method structure...")
+        if progress_callback:
+            progress_callback("Analyzing class/method structure", 0, 1)
         try:
             classes_data = extract_class_method_structure(
                 target, filter=filter, progress_callback=progress_callback
@@ -167,6 +173,8 @@ def generate_full_cache(
         # Step 3: Get cache status
         if verbose:
             print("  📁 Checking cache status...")
+        if progress_callback:
+            progress_callback("Checking cache status", 0, 1)
         status_result = mcp_server.cache_status(target=target)
         status_data = json.loads(status_result)
 
@@ -183,6 +191,8 @@ def generate_full_cache(
             "total_cache_entries": status_data.get("entries", 0),
             "cache_size_mb": round(status_data.get("size_bytes", 0) / (1024 * 1024), 2),
         }
+        if progress_callback:
+            progress_callback("Cache generation complete", 1, 1)
 
         if verbose:
             print(f"\n✅ Cache generation complete!")
