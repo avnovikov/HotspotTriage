@@ -1,3 +1,5 @@
+.DS_Store
+
 .venv/
 __pycache__/
 *.pyc
@@ -11,4 +13,8 @@ build/
 .coverage
 htmlcov/
 .hotspottriage/
+.cursor/
+.claude/
+.serena/
 CLAUDE.md
+AGENTS.md
