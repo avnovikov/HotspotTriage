@@ -561,6 +561,17 @@ class DashboardServer:
             entries = metadata.get("entry_count", 0) if isinstance(metadata, dict) else 0
             with self._block_metrics_lock:
                 has_rows = bool(self._block_metrics_rows)
+            if not has_rows:
+                # Try live manager rows first, then fall back to disk.
+                try:
+                    from hotspottriage.mcp_server import _get_cache_manager
+                    mgr = _get_cache_manager(repo)
+                    live_rows = mgr.get_all_rows()
+                    if live_rows:
+                        self.publish_latest_block_metrics(live_rows)
+                        has_rows = True
+                except Exception:
+                    pass
             if exists and not has_rows:
                 loaded = _cache.load_block_results(repo)
                 if loaded:
