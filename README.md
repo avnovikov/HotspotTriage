@@ -10,11 +10,11 @@ Open source (MIT). **Python 3.11–3.13.**
 
 ## Screenshots
 
-GitHub shows images when they live in the repo and `README.md` points at them with a **relative path** (no external host needed).
+**Web dashboard (Overview)** — the FastAPI UI that starts with the MCP server (`hotspottriage start-mcp-server --open-browser`): tool activity, logs, cache controls, and project context.
 
-![HotspotTriage web dashboard — overview](docs/screenshots/dashboard-overview.png)
+![HotspotTriage dashboard — Overview](docs/screenshots/dashboard-overview.png)
 
-The dashboard runs beside the MCP server (`hotspottriage start-mcp-server --open-browser`). The image above is a **representative preview** (same general layout and palette as the embedded dashboard); replace it with a live capture when you want pixel-perfect docs—see [`docs/screenshots/README.md`](docs/screenshots/README.md).
+This file is a **real screenshot** of the running dashboard (not a mock). Replace [`docs/screenshots/dashboard-overview.png`](docs/screenshots/dashboard-overview.png) only when you intentionally refresh repo imagery — see [`docs/screenshots/README.md`](docs/screenshots/README.md).
 
 ---
 
@@ -126,23 +126,6 @@ Tips:
 - Project-level `.hotspottriage/project.yml` is **not** read by the MCP server (only by the CLI). Pass overrides as tool arguments, or change them via the dashboard config view.
 - For your own projects, drop a `CLAUDE.md` at the repo root pointing at the modules you care about; Claude Code auto-loads it as system context. The architecture map in [ARCHITECTRE.md](ARCHITECTRE.md) and the scoring guide in [SCORES.md](SCORES.md) are good things to point at from yours.
 
----
-
-## First Analysis
-
-Point at any local Git repo (or remote URL—cloned to a temp dir):
-
-```bash
-uv run hotspottriage /path/to/repo --no-config -l 10
-```
-
-Block-level hotspots (cached under `.hotspottriage/cache/`):
-
-```bash
-uv run hotspottriage /path/to/repo --blocks -l 15 --no-config
-```
-
-Full CLI reference: `hotspottriage --help`. Scaffold config: `hotspottriage init --global` or `hotspottriage init --project`.
 
 ---
 
