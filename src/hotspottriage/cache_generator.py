@@ -91,6 +91,7 @@ def generate_full_cache(
     score_metrics: str = "churn_per_sloc,cyclomatic",
     verbose: bool = False,
     progress_callback: Callable[[str, int, int], None] | None = None,
+    config_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Generate comprehensive cache for entire codebase.
 
@@ -105,6 +106,7 @@ def generate_full_cache(
         score_metrics: Metrics to compute score from
         verbose: Print progress information
         progress_callback: Optional ``(label, done, total)`` updates (e.g. dashboard job UI)
+        config_overrides: Optional scoring/config values to merge before analysis
 
     Returns:
         Dictionary with:
@@ -139,6 +141,7 @@ def generate_full_cache(
                 compact=False,
                 similarity=True,
                 progress_callback=progress_callback,
+                config_overrides=config_overrides,
             )
         except Exception as e:
             result["blocks"] = {"error": str(e)}

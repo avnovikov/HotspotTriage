@@ -23,6 +23,7 @@ from hotspottriage import cache as _cache
 from hotspottriage import config as _config
 from hotspottriage import normalize as _normalize
 from hotspottriage import score as _score_mod
+from hotspottriage import stats as _stats_mod
 from hotspottriage.dashboard.html import DASHBOARD_HTML
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.stats import StatsCollector
@@ -315,8 +316,47 @@ class DashboardServer:
 
     def publish_latest_block_metrics(self, rows: list[dict[str, Any]]) -> None:
         """Replace stored raw block rows used by distribution histograms."""
+        scored_rows = self._derive_block_rows(rows)
         with self._block_metrics_lock:
-            self._block_metrics_rows = list(rows)
+            self._block_metrics_rows = scored_rows
+
+    def _derive_block_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Score raw block rows using the current dashboard config snapshot."""
+        snapshot = self._merged_snapshot()
+        scored_rows: list[dict[str, Any]] = []
+        raw_metric_keys = {
+            "path",
+            "sloc",
+            "normalized_sloc",
+            "cyclomatic",
+            "halstead",
+            "maintainability",
+            "churn",
+            "churn_per_sloc",
+            "decayed_churn",
+            "decayed_churn_per_sloc",
+            "smell_count",
+            "smell_severity",
+            "smell_burden",
+            "similarity_score",
+            "match_count",
+        }
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if raw_metric_keys <= set(row):
+                scored_rows.extend(
+                    _stats_mod.derive_block_score_rows(
+                        [row],
+                        snapshot,
+                        score_metrics=list(snapshot.get("score_metrics") or []),
+                        smell_weight=float(snapshot.get("smell_weight", 0.0)),
+                        similarity_enabled=bool(snapshot.get("similarity_enabled", True)),
+                    )
+                )
+            else:
+                scored_rows.append(dict(row))
+        return scored_rows
 
     def _load_patch_unlocked(self) -> dict[str, Any]:
         path = self._config_patch_path
@@ -360,6 +400,16 @@ class DashboardServer:
             else:
                 out["score_aggregation"] = deepcopy(sa_patch)
         return out
+
+    def _analysis_config_overrides(self) -> dict[str, Any]:
+        """Return saved dashboard scoring config used when regenerating heatmap rows."""
+        snapshot = self._merged_snapshot()
+        overrides: dict[str, Any] = {}
+        for key in ("metric_normalization", "score_aggregation"):
+            value = snapshot.get(key)
+            if isinstance(value, dict):
+                overrides[key] = deepcopy(value)
+        return overrides
 
     def _validate_merged_patch(self, merged_patch: dict[str, Any]) -> None:
         """Raise ``ValueError`` if overlay produces invalid normalization/score config."""
@@ -559,6 +609,7 @@ class DashboardServer:
             exists = cache_file.exists()
             size = cache_file.stat().st_size if exists else 0
             entries = metadata.get("entry_count", 0) if isinstance(metadata, dict) else 0
+            loaded_rows: list[dict[str, Any]] | None = None
             with self._block_metrics_lock:
                 has_rows = bool(self._block_metrics_rows)
             if not has_rows:
@@ -573,13 +624,23 @@ class DashboardServer:
                 except Exception:
                     pass
             if exists and not has_rows:
-                loaded = _cache.load_block_results(repo)
-                if loaded:
-                    self.publish_latest_block_metrics(loaded)
+                loaded_rows = _cache.load_block_results(repo)
+                if loaded_rows:
+                    self.publish_latest_block_metrics(loaded_rows)
+                    has_rows = True
+            usable = has_rows or bool(loaded_rows)
+            stale = exists and not usable
             return {
                 "target": str(repo),
                 "cache_dir": str(cache_dir),
                 "exists": exists,
+                "usable": usable,
+                "stale": stale,
+                "message": (
+                    "Cache file is stale or incompatible; regenerate cache."
+                    if stale
+                    else ""
+                ),
                 "entries": int(entries),
                 "size_bytes": int(size),
                 "metadata": metadata,
@@ -655,6 +716,7 @@ class DashboardServer:
                         score_metrics=score,
                         verbose=False,
                         progress_callback=_cache_progress,
+                        config_overrides=dash_self._analysis_config_overrides(),
                     )
                     with self._cache_jobs_lock:
                         self._cache_jobs[job_id].status = "done"

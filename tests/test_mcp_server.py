@@ -80,9 +80,19 @@ def complex_function(a, b, c):
 """
     )
 
+    helper_file = repo / "helper.py"
+    helper_file.write_text(
+        """
+def helper_branch(x):
+    if x % 2 == 0:
+        return "even"
+    return "odd"
+"""
+    )
+
     # Commit the file
     subprocess.run(
-        ["git", "add", "example.py"],
+        ["git", "add", "example.py", "helper.py"],
         cwd=repo,
         check=True,
         capture_output=True,
@@ -181,6 +191,21 @@ def test_analyze_with_filter(test_repo):
     data = json.loads(result)
 
     assert len(data["results"]) > 0
+
+
+def test_analyze_with_multiple_literal_file_filters_returns_union(test_repo):
+    """Multiple literal file paths in MCP filter should include each file."""
+    result = analyze(
+        str(test_repo),
+        filter="example.py,helper.py",
+        compact=False,
+        similarity=False,
+    )
+    data = json.loads(result)
+    result_paths = {row["path"].split("::", 1)[0] for row in data["results"]}
+
+    assert "example.py" in result_paths
+    assert "helper.py" in result_paths
 
 
 def test_init_config_project(test_repo):
