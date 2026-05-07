@@ -1,8 +1,9 @@
 """Block-level results cache stored in <repo>/.hotspottriage/cache/blocks.pkl.
 
-Each row is a full Statistic-as-dict with ``_blob_sha``, ``_start``, and
-``_end`` fields for staleness detection.  When the file's blob SHA at HEAD
-matches the stored one, churn (and all derived metrics) are reusable.
+Each row stores raw block metrics plus ``_blob_sha``, ``_start``, and ``_end``
+fields for staleness detection.  When the file's blob SHA at HEAD matches the
+stored one, expensive raw metrics such as churn are reusable; scores and
+normalization are derived from the active config at read time.
 
 Cache metadata is stored in metadata.json with timestamps.
 
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 _CACHE_FILE = "blocks.pkl"
 
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 
 
 def cache_path_for(repo: Path) -> Path:
@@ -70,7 +71,8 @@ def _read_versioned_pickle(path: Path) -> list[dict] | None:
         obj = raw.get("obj")
         return obj if isinstance(obj, list) else None
     if isinstance(raw, list):
-        return raw
+        logger.info("Legacy unversioned cache at %s — starting fresh", path)
+        return None
     logger.info("Cache version mismatch at %s — starting fresh", path)
     return None
 

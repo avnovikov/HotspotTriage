@@ -72,6 +72,14 @@ class Statistic:
 
 SORT_KEYS: tuple[str, ...] = ("score", "file")
 
+_DERIVED_BLOCK_CACHE_KEYS = frozenset(
+    {
+        "score",
+        "score_band",
+        "score_subscores",
+    }
+)
+
 
 def block_similarity_kwargs_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     """Keyword arguments for :func:`build_block_stats` DeepCSIM integration."""
@@ -514,6 +522,148 @@ def _apply_risk_scores(
         )
 
 
+def _raw_block_cache_row(
+    stat: Statistic,
+    meta: dict[str, str | int],
+) -> dict[str, Any]:
+    """Return the raw persisted row for a block statistic."""
+    row = stat.as_dict()
+    for key in list(row):
+        if key in _DERIVED_BLOCK_CACHE_KEYS or key.startswith("norm_"):
+            del row[key]
+    row.update(meta)
+    return row
+
+
+def statistic_from_raw_block_row(
+    row: dict[str, Any],
+    score_metrics: Iterable[str],
+    *,
+    smell_weight: float = 0.0,
+    merged_config: dict[str, Any] | None = None,
+    similarity_enabled: bool = True,
+) -> Statistic:
+    """Derive a scored ``Statistic`` from one raw cached block row."""
+    path = str(row.get("path", ""))
+    if path.startswith("__"):
+        return Statistic(
+            path=path,
+            sloc=int(row.get("sloc", 0)),
+            normalized_sloc=float(row.get("normalized_sloc", 0.0)),
+            cyclomatic=int(row.get("cyclomatic", 0)),
+            halstead=int(row.get("halstead", 0)),
+            maintainability=int(row.get("maintainability", 0)),
+            churn=int(row.get("churn", 0)),
+            churn_per_sloc=float(row.get("churn_per_sloc", 0.0)),
+            decayed_churn=float(row.get("decayed_churn", 0.0)),
+            decayed_churn_per_sloc=float(row.get("decayed_churn_per_sloc", 0.0)),
+            smell_count=int(row.get("smell_count", 0)),
+            smell_severity=float(row.get("smell_severity", 0.0)),
+            smell_burden=float(row.get("smell_burden", 0.0)),
+            smells=dict(row.get("smells") or {}),
+            similarity_score=float(row.get("similarity_score", 0.0)),
+            similarity_band=str(row.get("similarity_band", "n/a")),
+            match_count=int(row.get("match_count", 0)),
+            score=float(row.get("score", 0.0)),
+            score_band=str(row.get("score_band", "n/a")),
+            score_subscores=dict(row.get("score_subscores") or {}),
+        )
+    metrics = {
+        "normalized_sloc": float(row.get("normalized_sloc", 0.0)),
+        "cyclomatic": float(row.get("cyclomatic", 0.0)),
+        "halstead": float(row.get("halstead", 0.0)),
+        "maintainability": float(row.get("maintainability", 0.0)),
+        "churn": float(row.get("churn", 0.0)),
+        "churn_per_sloc": float(row.get("churn_per_sloc", 0.0)),
+        "decayed_churn": float(row.get("decayed_churn", 0.0)),
+        "decayed_churn_per_sloc": float(row.get("decayed_churn_per_sloc", 0.0)),
+        "smell_count": float(row.get("smell_count", 0.0)),
+        "smell_severity": float(row.get("smell_severity", 0.0)),
+        "smell_burden": float(row.get("smell_burden", 0.0)),
+        "similarity_score": float(row.get("similarity_score", 0.0)),
+    }
+    stat = Statistic(
+        path=path,
+        sloc=int(row.get("sloc", 0)),
+        normalized_sloc=metrics["normalized_sloc"],
+        cyclomatic=int(metrics["cyclomatic"]),
+        halstead=int(metrics["halstead"]),
+        maintainability=int(metrics["maintainability"]),
+        churn=int(metrics["churn"]),
+        churn_per_sloc=metrics["churn_per_sloc"],
+        decayed_churn=metrics["decayed_churn"],
+        decayed_churn_per_sloc=metrics["decayed_churn_per_sloc"],
+        smell_count=int(metrics["smell_count"]),
+        smell_severity=metrics["smell_severity"],
+        smell_burden=metrics["smell_burden"],
+        smells=dict(row.get("smells") or {}),
+        similarity_score=metrics["similarity_score"],
+        similarity_band=str(row.get("similarity_band", "n/a")),
+        match_count=int(row.get("match_count", 0)),
+        score=_score(metrics, score_metrics, smell_weight=smell_weight),
+    )
+    cfg = merged_config if merged_config is not None else {}
+    scored = [stat]
+    _apply_risk_scores(scored, cfg, similarity_enabled)
+    return scored[0]
+
+
+def derive_block_statistics(
+    rows: Iterable[dict[str, Any]],
+    merged_config: dict[str, Any],
+    *,
+    score_metrics: Iterable[str] | None = None,
+    smell_weight: float = 0.0,
+    similarity_enabled: bool | None = None,
+) -> list[Statistic]:
+    """Derive scored block statistics from raw cached rows and active config."""
+    cfg_score_metrics = (
+        list(score_metrics)
+        if score_metrics is not None
+        else list(merged_config.get("score_metrics") or [])
+    )
+    sim_enabled = (
+        bool(merged_config.get("similarity_enabled", True))
+        if similarity_enabled is None
+        else similarity_enabled
+    )
+    out: list[Statistic] = []
+    for row in rows:
+        if not isinstance(row, dict) or not str(row.get("path", "")).strip():
+            continue
+        out.append(
+            statistic_from_raw_block_row(
+                row,
+                cfg_score_metrics,
+                smell_weight=smell_weight,
+                merged_config=merged_config,
+                similarity_enabled=sim_enabled,
+            )
+        )
+    return out
+
+
+def derive_block_score_rows(
+    rows: Iterable[dict[str, Any]],
+    merged_config: dict[str, Any],
+    *,
+    score_metrics: Iterable[str] | None = None,
+    smell_weight: float = 0.0,
+    similarity_enabled: bool | None = None,
+) -> list[dict[str, Any]]:
+    """Return scored dict rows derived from raw cached rows."""
+    return [
+        stat.as_dict()
+        for stat in derive_block_statistics(
+            rows,
+            merged_config,
+            score_metrics=score_metrics,
+            smell_weight=smell_weight,
+            similarity_enabled=similarity_enabled,
+        )
+    ]
+
+
 def _persist_block_cache(
     out: list[Statistic],
     row_cache_meta: list[dict[str, str | int]],
@@ -525,9 +675,7 @@ def _persist_block_cache(
     """Persist results with cache metadata for next run's churn lookup."""
     cache_rows: list[dict[str, Any]] = []
     for stat, meta in zip(out, row_cache_meta):
-        d = stat.as_dict()
-        d.update(meta)
-        cache_rows.append(d)
+        cache_rows.append(_raw_block_cache_row(stat, meta))
 
     if not files:
         return

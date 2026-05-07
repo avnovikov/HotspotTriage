@@ -72,7 +72,7 @@ def test_save_writes_metadata(tmp_path: Path):
 
 
 def test_versioned_envelope_rejects_old_format(tmp_path: Path):
-    """A raw (non-envelope) pickle written by an older version is still readable."""
+    """A raw (non-envelope) pickle written by an older version is ignored."""
     repo = tmp_path / "myrepo"
     cache_dir = cache_path_for(repo)
     cache_dir.mkdir(parents=True)
@@ -80,7 +80,7 @@ def test_versioned_envelope_rejects_old_format(tmp_path: Path):
     with open(cache_dir / _CACHE_FILE, "wb") as f:
         pickle.dump(old_rows, f)
     loaded = load_block_results(repo)
-    assert loaded == old_rows
+    assert loaded is None
 
 
 # ── BlockCacheManager tests ─────────────────────────────────────────

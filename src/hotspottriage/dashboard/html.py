@@ -272,6 +272,37 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     }
     .weight-sum-badge.ok { border-color: var(--ok); color: var(--ok); }
     .weight-sum-badge.bad { border-color: var(--error); color: var(--error); }
+    .band-editor {
+      margin-top: 0.55rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.45rem;
+      background: rgba(127, 127, 127, 0.03);
+    }
+    .band-editor h3 { margin: 0 0 0.35rem; font-size: 0.82rem; color: var(--muted); }
+    .band-row {
+      display: grid;
+      grid-template-columns: 1fr minmax(160px, 240px) 82px;
+      gap: 0.35rem;
+      align-items: center;
+      margin-bottom: 0.28rem;
+    }
+    .band-row.low-band {
+      grid-template-columns: 1fr;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+    .band-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.78rem;
+    }
+    .band-dot { width: 0.55rem; height: 0.55rem; border-radius: 999px; display: inline-block; }
+    .band-dot.low { background: var(--ok); }
+    .band-dot.medium { background: var(--warn); }
+    .band-dot.high { background: var(--heatmap-high); }
+    .band-dot.critical { background: var(--error); }
     .heatmap-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.55rem; }
     .heatmap-controls label { font-size: 0.78rem; color: var(--muted); display: inline-flex; align-items: center; gap: 0.3rem; }
     .heatmap-controls select { min-width: 140px; }
@@ -445,6 +476,7 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
         <div id="configPanel" class="stack">
           <div class="muted">Loading config…</div>
         </div>
+        <div id="scoreBandsPanel" class="stack" style="margin-top:0.55rem;"></div>
         <div id="scoreWeightsPanel" class="stack" style="margin-top:0.55rem;"></div>
         <div id="configMetaPanel" class="stack muted" style="margin-top:0.55rem;font-size:0.78rem;"></div>
         <h2 style="margin-top: 0.9rem;">Tool Call Statistics</h2>
@@ -473,6 +505,8 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
     };
 
     const WEIGHT_GROUPS = ["complexity_weights", "churn_weights", "smell_weights", "similarity_weights"];
+    const DEFAULT_BAND_EDGES = [0.30, 0.60, 0.80];
+    const DEFAULT_BAND_NAMES = ["low", "medium", "high", "critical"];
 
     function clone(o) {
       return JSON.parse(JSON.stringify(o));
@@ -865,6 +899,87 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
       badge.classList.toggle("bad", s > 1.0 + 1e-6);
     }
 
+    function normalizedScoreBandConfig() {
+      if (!state.editorSA) state.editorSA = {};
+      const sa = state.editorSA || {};
+      let edges = Array.isArray(sa.band_edges)
+        ? sa.band_edges.map((x) => Number(x)).filter((x) => Number.isFinite(x))
+        : [];
+      if (!edges.length) edges = DEFAULT_BAND_EDGES.slice();
+      edges = edges
+        .map((x) => Math.max(0.001, Math.min(0.999, x)))
+        .sort((a, b) => a - b);
+      for (let i = 1; i < edges.length; i++) {
+        if (edges[i] <= edges[i - 1]) edges[i] = Math.min(0.999, edges[i - 1] + 0.001);
+      }
+      let names = Array.isArray(sa.band_names) ? sa.band_names.map((x) => String(x)) : [];
+      if (names.length !== edges.length + 1 || names.some((x) => !x.trim())) {
+        names = DEFAULT_BAND_NAMES.slice(0, edges.length + 1);
+      }
+      state.editorSA.band_edges = edges;
+      state.editorSA.band_names = names;
+      return { edges, names };
+    }
+
+    function bandLabel(name) {
+      const value = String(name || "");
+      return value.toLowerCase() === "medium" ? "mid / medium" : value;
+    }
+
+    function bandDotClass(name) {
+      const value = String(name || "").toLowerCase();
+      if (value === "low") return "low";
+      if (value === "medium" || value === "mid") return "medium";
+      if (value === "high") return "high";
+      if (value === "critical") return "critical";
+      return "medium";
+    }
+
+    function setBandEdge(index, rawValue) {
+      const { edges } = normalizedScoreBandConfig();
+      const minGap = 0.001;
+      const min = index > 0 ? edges[index - 1] + minGap : minGap;
+      const max = index < edges.length - 1 ? edges[index + 1] - minGap : 1 - minGap;
+      let value = Number(rawValue);
+      if (!Number.isFinite(value)) value = edges[index];
+      state.editorSA.band_edges[index] = Math.max(min, Math.min(max, value));
+      renderScoreBands();
+    }
+
+    function renderScoreBands() {
+      const host = $("scoreBandsPanel");
+      const { edges, names } = normalizedScoreBandConfig();
+      const lowName = names[0] || "low";
+      const rows = edges
+        .map((edge, idx) => {
+          const name = names[idx + 1] || `band ${idx + 2}`;
+          return `<div class="band-row" data-edge-idx="${idx}">
+            <label class="band-chip"><span class="band-dot ${bandDotClass(name)}"></span>${escapeHtml(bandLabel(name))} starts at</label>
+            <input type="range" min="0.01" max="0.99" step="0.01" data-role="band-slider" value="${edge}" />
+            <input type="number" min="0.01" max="0.99" step="0.01" data-role="band-num" class="norm-num-in" value="${edge.toFixed(2)}" />
+          </div>`;
+        })
+        .join("");
+      host.innerHTML = `<strong>Score band thresholds</strong>
+        <div class="band-editor">
+          <h3>Risk band handles</h3>
+          <div class="band-row low-band">
+            <span class="band-chip"><span class="band-dot ${bandDotClass(lowName)}"></span>${escapeHtml(bandLabel(lowName))}: score &lt; ${edges[0].toFixed(2)}</span>
+          </div>
+          ${rows}
+          <div class="muted" style="font-size:0.72rem;margin-top:0.2rem;">
+            Thresholds must stay in ascending order between 0 and 1.
+          </div>
+        </div>`;
+      host.querySelectorAll(".band-row[data-edge-idx]").forEach((row) => {
+        const idx = Number(row.getAttribute("data-edge-idx"));
+        const slider = row.querySelector('[data-role="band-slider"]');
+        const num = row.querySelector('[data-role="band-num"]');
+        slider.addEventListener("input", () => setBandEdge(idx, slider.value));
+        num.addEventListener("change", () => setBandEdge(idx, num.value));
+      });
+    }
+
     async function refreshDistributionsOnly() {
       const mn = state.editorMN || {};
       const metrics = Object.keys(mn).filter((m) => {
@@ -1194,6 +1309,7 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
         state.baselineSA = clone(cfg.score_aggregation || {});
         renderOverviewSummary(cfg);
         renderNormEditors();
+        renderScoreBands();
         renderScoreWeights();
         renderConfigMeta(cfg);
         await refreshDistributionsOnly();
@@ -1465,6 +1581,15 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
         }
         if (data.target) {
           $("cacheTargetInput").value = String(data.target);
+        }
+        if (data.stale || data.usable === false) {
+          const msg = data.message || "Cache is stale or incompatible; regenerate cache.";
+          box.textContent = `${msg} size=${data.size_bytes ?? 0} bytes, dir=${data.cache_dir}`;
+          updateCacheContext(`stale (${data.cache_dir})`);
+          bar.classList.remove("done");
+          bar.classList.add("err");
+          bar.style.width = "100%";
+          return;
         }
         if (!data.exists) {
           box.textContent = `No cache yet at ${data.cache_dir}`;
