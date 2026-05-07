@@ -463,6 +463,8 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
       pauseScroll: false,
       healthFailures: 0,
       activeCacheJobId: null,
+      loadedConfig: null,
+      cacheContext: null,
       editorMN: null,
       editorSA: null,
       baselineMN: null,
@@ -886,13 +888,25 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
       metrics.forEach((m) => redrawNormMetric(m));
     }
 
-    function renderOverviewSummary(cfg) {
+    function renderOverviewSummary(cfg, ctx = null) {
       const el = $("overviewSummaryPanel");
       const project = cfg.project || {};
+      const dashboard = cfg.dashboard || {};
+      const cacheCtx = (ctx && typeof ctx === "object") ? ctx : {};
+      const projectPath =
+        String(cacheCtx.last_target || "").trim() ||
+        String(project.path || "").trim() ||
+        String(dashboard.default_target || "").trim() ||
+        "n/a";
       const lines = [
-        ["Project path", project.path ?? "n/a"],
-        ["Granularity", cfg.granularity ?? "n/a"],
-        ["Score metrics", cfg.score_metrics ?? []],
+        ["Project path", projectPath],
+        ["Analysis granularity (config)", cfg.granularity ?? "n/a"],
+        ["Analysis score metrics (config)", cfg.score_metrics ?? []],
+        ["Cache granularity", "block"],
+        [
+          "Cache score metrics",
+          String(cacheCtx.last_score_metrics || "").trim() || "churn_per_sloc,cyclomatic",
+        ],
       ];
       el.innerHTML = lines
         .map(([k, v]) => `<div><strong>${k}</strong>: ${pretty(v)}</div>`)
@@ -1117,10 +1131,20 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
 
     function $(id) { return document.getElementById(id); }
 
-    function updateCacheContext(statusText) {
-      const target = $("cacheTargetInput").value.trim() || "n/a";
-      const filter = $("cacheFilterInput").value.trim() || "<none>";
-      const score = $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic";
+    function updateCacheContext(statusText, ctx = null) {
+      const ctxObj = (ctx && typeof ctx === "object") ? ctx : {};
+      const target =
+        String(ctxObj.last_target || "").trim() ||
+        $("cacheTargetInput").value.trim() ||
+        "n/a";
+      const filter =
+        String(ctxObj.last_filter || "").trim() ||
+        $("cacheFilterInput").value.trim() ||
+        "<none>";
+      const score =
+        String(ctxObj.last_score_metrics || "").trim() ||
+        $("cacheScoreInput").value.trim() ||
+        "churn_per_sloc,cyclomatic";
       $("cacheContextPanel").textContent =
 `Path: ${target}
 Cache Status: ${statusText}
@@ -1183,6 +1207,7 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
         const res = await fetch("/api/config");
         if (!res.ok) throw new Error("config request failed");
         const cfg = await res.json();
+        state.loadedConfig = cfg;
         const dashboard = cfg.dashboard || {};
         if (dashboard.default_target && !$("cacheTargetInput").value.trim()) {
           $("cacheTargetInput").value = String(dashboard.default_target);
@@ -1192,7 +1217,7 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
         state.editorSA = clone(cfg.score_aggregation || {});
         state.baselineMN = clone(cfg.metric_normalization || {});
         state.baselineSA = clone(cfg.score_aggregation || {});
-        renderOverviewSummary(cfg);
+        renderOverviewSummary(cfg, state.cacheContext);
         renderNormEditors();
         renderScoreWeights();
         renderConfigMeta(cfg);
@@ -1211,8 +1236,12 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
         const res = await fetch("/api/cache/context");
         if (!res.ok) return;
         const ctx = await res.json();
+        state.cacheContext = ctx;
         applyCacheContext(ctx, overwrite);
-        updateCacheContext(ctx.last_target ? "restored" : "unknown");
+        updateCacheContext(ctx.last_target ? "restored" : "unknown", ctx);
+        if (state.loadedConfig) {
+          renderOverviewSummary(state.loadedConfig, state.cacheContext);
+        }
       } catch (_) {
         // no-op: context restore is best-effort
       }
@@ -1261,8 +1290,12 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
         });
         if (res.ok) {
           const ctx = await res.json();
+          state.cacheContext = ctx;
           applyCacheContext(ctx, overwrite);
-          updateCacheContext(statusText || "saved");
+          updateCacheContext(statusText || "saved", ctx);
+          if (state.loadedConfig) {
+            renderOverviewSummary(state.loadedConfig, state.cacheContext);
+          }
           return ctx;
         }
       } catch (_) {
@@ -1465,6 +1498,9 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
         }
         if (data.target) {
           $("cacheTargetInput").value = String(data.target);
+          if ($("heatmapTargetInput")) {
+            $("heatmapTargetInput").value = String(data.target);
+          }
         }
         if (!data.exists) {
           box.textContent = `No cache yet at ${data.cache_dir}`;
