@@ -32,10 +32,12 @@ def test_dashboard_html_hash_routing_and_heatmap():
     assert 'id="view-overview"' in DASHBOARD_HTML
     assert 'id="view-heatmap"' in DASHBOARD_HTML
     assert 'id="view-config"' in DASHBOARD_HTML
+    assert 'id="view-scores"' in DASHBOARD_HTML
     assert 'data-route="overview"' in DASHBOARD_HTML
     assert 'href="#overview"' in DASHBOARD_HTML
     assert 'href="#heatmap"' in DASHBOARD_HTML
     assert 'href="#config"' in DASHBOARD_HTML
+    assert 'href="#scores"' in DASHBOARD_HTML
     assert 'id="topNav"' in DASHBOARD_HTML
     assert "overviewSummaryPanel" in DASHBOARD_HTML
     assert "heatmapPanel" in DASHBOARD_HTML
@@ -46,6 +48,8 @@ def test_dashboard_html_hash_routing_and_heatmap():
     assert "#view-config .norm-svg-wrap" in DASHBOARD_HTML
     assert "normChartTabWidth" in DASHBOARD_HTML
     assert "Necessary when configuration changes." in DASHBOARD_HTML
+    assert "HotspotTriage Scores" in DASHBOARD_HTML
+    assert 'src="/dashboard/scores"' in DASHBOARD_HTML
     assert ".heatmap-file-col .heatmap-file-label" in DASHBOARD_HTML
     assert "function truncateLeftLabelToWidth(value, maxWidthPx = 168)" in DASHBOARD_HTML
     assert "measureText(candidate).width <= maxWidth" in DASHBOARD_HTML
