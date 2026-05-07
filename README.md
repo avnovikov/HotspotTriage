@@ -95,8 +95,9 @@ Or register it manually by adding the same JSON as above to `~/.claude.json` und
 Tips:
 - The first `analyze` call on a large repo populates `<repo>/.hotspottriage/cache/blocks.pkl`; subsequent calls are instant. Run `generate_cache` once up front to warm it deliberately.
 - Project-level `.hotspottriage/project.yml` is **not** read by the MCP server (only by the CLI). Pass overrides as tool arguments, or change them via the dashboard config view.
-- For your own projects, drop a `CLAUDE.md` at the repo root pointing at the modules you care about; Claude Code auto-loads it as system context. 
+- For your own projects, drop a `CLAUDE.md` at the repo root pointing at the modules you care about; Claude Code auto-loads it as system context.
 
+**Make it a standing rule for agents:** Add the workflow from [`docs/agent-hotspottriage-score-check.md`](docs/agent-hotspottriage-score-check.md) to your repo’s **`CLAUDE.md`**, Cursor **Rules**, Copilot instructions, or any agent playbook—so assistants **run MCP `analyze` on the target block before editing** and record score, band, and (when needed) subscores / proposed model.
 
 ---
 
