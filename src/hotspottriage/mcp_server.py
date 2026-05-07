@@ -3,7 +3,7 @@
 Exposes analyze and init_config as MCP tools for Claude and other AI assistants.
 
 Usage (stdio MCP server):
-    hotspottriage start-mcp-server   # same layout as ``serena start-mcp-server``
+    hotspottriage start-mcp-server [--open-browser] [--default-target /path/to/repo]
     hotspottriage-mcp                # legacy console_scripts alias
 """
 from __future__ import annotations
@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 # Populated in :func:`main` before ``mcp.run()`` (used by dashboard lifespan).
 _mcp_dashboard_cli: argparse.Namespace | None = None
+# Optional default repo for MCP tools when ``target`` is omitted or empty.
+_mcp_default_target: str | None = None
 _dashboard_stats = StatsCollector()
 # Live dashboard instance when MCP enables the FastAPI server (block metrics publishing).
 _dashboard_server_instance: DashboardServer | None = None
@@ -87,6 +89,24 @@ def _ensure_root_logging_configured() -> None:
 def get_mcp_dashboard_cli_args() -> argparse.Namespace | None:
     """Return parsed MCP dashboard flags (``start-mcp-server`` / ``hotspottriage-mcp``), or ``None`` before :func:`main`."""
     return _mcp_dashboard_cli
+
+
+def get_mcp_default_target() -> str | None:
+    """Return ``--default-target`` from server argv, or ``None`` if unset / before :func:`main`."""
+    return _mcp_default_target
+
+
+def _resolve_mcp_target(target: str) -> str:
+    """Resolve repo path/URL: explicit ``target``, else ``--default-target``, else error."""
+    t = target.strip() if isinstance(target, str) else ""
+    if t:
+        return t
+    if _mcp_default_target:
+        return _mcp_default_target
+    raise ValueError(
+        "MCP tool requires a non-empty target (local git repo path or remote URL), "
+        "or start the server with --default-target PATH_OR_URL"
+    )
 
 
 def _effective_dashboard_config() -> dict[str, Any]:
@@ -163,6 +183,16 @@ def _parse_mcp_dashboard_argv() -> argparse.Namespace:
         "--open-browser",
         action="store_true",
         help="Open the dashboard in a browser when the server starts.",
+    )
+    parser.add_argument(
+        "--default-target",
+        type=str,
+        default=None,
+        metavar="PATH_OR_URL",
+        help=(
+            "Default repo path or git URL for MCP tools when target is omitted or blank "
+            "(analyze, generate_cache, cache_status, clear_cache; project init_config)."
+        ),
     )
     args, rest = parser.parse_known_args()
     sys.argv = [sys.argv[0], *rest]
@@ -276,7 +306,7 @@ def _run_analyze_cached(
 
 @mcp.tool()
 def analyze(
-    target: str,
+    target: str = "",
     filter: str | None = None,
     score_metrics: str | None = None,
     limit: int | None = None,
@@ -297,7 +327,8 @@ def analyze(
     ``compact`` to false for full metric dicts.
 
     Args:
-        target: Path to a local git repo or remote git URL
+        target: Path to a local git repo or remote git URL. Empty uses ``--default-target``
+            from ``hotspottriage start-mcp-server`` if set.
         filter: Comma-separated filters, matched against repo-relative POSIX paths.
             Globs use AND semantics ('!' negates). Example: ``*dashboard/*.py``
             only matches root-level ``<name>dashboard/<file>.py`` paths, while
@@ -316,8 +347,12 @@ def analyze(
     Returns:
         JSON object with ``results`` and ``cache`` keys, or ``{"error": ...}``
     """
+    try:
+        resolved = _resolve_mcp_target(target)
+    except ValueError as e:
+        return json.dumps({"error": str(e)})
     return _run_analyze_cached(
-        target,
+        resolved,
         filter=filter,
         score_metrics=score_metrics,
         limit=limit,
@@ -332,17 +367,17 @@ def analyze(
 
 
 @mcp.tool()
-def cache_status(target: str) -> str:
+def cache_status(target: str = "") -> str:
     """Check cache status and statistics for a repository.
 
     Args:
-        target: Path to a local git repo
+        target: Path to a local git repo. Empty uses ``--default-target`` if set.
 
     Returns:
         JSON with cache statistics (size, entries, age)
     """
     try:
-        repo_path = Path(target)
+        repo_path = Path(_resolve_mcp_target(target))
         cache_dir = _cache.cache_path_for(repo_path)
 
         if not cache_dir.exists():
@@ -371,23 +406,25 @@ def cache_status(target: str) -> str:
             "cache_file": str(cache_file) if cache_file.exists() else None,
         })
 
+    except ValueError as e:
+        return json.dumps({"status": "error", "message": str(e)})
     except Exception as e:
         logger.exception("Cache status check failed")
         return json.dumps({"status": "error", "message": str(e)})
 
 
 @mcp.tool()
-def clear_cache(target: str) -> str:
+def clear_cache(target: str = "") -> str:
     """Clear the block-level cache for a repository.
 
     Args:
-        target: Path to a local git repo
+        target: Path to a local git repo. Empty uses ``--default-target`` if set.
 
     Returns:
         Status message
     """
     try:
-        repo_path = Path(target)
+        repo_path = Path(_resolve_mcp_target(target))
         cache_dir = _cache.cache_path_for(repo_path)
 
         if not cache_dir.exists():
@@ -411,6 +448,8 @@ def clear_cache(target: str) -> str:
             "message": f"Cleared cache in {cache_dir}",
         })
 
+    except ValueError as e:
+        return json.dumps({"status": "error", "message": str(e)})
     except Exception as e:
         logger.exception("Cache clear failed")
         return json.dumps({"status": "error", "message": str(e)})
@@ -418,7 +457,7 @@ def clear_cache(target: str) -> str:
 
 @mcp.tool()
 def generate_cache(
-    target: str,
+    target: str = "",
     filter: str | None = None,
     score_metrics: str = "churn_per_sloc,cyclomatic",
 ) -> str:
@@ -429,7 +468,7 @@ def generate_cache(
     <repo>/.hotspottriage/cache/blocks.pkl.
 
     Args:
-        target: Path to a local git repo
+        target: Path to a local git repo. Empty uses ``--default-target`` if set.
         filter: Comma-separated glob patterns
         score_metrics: Metrics to compute score from (default: churn_per_sloc,cyclomatic)
 
@@ -437,13 +476,16 @@ def generate_cache(
         JSON with complete cache including blocks, classes, and status
     """
     try:
+        resolved = _resolve_mcp_target(target)
         cache_data = _cache_gen.generate_full_cache(
-            target=target,
+            target=resolved,
             filter=filter,
             score_metrics=score_metrics,
             verbose=False,
         )
         return json.dumps(cache_data, indent=2)
+    except ValueError as e:
+        return json.dumps({"error": str(e)})
     except Exception as e:
         logger.exception("Cache generation failed")
         return json.dumps({"error": str(e)})
@@ -454,7 +496,8 @@ def init_config(target: str = "", is_global: bool = False) -> str:
     """Initialize HotspotTriage configuration files.
 
     Args:
-        target: Path to git repository (empty/unused if is_global=True)
+        target: Path to git repository (empty/unused if is_global=True). For project scope,
+            empty uses ``--default-target`` if set, otherwise ``.``.
         is_global: Initialize global config (~/.hotspottriage/) instead of project config
 
     Returns:
@@ -471,8 +514,10 @@ def init_config(target: str = "", is_global: bool = False) -> str:
                 "files": files,
             })
         else:
-            target = target or "."
-            repo_path = Path(target)
+            t = (target or "").strip()
+            if not t:
+                t = (_mcp_default_target or ".").strip()
+            repo_path = Path(t).expanduser()
             written = _config.init_config(scope="project", target=repo_path)
             # Project scope returns a single Path, convert to list
             files = [str(written)] if isinstance(written, Path) else [str(f) for f in written]
@@ -758,8 +803,10 @@ def _analyze_repository(
 
 def main() -> None:
     """Entry point for the FastMCP server."""
-    global _mcp_dashboard_cli
+    global _mcp_dashboard_cli, _mcp_default_target
     _mcp_dashboard_cli = _parse_mcp_dashboard_argv()
+    dt = getattr(_mcp_dashboard_cli, "default_target", None)
+    _mcp_default_target = dt.strip() if isinstance(dt, str) and dt.strip() else None
     _ensure_root_logging_configured()
     mcp.run()
 
