@@ -56,6 +56,12 @@ uv sync
 python3.13 -m venv .venv && .venv/bin/python -m pip install --upgrade pip && .venv/bin/python -m pip install -e .
 ```
 
+Editable install with pip (only when the active interpreter is already 3.11–3.13):
+
+```bash
+pip install -e .
+```
+
 After install, `hotspottriage`, `hotspottriage-mcp`, and `hotspottriage-cache` are on your `PATH` when the active environment is the venv (or your chosen Python environment).
 
 **Run as an MCP Server**
