@@ -455,6 +455,7 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
         <h2>Heatmap</h2>
         <div class="heatmap-controls">
           <button id="heatmapUpdateBtn" type="button">Update Heatmap</button>
+          <span class="muted">Necessary when configuration changes.</span>
           <label>Limit
             <input id="heatmapLimitInput" type="number" min="1" max="500" value="500" style="width:5rem;min-width:0;" />
           </label>
@@ -511,7 +512,20 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
       normDrag: null,
     };
 
-    const WEIGHT_GROUPS = ["complexity_weights", "churn_weights", "smell_weights", "similarity_weights"];
+    const FINAL_BURDEN_KEYS = [
+      "complexity_burden",
+      "churn_burden",
+      "maintainability_burden",
+      "smell_burden",
+      "similarity_burden",
+    ];
+    const WEIGHT_GROUPS = [
+      "final_weights",
+      "complexity_weights",
+      "churn_weights",
+      "smell_weights",
+      "similarity_weights",
+    ];
     const DEFAULT_BAND_EDGES = [0.30, 0.60, 0.80];
     const DEFAULT_BAND_NAMES = ["low", "medium", "high", "critical"];
 
@@ -851,21 +865,27 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
 
     function renderScoreWeights() {
       const host = $("scoreWeightsPanel");
+      ensureFinalWeights();
       host.innerHTML = "<strong>Score aggregation weights</strong>";
       WEIGHT_GROUPS.forEach((gk) => {
         const wg = document.createElement("div");
         wg.className = "weight-group";
         wg.dataset.weightGroup = gk;
-        const title = gk.replace(/_/g, " ");
+        const title = gk === "final_weights"
+          ? "top composite parameters (must sum to 1.0)"
+          : gk.replace(/_/g, " ");
         const weights = state.editorSA[gk] || {};
-        const rows = Object.keys(weights)
-          .sort()
+        const keys = gk === "final_weights"
+          ? FINAL_BURDEN_KEYS
+          : Object.keys(weights).sort();
+        const rows = keys
           .map((key) => {
             const v = Number(weights[key]);
+            const shown = gk === "final_weights" ? v.toFixed(2) : String(v);
             return `<div class="weight-row" data-wkey="${key}">
               <label>${key}</label>
               <input type="range" min="0" max="1" step="0.01" data-role="w-slider" value="${v}" />
-              <input type="number" step="0.01" min="0" data-role="w-num" class="norm-num-in" value="${v}" />
+              <input type="number" step="0.01" min="0" data-role="w-num" class="norm-num-in" value="${shown}" />
             </div>`;
           })
           .join("");
@@ -876,20 +896,101 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
           const num = row.querySelector('[data-role="w-num"]');
           const key = row.getAttribute("data-wkey");
           slider.addEventListener("input", () => {
-            num.value = slider.value;
-            state.editorSA[gk][key] = Number(slider.value);
+            let val = Number(slider.value);
+            if (!Number.isFinite(val) || val < 0) val = 0;
+            val = Math.round(val * 100) / 100;
+            slider.value = val.toFixed(2);
+            if (gk === "final_weights") {
+              setFinalWeight(key, val);
+              renderScoreWeights();
+              return;
+            }
+            num.value = val.toFixed(2);
+            state.editorSA[gk][key] = val;
             updateWeightSumBadge(wg);
           });
           num.addEventListener("change", () => {
             let val = Number(num.value);
             if (!Number.isFinite(val) || val < 0) val = 0;
-            slider.value = String(val);
+            val = Math.round(val * 100) / 100;
+            if (gk === "final_weights") {
+              setFinalWeight(key, val);
+              renderScoreWeights();
+              return;
+            }
+            slider.value = val.toFixed(2);
+            num.value = val.toFixed(2);
             state.editorSA[gk][key] = val;
             updateWeightSumBadge(wg);
           });
         });
         updateWeightSumBadge(wg);
       });
+    }
+
+    function setFinalWeight(key, rawValue) {
+      if (!state.editorSA) state.editorSA = {};
+      if (!state.editorSA.final_weights || typeof state.editorSA.final_weights !== "object") {
+        state.editorSA.final_weights = {};
+      }
+      const weights = { ...state.editorSA.final_weights };
+      FINAL_BURDEN_KEYS.forEach((k) => {
+        const v = Number(weights[k]);
+        weights[k] = Number.isFinite(v) && v >= 0 ? v : 0;
+      });
+      const target = Math.max(0, Math.min(1, Number(rawValue) || 0));
+      const otherKeys = FINAL_BURDEN_KEYS.filter((k) => k !== key);
+      const otherSum = otherKeys.reduce((acc, k) => acc + Number(weights[k] || 0), 0);
+      const remaining = 1 - target;
+      if (otherKeys.length) {
+        if (otherSum <= 1e-12) {
+          const each = remaining / otherKeys.length;
+          otherKeys.forEach((k) => {
+            weights[k] = each;
+          });
+        } else {
+          const factor = remaining / otherSum;
+          otherKeys.forEach((k) => {
+            weights[k] = Number(weights[k] || 0) * factor;
+          });
+        }
+      }
+      weights[key] = target;
+      FINAL_BURDEN_KEYS.forEach((k) => {
+        weights[k] = Math.round(weights[k] * 100) / 100;
+      });
+      // Keep strict invariant after rounding to 2 decimals.
+      const roundedSum = FINAL_BURDEN_KEYS.reduce((acc, k) => acc + weights[k], 0);
+      const delta = Math.round((1 - roundedSum) * 100) / 100;
+      if (Math.abs(delta) > 0 && Math.abs(delta) <= 0.02) {
+        weights[key] = Math.max(0, Math.min(1, Math.round((weights[key] + delta) * 100) / 100));
+      }
+      state.editorSA.final_weights = weights;
+    }
+
+    function ensureFinalWeights() {
+      if (!state.editorSA) state.editorSA = {};
+      const source =
+        state.editorSA.final_weights && typeof state.editorSA.final_weights === "object"
+          ? state.editorSA.final_weights
+          : {};
+      const weights = {};
+      FINAL_BURDEN_KEYS.forEach((k) => {
+        const v = Number(source[k]);
+        weights[k] = Number.isFinite(v) && v >= 0 ? v : 0;
+      });
+      const sum = FINAL_BURDEN_KEYS.reduce((acc, k) => acc + weights[k], 0);
+      if (sum <= 1e-12) {
+        const each = 1 / FINAL_BURDEN_KEYS.length;
+        FINAL_BURDEN_KEYS.forEach((k) => {
+          weights[k] = each;
+        });
+      } else {
+        FINAL_BURDEN_KEYS.forEach((k) => {
+          weights[k] = weights[k] / sum;
+        });
+      }
+      state.editorSA.final_weights = weights;
     }
 
     function renderProposedModels() {
@@ -927,6 +1028,12 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
         if (Number.isFinite(v)) s += v;
       });
       const badge = groupEl.querySelector('[data-role="sum-badge"]');
+      if (gk === "final_weights") {
+        badge.textContent = `Σ = ${s.toFixed(3)} (must be 1.000)`;
+        badge.classList.toggle("ok", Math.abs(s - 1.0) <= 1e-6);
+        badge.classList.toggle("bad", Math.abs(s - 1.0) > 1e-6);
+        return;
+      }
       badge.textContent = `Σ = ${s.toFixed(3)}`;
       badge.classList.toggle("ok", s <= 1.0 + 1e-6);
       badge.classList.toggle("bad", s > 1.0 + 1e-6);
