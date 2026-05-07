@@ -274,12 +274,14 @@ def test_stream_endpoints_exist():
     srv = _server()
     client = TestClient(srv.app)
     assert client.get("/dashboard/").status_code == 200
+    assert client.get("/dashboard/scores").status_code == 200
     paths = {r.path for r in srv.app.router.routes}
     assert "/api/logs/stream" in paths
     assert "/api/stats/stream" in paths
     assert "/api/config/patch" in paths
     assert "/api/stats/distribution" in paths
     assert "/api/stats/heatmap" in paths
+    assert "/dashboard/scores" in paths
 
 
 def test_stats_heatmap_sorts_and_limits():
