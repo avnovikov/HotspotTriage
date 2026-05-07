@@ -30,19 +30,33 @@ HotspotTriage makes the overlap visible **per file or per function**—so you ca
 - Agent workflows: quantify risk before edits; route expensive reasoning to the worst hotspots.
 - Teams shipping Python: repeatable hotspot lists from CI or local runs.
 - Maintainers: one tool for complexity, churn, smells, and (in block mode) similarity pressure.
-##  Quick Start
+## Quick Start
 
-**Install** (from a clone—recommended for development, uses `uv.lock` when present):
+**Python version:** HotspotTriage requires **Python 3.11, 3.12, or 3.13** (`requires-python` matches **deepcsim** on PyPI). On **3.14+**, pip reports `No matching distribution found for deepcsim` — use a supported interpreter (the install script checks this early).
+
+**Install from a clone** (recommended — handles version check, `pip` upgrade, editable install):
+
 ```bash
 git clone https://github.com/avnovikov/HotspotTriage.git
 cd HotspotTriage
+./scripts/install_hotspottriage.sh --venv
+```
+
+- **`--venv`** — create/use `.venv` under the repo (recommended).
+- **`--uv`** — run `uv sync` instead of pip (requires [`uv`](https://docs.astral.sh/uv/) and `uv.lock`).
+- **`--python /path/to/python3.13`** — pick an interpreter if `python3` on `PATH` is too new.
+
+Manual equivalents:
+
+```bash
 uv sync
 ```
-Editable install with pip:
+
 ```bash
-pip install -e .
+python3.13 -m venv .venv && .venv/bin/python -m pip install --upgrade pip && .venv/bin/python -m pip install -e .
 ```
-After install, `hotspottriage`, `hotspottriage-mcp`, and `hotspottriage-cache` are on your PATH.
+
+After install, `hotspottriage`, `hotspottriage-mcp`, and `hotspottriage-cache` are on your `PATH` when the active environment is the venv (or your chosen Python environment).
 
 **Run as an MCP Server**
 
@@ -138,4 +152,4 @@ Tips:
 | [docs/block-cache-model.md](docs/block-cache-model.md) | Block cache format and semantics |
 | [docs/agent-hotspottriage-score-check.md](docs/agent-hotspottriage-score-check.md) | MCP score check before editing hotspots (agent workflow) |
 
-Developing this repo: run **`uv lock`** after dependency changes in `pyproject.toml`. Run **`pytest`** (or `uv run pytest`) before merging; architecture notes live in [ARCHITECTRE.md](ARCHITECTRE.md) above.
+Developing this repo: **`./scripts/install_hotspottriage.sh --venv`** (or **`uv sync`**); run **`uv lock`** after dependency changes in `pyproject.toml`. Run **`pytest`** (or `uv run pytest`) before merging; architecture notes live in [ARCHITECTRE.md](ARCHITECTRE.md) above.
