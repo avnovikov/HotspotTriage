@@ -112,6 +112,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     }
     .view-section { display: none; }
     .view-section.active { display: block; }
+    .doc-frame {
+      width: 100%;
+      min-height: 78vh;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+    }
     .section-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -404,6 +411,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <h1>HotspotTriage Dashboard</h1>
       <nav id="topNav" class="top-nav" aria-label="Primary">
         <a id="navOverview" class="nav-tab" href="#overview" data-route="overview">Overview</a>
+        <a id="navScores" class="nav-tab" href="#scores" data-route="scores">HotspotTriage Scores</a>
         <a id="navHeatmap" class="nav-tab" href="#heatmap" data-route="heatmap">Heatmap</a>
         <a id="navConfig" class="nav-tab" href="#config" data-route="config">Config</a>
       </nav>
@@ -491,6 +499,14 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
           <span class="muted">Refreshes every 5s</span>
         </div>
         <div id="statsPanel" class="muted">No tool activity yet.</div>
+      </section>
+    </div>
+
+    <div id="view-scores" class="view-section" data-view="scores">
+      <section class="wide">
+        <h2>HotspotTriage Scores</h2>
+        <div class="muted" style="margin-bottom: 0.45rem;">Live view of <code>SCORES.md</code></div>
+        <iframe class="doc-frame" src="/dashboard/scores" title="SCORES.md"></iframe>
       </section>
     </div>
   </main>
@@ -1211,7 +1227,7 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
         .join("");
     }
 
-    const ROUTES = ["overview", "heatmap", "config"];
+    const ROUTES = ["overview", "heatmap", "config", "scores"];
     function normalizeRouteHash() {
       let h = (location.hash || "").replace(/^#/, "").trim().toLowerCase();
       if (!h || !ROUTES.includes(h)) return "overview";
