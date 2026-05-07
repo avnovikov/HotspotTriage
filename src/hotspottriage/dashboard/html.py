@@ -342,10 +342,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       min-width: 0;
       box-sizing: border-box;
       overflow: hidden;
-      text-overflow: ellipsis;
       white-space: nowrap;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-size: 0.74rem;
+    }
+    .heatmap-file-col .heatmap-file-label {
+      display: block;
+      white-space: nowrap;
+      max-width: 100%;
     }
     .heatmap-method-col .heatmap-method {
       display: block;
@@ -1142,6 +1146,36 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
       return escapeHtml(s).replace(/"/g, "&quot;");
     }
 
+    /** Keep end of long labels visible by trimming from the left. */
+    function truncateLeftLabelToWidth(value, maxWidthPx = 168) {
+      const text = String(value || "");
+      const maxWidth = Number(maxWidthPx);
+      if (!Number.isFinite(maxWidth) || maxWidth <= 0) return text;
+      if (!truncateLeftLabelToWidth._ctx) {
+        const canvas = document.createElement("canvas");
+        truncateLeftLabelToWidth._ctx = canvas.getContext("2d");
+      }
+      const ctx = truncateLeftLabelToWidth._ctx;
+      if (!ctx) return text;
+      ctx.font = '0.74rem ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+      if (ctx.measureText(text).width <= maxWidth) return text;
+      const ellipsis = "…";
+      let lo = 1;
+      let hi = text.length;
+      let best = ellipsis + text.slice(-1);
+      while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        const candidate = ellipsis + text.slice(-mid);
+        if (ctx.measureText(candidate).width <= maxWidth) {
+          best = candidate;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return best;
+    }
+
     function heatmapBarBandClass(band) {
       const b = String(band || "").toLowerCase();
       if (b === "low") return "band-low";
@@ -1240,7 +1274,7 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
               })
               .join("");
             return `<tr>
-  <td class="heatmap-file-col" title="${escapeAttr(r.file || "")}">${escapeHtml(r.file || "")}</td>
+  <td class="heatmap-file-col" title="${escapeAttr(r.file || "")}"><span class="heatmap-file-label">${escapeHtml(truncateLeftLabelToWidth(r.file || ""))}</span></td>
   <td class="heatmap-method-col" title="${escapeAttr(r.method || "")}"><span class="heatmap-method">${escapeHtml(r.method || "")}</span></td>
   ${cells}
   <td>${escapeHtml(r.score_band || "")}</td>
