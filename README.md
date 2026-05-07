@@ -2,30 +2,34 @@
 
 Rank Python hotspots where complexity meets churn—then wire that signal into your agent through MCP.
 
-HotspotTriage analyzes tracked `.py` files in a Git repo, blends AST metrics (Radon) with history (`git log`), and per-function churn (in block mode), smells (Pylint heuristics), and block similarity (DeepCSIM).'' Built for engineers and coding agents who want numbers, not guesswork. Open source (MIT). Python 3.11+.''
+HotspotTriage analyzes tracked `.py` files in a Git repo, blends AST metrics (Radon) with history (`git log`), and per-function churn (in block mode), smells (Pylint heuristics), and block similarity (DeepCSIM). Built for engineers and coding agents who want numbers, not guesswork. Open source (MIT). Python 3.11+.
 
 ## The Problem
-Coding agents are not yet there—they churn out **duplicated, smelly, bad code**. You can run always-expensive models everywhere, but that's just **tokens burning**. Humans can't be fast enough for code review, and bad code slips into the repo. Even the best models can't do a good code review for various reasons.''
 
-We need a mechanism to **automatically understand the problems with the code** and **route refactoring + the most expensive models to the particular areas, not everywhere**.''
+Coding agents are not yet there—they churn out **duplicated, smelly, bad code**. You can run always-expensive models everywhere, but that's just **tokens burning**. Humans can't be fast enough for code review, and bad code slips into the repo. Even the best models can't do a good code review for various reasons.
+
+We need a mechanism to **automatically understand the problems with the code** and **route refactoring + the most expensive models to the particular areas, not everywhere**.
 
 ## 💡 The Solution
-HotspotTriage makes the overlap visible **per file or per function**—so you can prioritize reviews, safer edits, and stronger models **where risk is highest**.'' Coding agents can automatically unerstand which model to use, if the code should be refactored before the start of the change, if the changes improved the code or make it worth. After a few iterations your coding agents will start to pay attention to the numbers and after some time general code quality will be improved automagically. 
+
+HotspotTriage makes the overlap visible **per file or per function**—so you can prioritize reviews, safer edits, and stronger models **where risk is highest**. Coding agents can automatically understand which model to use, if the code should be refactored before the start of the change, if the changes improved the code or make it worth. After a few iterations your coding agents will start to pay attention to the numbers and after some time general code quality will be improved automagically.
 
 ![Web dashboard overview](docs/screenshots/dashboard-overview.png)
-*The FastAPI UI (starts with `hotspottriage start-mcp-server --open-browser`): tool activity, logs, cache controls, and project context. This is a real screenshot of the running dashboard (not a mock). Replace `docs/screenshots/dashboard-overview.png` only when you intentionally refresh repo imagery (see `docs/screenshots/README.md`).*''
 
-##  Key Benefits
-- **MCP server**: expose analysis, cache lifecycle, and config scaffolding to Cursor, Claude Code, and other MCP clients (FastMCP).''
-- **CLI**: table, JSON, or CSV output for CI and local exploration (`hotspottriage repo`).''
-- **Block mode**: function/method rows with cached churn (`git log -L`), optional similarity, and interpretable risk bands for agent routing.''
-- **Layered YAML config**: global, project, and local overrides (Serena-inspired layering); `hotspottriage init` scaffolds templates.''
+*The FastAPI UI (starts with `hotspottriage start-mcp-server --open-browser`): tool activity, logs, cache controls, and project context. This is a real screenshot of the running dashboard (not a mock). Replace `docs/screenshots/dashboard-overview.png` only when you intentionally refresh repo imagery (see `docs/screenshots/README.md`).*
 
-##  Who It's For
-- Agent workflows: quantify risk before edits; route expensive reasoning to the worst hotspots.''
-- Teams shipping Python: repeatable hotspot lists from CI or local runs.''
-- Maintainers: one tool for complexity, churn, smells, and (in block mode) similarity pressure.''
+## Key Benefits
 
+- **MCP server**: expose analysis, cache lifecycle, and config scaffolding to Cursor, Claude Code, and other MCP clients (FastMCP).
+- **CLI**: table, JSON, or CSV output for CI and local exploration (`hotspottriage <repo>`).
+- **Block mode**: function/method rows with cached churn (`git log -L`), optional similarity, and interpretable risk bands for agent routing.
+- **Layered YAML config**: global, project, and local overrides (Serena-inspired layering); `hotspottriage init` scaffolds templates.
+
+## Who It's For
+
+- Agent workflows: quantify risk before edits; route expensive reasoning to the worst hotspots.
+- Teams shipping Python: repeatable hotspot lists from CI or local runs.
+- Maintainers: one tool for complexity, churn, smells, and (in block mode) similarity pressure.
 ##  Quick Start
 
 **Install** (from a clone—recommended for development, uses `uv.lock` when present):
@@ -38,61 +42,85 @@ Editable install with pip:
 ```bash
 pip install -e .
 ```
-After install, `hotspottriage`, `hotspottriage-mcp`, and `hotspottriage-cache` are on your PATH.''
+After install, `hotspottriage`, `hotspottriage-mcp`, and `hotspottriage-cache` are on your PATH.
 
-**Run as an MCP Server**  The `hotspottriage-mcp` entry point is an alias. While MCP talks over stdio, the process can also bring up a local web dashboard (FastAPI: logs, cache actions, and block metrics). Use `--open-browser` to open it when the server starts, `--no-dashboard` to disable it, or `--dashboard-port` / `--dashboard-host` to tune binding. See [ARCHITECTRE.md](ARCHITECTRE.md) for dashboard wiring.
+**Run as an MCP Server**
+
+The `hotspottriage-mcp` entry point is an alias. While MCP talks over stdio, the process can also bring up a local web dashboard (FastAPI: logs, cache actions, and block metrics). Use `--open-browser` to open it when the server starts, `--no-dashboard` to disable it, or `--dashboard-port` / `--dashboard-host` to tune binding. **`--default-target PATH_OR_URL`** sets the repo used when MCP tools omit `target` (or pass an empty string): `analyze`, `generate_cache`, `cache_status`, `clear_cache`, and project-scoped `init_config`. See [ARCHITECTRE.md](ARCHITECTRE.md) for dashboard wiring.
 ```bash
 uv run hotspottriage start-mcp-server --help
 ```
 Ephemeral run from Git (can resync on upstream churn):
 ```bash
-uvx -p 3.13 --from git+https://github.com/avnovikov/HotspotTriage hotspottriage start-mcp-server
+uvx -p 3.13 --from git+https://github.com/avnovikov/HotspotTriage hotspottriage start-mcp-server --open-browser --default-target /absolute/path/to/your/git/repo
 ```
-Example MCP client config for **Cursor** (save as `.cursor/mcp.json` in your project, or merge into your editor’s MCP settings—the paths below are placeholders):
+
+Arguments after `start-mcp-server` are parsed by HotspotTriage (dashboard flags and `--default-target`), then the MCP runtime receives the rest.
+
+Example MCP client config for **Cursor** (save as `.cursor/mcp.json` in your project, or merge into your editor’s MCP settings—the paths below are placeholders). When using **`scripts/run_hotspottriage_mcp.sh`**, put only dashboard / default-repo flags in **`args`**—the script already runs `hotspottriage start-mcp-server` for you.
+
+**PATH / `git`:** Cursor often starts MCP with a minimal `PATH`, which triggers `[Errno 2] No such file or directory: 'git'`. The launcher prepends `.venv/bin` plus usual system dirs (`/usr/bin`, `/bin`, `/usr/local/bin`, `/opt/homebrew/bin`). Prefer **omitting** the `env` block below so that wiring applies; if you set `PATH` yourself, Cursor may **not** expand `$PATH`—use a full string (venv first, then those dirs, then any extra dirs where your tools live).
+
 ```json
 {
   "mcpServers": {
     "hotspottriage": {
       "command": "path/to/HotspotTriage/scripts/run_hotspottriage_mcp.sh",
-      "args": ["--open-browser"],
+      "args": ["--open-browser", "--default-target", "/absolute/path/to/your/git/repo"]
+    }
+  }
+}
+```
+
+Optional explicit `PATH` (only if you need it; replace placeholders with absolute paths on your machine):
+
+```json
+{
+  "mcpServers": {
+    "hotspottriage": {
+      "command": "path/to/HotspotTriage/scripts/run_hotspottriage_mcp.sh",
+      "args": ["--open-browser", "--default-target", "/absolute/path/to/your/git/repo"],
       "env": {
-        "PATH": "path/to/HotspotTriage/.venv/bin:$PATH"
+        "PATH": "/path/to/HotspotTriage/.venv/bin:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
       }
     }
   }
 }
 ```
-Direct binary (same process, explicit subcommand):
+Direct **`hotspottriage` binary** (use `start-mcp-server` in **`args`**; preferred if shell wrappers fail on your host). Ensure **`git`** is on `PATH`—see **PATH / `git`** above; avoid relying on `$PATH` inside JSON unless your client expands it:
+
 ```json
 {
   "mcpServers": {
     "hotspottriage": {
       "command": "path/to/HotspotTriage/.venv/bin/hotspottriage",
-      "args": ["start-mcp-server", "--open-browser"],
+      "args": ["start-mcp-server", "--open-browser", "--default-target", "/absolute/path/to/your/git/repo"],
       "env": {
-        "PATH": "path/to/HotspotTriage/.venv/bin:$PATH"
+        "PATH": "/path/to/HotspotTriage/.venv/bin:/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
       }
     }
   }
 }
 ```
-For predictable tooling (e.g., pylint for smells), run from a dedicated venv and put that `bin` first on `PATH`. [`scripts/run_hotspottriage_mcp.sh`](scripts/run_hotspottriage_mcp.sh) prepends the project venv and execs `hotspottriage start-mcp-server`.''
+For predictable tooling (e.g., pylint for smells), run from a dedicated venv and put that `bin` first on `PATH`. [`scripts/run_hotspottriage_mcp.sh`](scripts/run_hotspottriage_mcp.sh) uses **`#!/bin/sh`** (POSIX; no **bash** required). It discovers the HotspotTriage checkout from the script path, prepends `.venv/bin` and common system locations to `PATH`, and **`exec`s `hotspottriage start-mcp-server`**. If your MCP host cannot run shell scripts, set **`command`** to `.venv/bin/hotspottriage` and put **`start-mcp-server`** plus flags in **`args`** (see JSON above).
 
-**Tools exposed over MCP**: `analyze`, `generatecache`, `cachestatus`, `clearcache`, and `initconfig`. Pass `compact=false` on `analyze` when you need full metric rows.''
+**Tools exposed over MCP**: `analyze`, `generate_cache`, `cache_status`, `clear_cache`, and `init_config`. Pass `compact=false` on `analyze` when you need full metric rows. With **`--default-target`** on the server, tools may omit **`target`** when it should always be that repo.
 
 **Use with Claude Code**: discovers the server through its standard MCP config. From inside the cloned repo (so the launcher and venv resolve correctly):
 ```bash
-claude mcp add hotspottriage -- ./scripts/run_hotspottriage_mcp.sh --open-browser
+claude mcp add hotspottriage -- ./scripts/run_hotspottriage_mcp.sh --open-browser --default-target /absolute/path/to/your/git/repo
 ```
 Or register it manually by adding the same JSON as above to `~/.claude.json` under `mcpServers` (same shape as Cursor’s MCP config). Then in a Claude Code session:
 
 ```text
 /mcp                                    # confirm "hotspottriage" is connected
-> Use hotspottriage analyze on this repo, top 15 by score
+> Use hotspottriage analyze on this repo, top 15 by score   # omit target if server used --default-target for this repo
 > Then call generate_cache so the dashboard heatmap is populated
 ```
 
 Tips:
+
+- With **`--default-target`**, `analyze` / `generate_cache` / `cache_status` / `clear_cache` can use an empty **`target`** for that repo.
 - The first `analyze` call on a large repo populates `<repo>/.hotspottriage/cache/blocks.pkl`; subsequent calls are instant. Run `generate_cache` once up front to warm it deliberately.
 - Project-level `.hotspottriage/project.yml` is **not** read by the MCP server (only by the CLI). Pass overrides as tool arguments, or change them via the dashboard config view.
 - For your own projects, drop a `CLAUDE.md` at the repo root pointing at the modules you care about; Claude Code auto-loads it as system context.
