@@ -10,7 +10,7 @@ Before changing existing code, run a HotspotTriage MCP score check for the funct
 ## Required workflow
 
 1. Identify the exact function or method you plan to modify.
-2. Use HotspotTriage MCP (`analyze` or `analyze_with_cache`) with block granularity for the target repo/path.
+2. Use HotspotTriage MCP `analyze` (always block-level + cache) for the target repo/path; pass `compact=false` when you need full metric rows.
 3. Locate the matching block row (`path::symbol`) and capture:
    - `score`
    - `score_band`

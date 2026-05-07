@@ -7,9 +7,18 @@ from pathlib import Path
 import pytest
 
 from hotspottriage.cache_generator import (
+    extract_class_method_structure,
     generate_full_cache,
     print_cache_summary,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_pylint_smells(monkeypatch):
+    monkeypatch.setattr(
+        "hotspottriage.smell.compute_smells",
+        lambda *args, **kwargs: [],
+    )
 
 
 @pytest.fixture
@@ -88,6 +97,25 @@ class AnotherClass:
     )
 
     return repo
+
+
+def test_extract_class_method_structure(test_repo):
+    rows = extract_class_method_structure(str(test_repo))
+    assert isinstance(rows, list) and len(rows) > 0
+    item = rows[0]
+    assert "file" in item and "full_name" in item
+    assert "start_line" in item and "end_line" in item and "lines" in item
+
+
+def test_extract_class_method_structure_progress_callback(test_repo):
+    seen: list[tuple[str, int, int]] = []
+
+    def cb(label: str, done: int, total: int) -> None:
+        seen.append((label, done, total))
+
+    extract_class_method_structure(str(test_repo), progress_callback=cb)
+    assert seen
+    assert all(l.startswith("Indexing ") for l, _, _ in seen)
 
 
 def test_generate_full_cache_basic(test_repo):

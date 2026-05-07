@@ -3,25 +3,36 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 import socket
 
+import pytest
 from fastapi.testclient import TestClient
 
+from hotspottriage import config as _project_config
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
-from hotspottriage.dashboard.server import DashboardServer, _find_free_port
+from hotspottriage.dashboard.server import DashboardServer, _find_free_port, _slim_cache_job_result
 from hotspottriage.dashboard.stats import StatsCollector
 
 
-def _server() -> DashboardServer:
+def _server(
+    *,
+    config_patch_path=None,
+    config_snapshot: dict | None = None,
+) -> DashboardServer:
     stats = StatsCollector()
     logs = MemoryLogHandler(max_records=100)
+    snap = config_snapshot or _project_config.to_dashboard_snapshot(
+        dict(_project_config.DEFAULTS)
+    )
     return DashboardServer(
-        config={"dashboard": {"enabled": True}},
+        config=snap,
         stats=stats,
         log_handler=logs,
         host="127.0.0.1",
         base_port=9200,
         open_on_start=False,
+        config_patch_path=config_patch_path,
     )
 
 
@@ -85,9 +96,13 @@ def test_generate_cache_endpoint(monkeypatch):
     client = TestClient(srv.app)
 
     def _fake_generate_full_cache(
-        target: str, filter: str | None, score_metrics: str, verbose: bool
+        target: str,
+        filter: str | None,
+        score_metrics: str,
+        verbose: bool,
+        progress_callback=None,
     ) -> dict:
-        assert target == "../LexVox"
+        assert target == str((Path.cwd() / "../LexVox").resolve())
         assert filter is None
         assert score_metrics == "churn_per_sloc,cyclomatic"
         assert verbose is False
@@ -114,6 +129,30 @@ def test_generate_cache_endpoint(monkeypatch):
     assert data["result"]["metadata"]["blocks_cached"] == 10
 
 
+def test_slim_cache_job_result_omits_row_payloads():
+    """Poll JSON must stay small: drop blocks/classes ``results`` lists."""
+    heavy = {
+        "timestamp": None,
+        "target": "/x",
+        "filter": None,
+        "score_metrics": "a,b",
+        "metadata": {"status": "success", "blocks_cached": 2},
+        "cache_status": {"entries": 2},
+        "blocks": {
+            "count": 2,
+            "cache": {"entries": 2},
+            "results": [{"path": "a::b"}, {"path": "c::d"}],
+        },
+        "classes": {"count": 3, "results": [{"file": "f.py"}] * 3},
+    }
+    slim = _slim_cache_job_result(heavy)
+    assert "results" not in slim.get("blocks", {})
+    assert "results" not in slim.get("classes", {})
+    assert slim["blocks"]["count"] == 2
+    assert slim["classes"]["count"] == 3
+    assert slim["metadata"]["blocks_cached"] == 2
+
+
 def test_generate_cache_requires_target():
     srv = _server()
     client = TestClient(srv.app)
@@ -130,19 +169,48 @@ def test_cache_status_endpoint(monkeypatch, tmp_path):
     cache_dir.mkdir(parents=True)
     (cache_dir / "blocks.pkl").write_bytes(b"abc")
 
-    class _FakeCache:
-        def __init__(self, _repo):
-            pass
-
-        def get_metadata(self):
-            return {"entry_count": 7}
-
-    monkeypatch.setattr("hotspottriage.dashboard.server._cache.Cache", _FakeCache)
+    monkeypatch.setattr(
+        "hotspottriage.dashboard.server._cache.get_metadata",
+        lambda _repo: {"entry_count": 7},
+    )
+    monkeypatch.setattr(
+        "hotspottriage.dashboard.server._cache.load_block_results",
+        lambda _repo: None,
+    )
     resp = client.post("/api/cache/status", json={"target": str(repo)})
     assert resp.status_code == 200
     data = resp.json()
     assert data["exists"] is True
     assert data["entries"] == 7
+
+
+def test_cache_status_hydrates_heatmap_rows_when_cache_exists(monkeypatch, tmp_path):
+    srv = _server()
+    client = TestClient(srv.app)
+    repo = tmp_path / "r"
+    repo.mkdir()
+    cache_dir = repo / ".hotspottriage" / "cache"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "blocks.pkl").write_bytes(b"abc")
+
+    monkeypatch.setattr(
+        "hotspottriage.dashboard.server._cache.get_metadata",
+        lambda _repo: {"entry_count": 2},
+    )
+    monkeypatch.setattr(
+        "hotspottriage.dashboard.server._cache.load_block_results",
+        lambda _repo: [
+            {"path": "x.py::f", "score": 0.8, "score_band": "high"},
+            {"path": "y.py::g", "score": 0.4, "score_band": "medium"},
+        ],
+    )
+    status = client.post("/api/cache/status", json={"target": str(repo)})
+    assert status.status_code == 200
+    heatmap = client.get("/api/stats/heatmap", params={"metric": "score", "limit": 10})
+    assert heatmap.status_code == 200
+    rows = heatmap.json()["rows"]
+    assert len(rows) >= 2
+    assert rows[0]["path"] == "x.py::f"
 
 
 def test_cache_context_persists_locally(tmp_path):
@@ -161,10 +229,10 @@ def test_cache_context_persists_locally(tmp_path):
     get_resp = client.get("/api/cache/context")
     assert get_resp.status_code == 200
     data = get_resp.json()
-    assert data["last_target"] == "../LexVox"
+    assert data["last_target"] == str((Path.cwd() / "../LexVox").resolve())
     assert data["last_filter"] == "src/**"
     assert data["last_score_metrics"] == "cyclomatic,churn"
-    assert data["recent_targets"][0] == "../LexVox"
+    assert data["recent_targets"][0] == str((Path.cwd() / "../LexVox").resolve())
 
 
 def test_generate_cache_job_not_found():
@@ -181,6 +249,143 @@ def test_stream_endpoints_exist():
     paths = {r.path for r in srv.app.router.routes}
     assert "/api/logs/stream" in paths
     assert "/api/stats/stream" in paths
+    assert "/api/config/patch" in paths
+    assert "/api/stats/distribution" in paths
+    assert "/api/stats/heatmap" in paths
+
+
+def test_stats_heatmap_sorts_and_limits():
+    srv = _server()
+    srv.publish_latest_block_metrics(
+        [
+            {"path": "a::x", "score": 0.1, "cyclomatic": 1, "score_band": "low"},
+            {"path": "b::y", "score": 0.9, "cyclomatic": 5, "score_band": "critical"},
+            {"path": "c::z", "score": 0.5, "cyclomatic": 9, "score_band": "medium"},
+        ]
+    )
+    client = TestClient(srv.app)
+    data = client.get("/api/stats/heatmap", params={"limit": 2}).json()
+    assert data["limit"] == 2
+    assert len(data["rows"]) == 2
+    assert data["rows"][0]["path"] == "b::y"
+    assert data["rows"][0]["file"] == "b"
+    assert data["rows"][0]["method"] == "y"
+    assert "score" in data["rows"][0]
+    assert data["rows"][1]["path"] == "c::z"
+
+
+def test_stats_heatmap_column_maxima_excludes_meta_aggregate_row():
+    """Meta rows (path ``__...``) must not dominate heatmap tint maxima."""
+    srv = _server()
+    srv.publish_latest_block_metrics(
+        [
+            {"path": "__aggregate_similarity__::repo", "score": 0.99, "complexity_burden": 0.95},
+            {"path": "a.py::f", "score": 0.4, "complexity_burden": 0.3},
+            {"path": "b.py::g", "score": 0.2, "complexity_burden": 0.5},
+        ]
+    )
+    client = TestClient(srv.app)
+    data = client.get("/api/stats/heatmap").json()
+    assert "column_maxima" in data
+    assert data["column_maxima"]["score"] == pytest.approx(0.4)
+    assert data["column_maxima"]["complexity_burden"] == pytest.approx(0.5)
+
+
+def test_stats_heatmap_file_then_method_sort():
+    srv = _server()
+    srv.publish_latest_block_metrics(
+        [
+            {"path": "z.py::b", "score": 0.2},
+            {"path": "z.py::a", "score": 0.3},
+            {"path": "a.py::c", "score": 0.1},
+        ]
+    )
+    client = TestClient(srv.app)
+    data = client.get("/api/stats/heatmap").json()
+    assert [r["path"] for r in data["rows"]] == ["z.py::a", "z.py::b", "a.py::c"]
+    assert "columns" in data
+
+
+def test_stats_heatmap_empty_rows():
+    srv = _server()
+    client = TestClient(srv.app)
+    empty = client.get("/api/stats/heatmap").json()
+    assert empty["rows"] == []
+
+
+def test_stats_heatmap_rejects_bad_limit():
+    srv = _server()
+    client = TestClient(srv.app)
+    assert client.get("/api/stats/heatmap", params={"limit": 0}).status_code == 400
+    assert client.get("/api/stats/heatmap", params={"limit": 501}).status_code == 400
+
+
+def test_stats_distribution_empty_and_unknown():
+    srv = _server()
+    client = TestClient(srv.app)
+    empty_metric = client.get("/api/stats/distribution", params={"metric": ""}).json()
+    assert empty_metric["buckets"] == [] and empty_metric["counts"] == []
+    unknown = client.get("/api/stats/distribution", params={"metric": "nope"}).json()
+    assert unknown["buckets"] == [] and unknown["counts"] == []
+
+
+def test_stats_distribution_histogram_counts():
+    srv = _server()
+    srv.publish_latest_block_metrics(
+        [
+            {"cyclomatic": 2, "sloc": 10, "score": 0.5},
+            {"cyclomatic": 8, "sloc": 12, "score": 0.2},
+            {"cyclomatic": 8, "sloc": 9, "score": 0.1},
+        ]
+    )
+    client = TestClient(srv.app)
+    data = client.get("/api/stats/distribution", params={"metric": "cyclomatic"}).json()
+    assert data["metric"] == "cyclomatic"
+    assert sum(data["counts"]) == 3
+    assert len(data["buckets"]) == len(data["counts"])
+
+
+def test_config_patch_persists_and_merges_get(tmp_path):
+    patch_path = tmp_path / ".hotspottriage" / "dashboard_config_patch.yml"
+    srv = _server(config_patch_path=patch_path)
+    client = TestClient(srv.app)
+    cyclo_before = client.get("/api/config").json()["metric_normalization"]["cyclomatic"][
+        "breakpoints"
+    ][1][0]
+    resp = client.post(
+        "/api/config/patch",
+        json={
+            "score_aggregation": {
+                "complexity_weights": {"cyclomatic": 0.99},
+            },
+        },
+    )
+    assert resp.status_code == 200
+    merged = client.get("/api/config").json()
+    assert merged["score_aggregation"]["complexity_weights"]["cyclomatic"] == 0.99
+    assert merged["metric_normalization"]["cyclomatic"]["breakpoints"][1][0] == cyclo_before
+    assert patch_path.exists()
+
+
+def test_config_patch_validation_error():
+    srv = _server()
+    client = TestClient(srv.app)
+    bad = client.post(
+        "/api/config/patch",
+        json={
+            "metric_normalization": {
+                "cyclomatic": {"method": "piecewise", "breakpoints": [[0, 0]]},
+            },
+        },
+    )
+    assert bad.status_code == 400
+
+
+def test_config_patch_rejects_unknown_keys():
+    srv = _server()
+    client = TestClient(srv.app)
+    resp = client.post("/api/config/patch", json={"filter": []})
+    assert resp.status_code == 400
 
 
 def test_start_runs_daemon_thread(monkeypatch):

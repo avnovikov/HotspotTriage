@@ -8,16 +8,22 @@ import pytest
 
 from hotspottriage.mcp_server import (
     analyze,
-    analyze_classes,
     generate_cache,
-    analyze_with_cache,
-    get_code_smells,
     cache_status,
     clear_cache,
     init_config,
     _effective_dashboard_config,
     _mcp_lifespan,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_pylint_smells(monkeypatch):
+    """Tests run without requiring a pylint executable on PATH."""
+    monkeypatch.setattr(
+        "hotspottriage.smell.compute_smells",
+        lambda *args, **kwargs: [],
+    )
 
 
 @pytest.fixture
@@ -90,16 +96,16 @@ def complex_function(a, b, c):
 
 
 def test_analyze_basic(test_repo):
-    """Test basic analyze functionality."""
-    result = analyze(str(test_repo))
+    """Test basic analyze functionality (full rows)."""
+    result = analyze(str(test_repo), compact=False)
     data = json.loads(result)
 
-    # Should return a list of statistics
-    assert isinstance(data, list)
-    assert len(data) > 0
+    assert "results" in data and "cache" in data
+    rows = data["results"]
+    assert isinstance(rows, list)
+    assert len(rows) > 0
 
-    # Check structure of first result
-    first = data[0]
+    first = rows[0]
     assert "path" in first
     assert "sloc" in first
     assert "normalized_sloc" in first
@@ -123,12 +129,11 @@ def test_analyze_basic(test_repo):
 
 
 def test_analyze_with_limit(test_repo):
-    """Test analyze with limit."""
-    result = analyze(str(test_repo), limit=1)
+    """Test analyze with limit (non-aggregate rows only; limit excludes similarity summary)."""
+    result = analyze(str(test_repo), limit=1, similarity=False)
     data = json.loads(result)
 
-    # Should respect limit
-    assert len(data) <= 1
+    assert len(data["results"]) <= 1
 
 
 def test_analyze_with_score_metrics(test_repo):
@@ -136,26 +141,24 @@ def test_analyze_with_score_metrics(test_repo):
     result = analyze(
         str(test_repo),
         score_metrics="cyclomatic",
+        compact=False,
     )
     data = json.loads(result)
 
-    # Should return results with custom score
-    assert len(data) > 0
-    assert "score" in data[0]
+    assert len(data["results"]) > 0
+    assert "score" in data["results"][0]
 
 
-def test_analyze_with_granularity_block(test_repo):
-    """Test analyze with block granularity (per-function)."""
+def test_analyze_returns_multiple_blocks(test_repo):
+    """Block analysis yields one row per function."""
     result = analyze(
         str(test_repo),
-        granularity="block",
         score_metrics="cyclomatic",
+        compact=False,
     )
     data = json.loads(result)
 
-    # With block granularity, we should get multiple rows per file
-    # (one per function)
-    assert len(data) >= 2  # We defined 2 functions in test_repo
+    assert len(data["results"]) >= 2
 
 
 def test_analyze_error_handling():
@@ -163,7 +166,6 @@ def test_analyze_error_handling():
     result = analyze("/nonexistent/path")
     data = json.loads(result)
 
-    # Should return error object
     assert "error" in data
 
 
@@ -172,11 +174,11 @@ def test_analyze_with_filter(test_repo):
     result = analyze(
         str(test_repo),
         filter="**/*.py",
+        compact=False,
     )
     data = json.loads(result)
 
-    # Should return results
-    assert len(data) > 0
+    assert len(data["results"]) > 0
 
 
 def test_init_config_project(test_repo):
@@ -216,12 +218,10 @@ def test_init_config_global():
 
 def test_analyze_sort_by_file(test_repo):
     """Test analyze sorting by file."""
-    result = analyze(str(test_repo), sort="file")
+    result = analyze(str(test_repo), sort="file", compact=False)
     data = json.loads(result)
 
-    # Should return results sorted by file path
-    assert len(data) > 0
-    # Can't guarantee much more about sorting without knowing the exact files
+    assert len(data["results"]) > 0
 
 
 def test_cache_status_empty(test_repo):
@@ -236,60 +236,28 @@ def test_cache_status_empty(test_repo):
 
 def test_clear_cache(test_repo):
     """Test clearing cache."""
-    # First generate some cache
-    analyze_with_cache(str(test_repo))
+    analyze(str(test_repo), compact=False)
 
-    # Then clear it
     result = clear_cache(str(test_repo))
     data = json.loads(result)
 
     assert data["status"] == "success"
 
-    # Verify cache is cleared
     status_result = cache_status(str(test_repo))
     status = json.loads(status_result)
     assert status["entries"] == 0
 
 
-def test_analyze_with_cache(test_repo):
-    """Test cache-backed analysis with block granularity."""
-    result = analyze_with_cache(str(test_repo), score_metrics="cyclomatic")
+def test_analyze_returns_cache_metadata(test_repo):
+    """Cache-backed analyze includes cache stats."""
+    result = analyze(str(test_repo), score_metrics="cyclomatic", compact=False)
     data = json.loads(result)
 
-    # Should have results and cache info
     assert "results" in data
     assert "cache" in data
     assert "entries" in data["cache"]
     assert len(data["results"]) > 0
     assert "normalized_sloc" in data["results"][0]
-
-
-def test_analyze_classes(test_repo):
-    """Test class and method analysis."""
-    result = analyze_classes(str(test_repo))
-    data = json.loads(result)
-
-    # Should return list of classes/methods
-    assert isinstance(data, list)
-    assert len(data) > 0
-
-    # Check structure
-    for item in data:
-        assert "file" in item
-        assert "full_name" in item
-        assert "start_line" in item
-        assert "end_line" in item
-        assert "lines" in item
-
-
-def test_analyze_classes_with_filter(test_repo):
-    """Test class analysis with glob filter."""
-    result = analyze_classes(str(test_repo), filter="**/*.py")
-    data = json.loads(result)
-
-    # Should return results
-    assert isinstance(data, list)
-    assert len(data) > 0
 
 
 def test_generate_cache_includes_normalized_sloc_in_block_results(test_repo):
@@ -301,18 +269,6 @@ def test_generate_cache_includes_normalized_sloc_in_block_results(test_repo):
     assert blocks.get("count", 0) > 0
     assert "results" in blocks
     assert "normalized_sloc" in blocks["results"][0]
-
-
-def test_get_code_smells_returns_smell_rows(test_repo):
-    result = get_code_smells(str(test_repo))
-    data = json.loads(result)
-    assert isinstance(data, list)
-    if data:
-        first = data[0]
-        assert "file" in first
-        assert "line" in first
-        assert "smell" in first
-        assert "message" in first
 
 
 def test_effective_dashboard_config_uses_cli_overrides(monkeypatch):
@@ -335,6 +291,75 @@ def test_effective_dashboard_config_uses_cli_overrides(monkeypatch):
     assert dash["base_port"] == 9333
     assert dash["host"] == "0.0.0.0"
     assert dash["open_on_start"] is True
+
+
+def test_analyze_compact_default_returns_only_function_score_risk_band(monkeypatch, test_repo):
+    monkeypatch.setattr(
+        "hotspottriage.smell.compute_smells",
+        lambda *args, **kwargs: [],
+    )
+    result = analyze(
+        str(test_repo),
+        score_metrics="cyclomatic",
+    )
+    data = json.loads(result)
+    assert "results" in data
+    rows = data["results"]
+    assert isinstance(rows, list) and len(rows) >= 1
+    first = rows[0]
+    assert set(first.keys()) == {"function", "score", "risk_band"}
+    assert isinstance(first["function"], str)
+    assert isinstance(first["score"], float)
+    assert isinstance(first["risk_band"], str)
+
+
+def test_analyze_block_publishes_rows_to_dashboard(monkeypatch, test_repo):
+    import hotspottriage.mcp_server as mcp_mod
+
+    monkeypatch.setattr(
+        "hotspottriage.smell.compute_smells",
+        lambda *args, **kwargs: [],
+    )
+
+    class _Capturing:
+        def __init__(self) -> None:
+            self.rows = None
+
+        def publish_latest_block_metrics(self, rows):
+            self.rows = rows
+
+    cap = _Capturing()
+    monkeypatch.setattr(mcp_mod, "_dashboard_server_instance", cap)
+    result = analyze(str(test_repo), score_metrics="cyclomatic", compact=False)
+    data = json.loads(result)
+    assert "results" in data
+    assert cap.rows is not None
+    assert len(cap.rows) >= 2
+
+
+def test_analyze_publishes_before_limit(monkeypatch, test_repo):
+    import hotspottriage.mcp_server as mcp_mod
+
+    monkeypatch.setattr(
+        "hotspottriage.smell.compute_smells",
+        lambda *args, **kwargs: [],
+    )
+
+    captured: dict[str, object] = {}
+
+    class _Capturing:
+        def publish_latest_block_metrics(self, rows):
+            captured["rows"] = rows
+
+    monkeypatch.setattr(mcp_mod, "_dashboard_server_instance", _Capturing())
+    out = analyze(str(test_repo), score_metrics="cyclomatic", limit=1, compact=False)
+    data = json.loads(out)
+    assert "results" in data
+    rows = captured.get("rows")
+    assert rows is not None
+    assert isinstance(rows, list)
+    assert len(rows) >= 2
+    assert len(data["results"]) <= len(rows)
 
 
 @pytest.mark.anyio

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from dataclasses import dataclass
 import json
 import socket
@@ -14,15 +15,213 @@ from pathlib import Path
 from typing import Any, AsyncGenerator
 
 import uvicorn
+import yaml
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from hotspottriage import cache as _cache
+from hotspottriage import config as _config
+from hotspottriage import normalize as _normalize
+from hotspottriage import score as _score_mod
 from hotspottriage.dashboard.html import DASHBOARD_HTML
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.stats import StatsCollector
 
 BASE_PORT = 9123
+
+# Numeric Statistic fields eligible for /api/stats/distribution histograms.
+_DISTRIBUTION_METRICS: frozenset[str] = frozenset(
+    {
+        "sloc",
+        "normalized_sloc",
+        "cyclomatic",
+        "halstead",
+        "maintainability",
+        "churn",
+        "churn_per_sloc",
+        "decayed_churn",
+        "decayed_churn_per_sloc",
+        "smell_count",
+        "smell_severity",
+        "smell_burden",
+        "similarity_score",
+        "match_count",
+        "score",
+    }
+)
+
+# Upper cap for ``/api/stats/heatmap`` limit (query param).
+_HEATMAP_MAX_LIMIT = 500
+
+
+def _slim_cache_job_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Strip huge ``results`` lists before storing on the cache job.
+
+    The dashboard poll endpoint returns ``job.result`` as JSON; including
+    hundreds of full block/class rows can exceed what browsers reliably parse
+    or hold in memory. Rows are already applied via ``publish_latest_block_metrics``.
+    """
+    out: dict[str, Any] = {
+        "timestamp": result.get("timestamp"),
+        "target": result.get("target"),
+        "filter": result.get("filter"),
+        "score_metrics": result.get("score_metrics"),
+        "metadata": dict(result.get("metadata") or {}),
+        "cache_status": dict(result.get("cache_status") or {}),
+    }
+    blocks = result.get("blocks")
+    if isinstance(blocks, dict):
+        slim_b = {k: v for k, v in blocks.items() if k != "results"}
+        res = blocks.get("results")
+        if isinstance(res, list) and "count" not in slim_b:
+            slim_b["count"] = len(res)
+        out["blocks"] = slim_b
+    classes = result.get("classes")
+    if isinstance(classes, dict):
+        slim_c = {k: v for k, v in classes.items() if k != "results"}
+        res = classes.get("results")
+        if isinstance(res, list) and "count" not in slim_c:
+            slim_c["count"] = len(res)
+        out["classes"] = slim_c
+    return out
+
+
+def _normalize_cache_target(raw_target: str) -> str:
+    """Normalize cache target paths so ``./`` inputs persist as absolute paths."""
+    target = str(raw_target).strip()
+    if not target:
+        return ""
+    if "://" in target or target.startswith("git@"):
+        return target
+    try:
+        return str(Path(target).expanduser().resolve())
+    except OSError:
+        return target
+
+
+_HEATMAP_SCORE_COLUMNS: tuple[str, ...] = (
+    "score",
+    "complexity_burden",
+    "churn_burden",
+    "maintainability_burden",
+    "smell_burden",
+    "similarity_burden",
+)
+
+
+def _split_block_path(raw_path: str) -> tuple[str, str]:
+    path = str(raw_path).strip()
+    if not path:
+        return "", ""
+    if "::" not in path:
+        return path, ""
+    file_path, symbol = path.split("::", 1)
+    return file_path, symbol
+
+
+def _as_float_or_zero(raw: Any) -> float:
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _build_heatmap_rows(rows: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    """Return matrix rows sorted by file score, then method score."""
+    table_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        path = row.get("path")
+        if not path:
+            continue
+        file_path, method_name = _split_block_path(str(path))
+        subs = row.get("score_subscores")
+        subs_map = subs if isinstance(subs, dict) else {}
+        item: dict[str, Any] = {
+            "path": str(path),
+            "file": file_path,
+            "method": method_name,
+        }
+        for col in _HEATMAP_SCORE_COLUMNS:
+            value = row.get(col)
+            if value is None:
+                value = subs_map.get(col)
+            item[col] = _as_float_or_zero(value)
+        band = row.get("score_band")
+        if band is not None and str(band).strip():
+            item["score_band"] = str(band)
+        table_rows.append(item)
+
+    file_max_score: dict[str, float] = {}
+    for row in table_rows:
+        file_name = str(row["file"])
+        score = _as_float_or_zero(row.get("score"))
+        prev = file_max_score.get(file_name)
+        if prev is None or score > prev:
+            file_max_score[file_name] = score
+
+    table_rows.sort(
+        key=lambda r: (
+            -file_max_score.get(str(r["file"]), 0.0),
+            str(r["file"]),
+            -_as_float_or_zero(r.get("score")),
+            str(r["method"]),
+        )
+    )
+    return table_rows[:limit]
+
+
+def _heatmap_column_maxima(
+    table_rows: list[dict[str, Any]], *, columns: tuple[str, ...]
+) -> dict[str, float]:
+    """Per-column maxima for heatmap cell tinting.
+
+    Excludes meta rows whose ``path`` starts with ``__`` (e.g. similarity aggregate),
+    which often have an outsized ``score`` and would flatten tinting for real blocks.
+    """
+    eligible = [r for r in table_rows if not str(r.get("path", "")).startswith("__")]
+    if not eligible:
+        eligible = table_rows
+    out: dict[str, float] = {}
+    for col in columns:
+        vals = [_as_float_or_zero(r.get(col)) for r in eligible]
+        m = float(max(vals)) if vals else 0.0
+        out[col] = m if m > 0 else 1e-9
+    return out
+
+
+def _histogram_buckets(values: list[float], *, bins: int = 20) -> tuple[list[list[float]], list[int]]:
+    """Return ``buckets`` as ``[low, high]`` pairs and ``counts`` (same length)."""
+    if not values:
+        return [], []
+    if bins < 1:
+        raise ValueError("bins must be positive")
+    vmin = float(min(values))
+    vmax = float(max(values))
+    if vmin == vmax:
+        return [[vmin, vmax]], [len(values)]
+    width = (vmax - vmin) / bins
+    counts = [0] * bins
+    buckets: list[list[float]] = []
+    for i in range(bins):
+        lo = vmin + i * width
+        hi = vmin + (i + 1) * width
+        if i == bins - 1:
+            hi = vmax
+        buckets.append([lo, hi])
+    for v in values:
+        fv = float(v)
+        if fv >= vmax:
+            idx = bins - 1
+        elif fv <= vmin:
+            idx = 0
+        else:
+            idx = int((fv - vmin) / width)
+            if idx >= bins:
+                idx = bins - 1
+        counts[idx] += 1
+    return buckets, counts
 
 
 @dataclass
@@ -31,6 +230,7 @@ class CacheJob:
     status: str
     progress: int
     message: str
+    started_at_monotonic: float
     result: dict[str, Any] | None = None
     error: str | None = None
 
@@ -59,8 +259,10 @@ class DashboardServer:
         host: str = "127.0.0.1",
         base_port: int = BASE_PORT,
         open_on_start: bool = False,
+        config_patch_path: Path | None = None,
     ) -> None:
-        self._config = config
+        self._base_snapshot = deepcopy(config)
+        self._ensure_snapshot_defaults()
         self._stats = stats
         self._log_handler = log_handler
         self._host = host
@@ -71,6 +273,12 @@ class DashboardServer:
         self._cache_jobs_lock = threading.Lock()
         self._state_file = Path(".hotspottriage") / "dashboard_state.json"
         self._state_lock = threading.Lock()
+        self._config_patch_path = config_patch_path or (
+            Path(".hotspottriage") / "dashboard_config_patch.yml"
+        )
+        self._patch_lock = threading.Lock()
+        self._block_metrics_rows: list[dict[str, Any]] = []
+        self._block_metrics_lock = threading.Lock()
         self._app = self._build_app()
         self._thread: threading.Thread | None = None
         self._server: uvicorn.Server | None = None
@@ -97,6 +305,83 @@ class DashboardServer:
     def _load_local_state(self) -> dict[str, Any]:
         with self._state_lock:
             return self._load_local_state_unlocked()
+
+    def _ensure_snapshot_defaults(self) -> None:
+        snap = self._base_snapshot
+        if not isinstance(snap.get("metric_normalization"), dict):
+            snap["metric_normalization"] = deepcopy(_config.DEFAULTS["metric_normalization"])
+        if not isinstance(snap.get("score_aggregation"), dict):
+            snap["score_aggregation"] = deepcopy(_config.DEFAULTS["score_aggregation"])
+
+    def publish_latest_block_metrics(self, rows: list[dict[str, Any]]) -> None:
+        """Replace stored raw block rows used by distribution histograms."""
+        with self._block_metrics_lock:
+            self._block_metrics_rows = list(rows)
+
+    def _load_patch_unlocked(self) -> dict[str, Any]:
+        path = self._config_patch_path
+        if not path.exists():
+            return {}
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return {}
+        if not text.strip():
+            return {}
+        try:
+            data = yaml.safe_load(text)
+        except yaml.YAMLError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _write_patch_unlocked(self, data: dict[str, Any]) -> None:
+        self._config_patch_path.parent.mkdir(parents=True, exist_ok=True)
+        self._config_patch_path.write_text(
+            yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+
+    def _merged_snapshot(self) -> dict[str, Any]:
+        """Base dashboard snapshot merged with persisted YAML overlay."""
+        out = deepcopy(self._base_snapshot)
+        patch = self._load_patch_unlocked()
+        mn_patch = patch.get("metric_normalization")
+        if isinstance(mn_patch, dict):
+            mn_base = out.get("metric_normalization")
+            if isinstance(mn_base, dict):
+                out["metric_normalization"] = _config._deep_merge(mn_base, mn_patch)
+            else:
+                out["metric_normalization"] = deepcopy(mn_patch)
+        sa_patch = patch.get("score_aggregation")
+        if isinstance(sa_patch, dict):
+            sa_base = out.get("score_aggregation")
+            if isinstance(sa_base, dict):
+                out["score_aggregation"] = _config._deep_merge(sa_base, sa_patch)
+            else:
+                out["score_aggregation"] = deepcopy(sa_patch)
+        return out
+
+    def _validate_merged_patch(self, merged_patch: dict[str, Any]) -> None:
+        """Raise ``ValueError`` if overlay produces invalid normalization/score config."""
+        probe = deepcopy(_config.DEFAULTS)
+        mn_base = deepcopy(self._base_snapshot.get("metric_normalization") or {})
+        mn_patch = merged_patch.get("metric_normalization")
+        if isinstance(mn_patch, dict):
+            mn_full = _config._deep_merge(mn_base, mn_patch)
+        else:
+            mn_full = mn_base
+        probe["metric_normalization"] = mn_full
+
+        sa_base = deepcopy(self._base_snapshot.get("score_aggregation") or {})
+        sa_patch = merged_patch.get("score_aggregation")
+        if isinstance(sa_patch, dict):
+            sa_full = _config._deep_merge(sa_base, sa_patch)
+        else:
+            sa_full = sa_base
+        probe["score_aggregation"] = sa_full
+
+        _normalize.validate_metric_normalization(probe)
+        _score_mod.validate_score_aggregation(probe)
 
     def _save_local_state(self, updates: dict[str, Any]) -> dict[str, Any]:
         with self._state_lock:
@@ -142,7 +427,7 @@ class DashboardServer:
         app = FastAPI(title="HotspotTriage Dashboard", docs_url=None, redoc_url=None)
         stats_ref = self._stats
         log_ref = self._log_handler
-        cfg_ref = self._config
+        dash_self = self
         started = self._started_at
 
         @app.get("/api/health")
@@ -154,7 +439,86 @@ class DashboardServer:
 
         @app.get("/api/config")
         def get_config() -> dict[str, Any]:
-            return cfg_ref
+            return dash_self._merged_snapshot()
+
+        @app.post("/api/config/patch")
+        def patch_config(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+            body = payload if isinstance(payload, dict) else {}
+            allowed = {"metric_normalization", "score_aggregation"}
+            extra = set(body.keys()) - allowed
+            if extra:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"unsupported patch key(s): {sorted(extra)}",
+                )
+            if not body:
+                raise HTTPException(
+                    status_code=400,
+                    detail="patch body must include metric_normalization and/or score_aggregation",
+                )
+            with dash_self._patch_lock:
+                current = dash_self._load_patch_unlocked()
+                merged_file = _config._deep_merge(current, body)
+                try:
+                    dash_self._validate_merged_patch(merged_file)
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e)) from e
+                dash_self._write_patch_unlocked(merged_file)
+            return {"status": "ok", "merged_keys": sorted(body.keys())}
+
+        @app.get("/api/stats/heatmap")
+        def stats_heatmap(
+            limit: int = 500,
+        ) -> dict[str, Any]:
+            if not isinstance(limit, int) or isinstance(limit, bool):
+                raise HTTPException(
+                    status_code=400,
+                    detail="limit must be an integer",
+                )
+            if limit < 1:
+                raise HTTPException(status_code=400, detail="limit must be >= 1")
+            if limit > _HEATMAP_MAX_LIMIT:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"limit must be <= {_HEATMAP_MAX_LIMIT}",
+                )
+            with dash_self._block_metrics_lock:
+                raw_rows = list(dash_self._block_metrics_rows)
+            rows = _build_heatmap_rows(raw_rows, limit=limit)
+            column_maxima = _heatmap_column_maxima(
+                rows, columns=_HEATMAP_SCORE_COLUMNS
+            )
+            return {
+                "limit": limit,
+                "columns": list(_HEATMAP_SCORE_COLUMNS),
+                "rows": rows,
+                "column_maxima": column_maxima,
+            }
+
+        @app.get("/api/stats/distribution")
+        def stats_distribution(metric: str = "") -> dict[str, Any]:
+            name = str(metric).strip()
+            if not name:
+                return {"metric": "", "buckets": [], "counts": []}
+            if name not in _DISTRIBUTION_METRICS:
+                return {"metric": name, "buckets": [], "counts": []}
+            with dash_self._block_metrics_lock:
+                rows = list(dash_self._block_metrics_rows)
+            values: list[float] = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                raw = row.get(name)
+                if raw is None:
+                    continue
+                try:
+                    values.append(float(raw))
+                except (TypeError, ValueError):
+                    continue
+            if not values:
+                return {"metric": name, "buckets": [], "counts": []}
+            buckets, counts = _histogram_buckets(values)
+            return {"metric": name, "buckets": buckets, "counts": counts}
 
         @app.get("/api/cache/context")
         def get_cache_context() -> dict[str, Any]:
@@ -164,7 +528,7 @@ class DashboardServer:
         def set_cache_context(payload: dict[str, Any] | None = None) -> dict[str, Any]:
             body = payload or {}
             updates = {
-                "last_target": str(body.get("target", "")).strip(),
+                "last_target": _normalize_cache_target(body.get("target", "")),
                 "last_filter": str(body.get("filter", "")).strip(),
                 "last_score_metrics": str(
                     body.get("score_metrics", "churn_per_sloc,cyclomatic")
@@ -176,7 +540,7 @@ class DashboardServer:
         @app.post("/api/cache/status")
         def cache_status(payload: dict[str, Any] | None = None) -> dict[str, Any]:
             body = payload or {}
-            target = str(body.get("target", "")).strip()
+            target = _normalize_cache_target(body.get("target", ""))
             if not target:
                 raise HTTPException(status_code=400, detail="target is required")
             filt = str(body.get("filter", "")).strip()
@@ -190,11 +554,17 @@ class DashboardServer:
             )
             repo = Path(target).resolve()
             cache_dir = _cache.cache_path_for(repo)
-            cache_file = cache_dir / "blocks.pkl"
-            metadata = _cache.Cache(repo).get_metadata()
+            cache_file = cache_dir / _cache._CACHE_FILE
+            metadata = _cache.get_metadata(repo)
             exists = cache_file.exists()
             size = cache_file.stat().st_size if exists else 0
             entries = metadata.get("entry_count", 0) if isinstance(metadata, dict) else 0
+            with self._block_metrics_lock:
+                has_rows = bool(self._block_metrics_rows)
+            if exists and not has_rows:
+                loaded = _cache.load_block_results(repo)
+                if loaded:
+                    self.publish_latest_block_metrics(loaded)
             return {
                 "target": str(repo),
                 "cache_dir": str(cache_dir),
@@ -210,7 +580,7 @@ class DashboardServer:
             from hotspottriage import cache_generator as _cache_generator
 
             body = payload or {}
-            target = str(body.get("target", "")).strip()
+            target = _normalize_cache_target(body.get("target", ""))
             if not target:
                 raise HTTPException(status_code=400, detail="target is required")
             filt = None if body.get("filter") in (None, "") else str(body.get("filter"))
@@ -228,26 +598,69 @@ class DashboardServer:
                 status="running",
                 progress=5,
                 message=f"Starting cache generation for {target}",
+                started_at_monotonic=time.monotonic(),
             )
             with self._cache_jobs_lock:
                 self._cache_jobs[job_id] = job
 
+            dash_self = self
+
+            def _cache_progress(label: str, done: int, total: int) -> None:
+                t = max(int(total), 1)
+                d = min(max(int(done), 0), t)
+                if label.startswith("Scanning "):
+                    msg = label
+                    pct = 26 + int(24 * d / t)
+                elif label.startswith("Block churn"):
+                    msg = f"Block churn (git log -L) {d}/{t}"
+                    pct = 50 + int(18 * d / t)
+                elif label.startswith("Building block rows"):
+                    msg = "Assembling block rows…" if d == 0 else label
+                    pct = 70 + int(12 * d / t)
+                elif "::" in label:
+                    msg = label
+                    pct = 72 + int(14 * d / t)
+                elif label.startswith("Indexing "):
+                    msg = label
+                    pct = 86 + int(9 * d / t)
+                else:
+                    msg = label
+                    pct = 40
+                with dash_self._cache_jobs_lock:
+                    job = dash_self._cache_jobs.get(job_id)
+                    if job is None:
+                        return
+                    job.message = msg
+                    job.progress = min(96, max(job.progress, pct))
+
             def _run() -> None:
                 try:
                     with self._cache_jobs_lock:
-                        self._cache_jobs[job_id].progress = 30
-                        self._cache_jobs[job_id].message = "Generating block cache..."
+                        self._cache_jobs[job_id].progress = 8
+                        self._cache_jobs[job_id].message = "Starting…"
                     result = _cache_generator.generate_full_cache(
                         target=target,
                         filter=filt,
                         score_metrics=score,
                         verbose=False,
+                        progress_callback=_cache_progress,
                     )
                     with self._cache_jobs_lock:
                         self._cache_jobs[job_id].status = "done"
                         self._cache_jobs[job_id].progress = 100
                         self._cache_jobs[job_id].message = "Cache generation complete"
-                        self._cache_jobs[job_id].result = result
+                        self._cache_jobs[job_id].result = _slim_cache_job_result(
+                            result if isinstance(result, dict) else {}
+                        )
+                    block_results = (
+                        result.get("blocks", {}).get("results", [])
+                        if isinstance(result, dict)
+                        else []
+                    )
+                    if isinstance(block_results, list) and block_results:
+                        self.publish_latest_block_metrics(
+                            [r for r in block_results if isinstance(r, dict)]
+                        )
                 except Exception as e:
                     with self._cache_jobs_lock:
                         self._cache_jobs[job_id].status = "error"
@@ -269,6 +682,7 @@ class DashboardServer:
                     "status": job.status,
                     "progress": job.progress,
                     "message": job.message,
+                    "running_for_s": round(max(0.0, time.monotonic() - job.started_at_monotonic), 1),
                     "error": job.error,
                     "result": job.result,
                 }

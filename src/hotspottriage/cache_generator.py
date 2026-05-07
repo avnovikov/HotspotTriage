@@ -1,4 +1,7 @@
-"""Generate comprehensive cache of codebase metrics using MCP tools.
+"""Generate comprehensive cache of codebase metrics.
+
+Uses MCP ``analyze`` / ``cache_status`` for block metrics and cache stats;
+class/method structure comes from :func:`extract_class_method_structure`.
 
 This module provides a function to build a complete cache snapshot including:
 - Block-level metrics (functions/methods) with churn data
@@ -12,12 +15,74 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from hotspottriage import blocks as _blocks
+from hotspottriage import config as _config
+from hotspottriage import discovery, filtering
 from hotspottriage import mcp_server
 
 logger = logging.getLogger(__name__)
+
+
+def extract_class_method_structure(
+    target: str,
+    filter: str | None = None,
+    progress_callback: Callable[[str, int, int], None] | None = None,
+) -> list[dict[str, Any]]:
+    """Build file/class/method line-range rows (used by cache generation, not MCP)."""
+    cfg = _config.DEFAULTS.copy()
+    if filter:
+        cfg["filter"] = [f.strip() for f in filter.split(",")]
+
+    with discovery.resolve_target(target) as repo:
+        patterns = list(cfg["filter"])
+        if not cfg["no_default_filter"]:
+            patterns.append(cfg["default_filter"])
+
+        glob_keep = filtering.make_filter(patterns)
+        keep = filtering.make_tracked_path_predicate(
+            repo,
+            glob_keep=glob_keep,
+            ignore_directories=cfg["ignore_directories"],
+            respect_gitignore=cfg["respect_gitignore"],
+        )
+        files = [f for f in discovery.list_tracked_files(repo) if keep(f)]
+        n_files = len(files)
+
+        results: list[dict[str, Any]] = []
+        for idx, file_path in enumerate(files, start=1):
+            if progress_callback:
+                progress_callback(f"Indexing {file_path}", idx, n_files)
+            full_path = repo / file_path
+            try:
+                src = full_path.read_text(encoding="utf-8")
+                blocks = _blocks.extract_blocks(src)
+
+                for block in blocks:
+                    parts = block.name.split(".")
+                    if len(parts) > 1:
+                        class_name = parts[0] if len(parts) >= 1 else None
+                        method_name = parts[-1]
+                    else:
+                        class_name = None
+                        method_name = parts[0]
+
+                    results.append({
+                        "file": str(file_path),
+                        "class": class_name,
+                        "method": method_name,
+                        "full_name": block.name,
+                        "start_line": block.start,
+                        "end_line": block.end,
+                        "lines": block.end - block.start + 1,
+                    })
+            except Exception as e:
+                logger.warning("Failed to analyze %s: %s", file_path, e)
+
+    return results
 
 
 def generate_full_cache(
@@ -25,6 +90,7 @@ def generate_full_cache(
     filter: str | None = None,
     score_metrics: str = "churn_per_sloc,cyclomatic",
     verbose: bool = False,
+    progress_callback: Callable[[str, int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Generate comprehensive cache for entire codebase.
 
@@ -38,6 +104,7 @@ def generate_full_cache(
         filter: Comma-separated glob patterns (optional)
         score_metrics: Metrics to compute score from
         verbose: Print progress information
+        progress_callback: Optional ``(label, done, total)`` updates (e.g. dashboard job UI)
 
     Returns:
         Dictionary with:
@@ -60,15 +127,17 @@ def generate_full_cache(
         # Step 1: Initialize repository cache (blocks + churn)
         if verbose:
             print("  📊 Initializing block-level cache...")
-        blocks_result = mcp_server.analyze_with_cache(
-            target=target,
-            filter=filter,
-            score_metrics=score_metrics,
-        )
-        blocks_data = json.loads(blocks_result)
-
-        if "error" in blocks_data:
-            result["blocks"] = {"error": blocks_data["error"]}
+        try:
+            blocks_data = mcp_server.run_cached_block_analysis_dict(
+                target=target,
+                filter=filter,
+                score_metrics=score_metrics,
+                compact=False,
+                similarity=True,
+                progress_callback=progress_callback,
+            )
+        except Exception as e:
+            result["blocks"] = {"error": str(e)}
         else:
             result["blocks"] = {
                 "count": len(blocks_data.get("results", [])),
@@ -81,11 +150,12 @@ def generate_full_cache(
         # Step 2: Analyze class/method structure
         if verbose:
             print("  🏛️  Analyzing class/method structure...")
-        classes_result = mcp_server.analyze_classes(target=target, filter=filter)
-        classes_data = json.loads(classes_result)
-
-        if "error" in classes_data:
-            result["classes"] = {"error": classes_data["error"]}
+        try:
+            classes_data = extract_class_method_structure(
+                target, filter=filter, progress_callback=progress_callback
+            )
+        except Exception as e:
+            result["classes"] = {"error": str(e)}
         else:
             result["classes"] = {
                 "count": len(classes_data),

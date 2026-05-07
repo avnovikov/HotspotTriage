@@ -65,16 +65,16 @@ def test_compute_smells_returns_empty_on_no_output(monkeypatch: pytest.MonkeyPat
     assert smell.compute_smells(target) == []
 
 
-def test_compute_smells_raises_when_pylint_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_compute_smells_skips_pylint_when_binary_unresolved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
     target = tmp_path / "example.py"
     target.write_text("def f():\n    return 1\n")
 
-    def fake_run(*_args, **_kwargs):
-        raise FileNotFoundError("pylint")
-
-    monkeypatch.setattr(smell.subprocess, "run", fake_run)
-    with pytest.raises(RuntimeError, match="pylint executable not found"):
-        smell.compute_smells(target)
+    monkeypatch.setattr(smell, "_pylint_executable", lambda: None)
+    out = smell.compute_smells(target)
+    assert isinstance(out, list)
+    assert not any("pylint_code" in x for x in out)
 
 
 def test_build_command_contains_threshold_flags():
@@ -88,6 +88,7 @@ def test_build_command_contains_threshold_flags():
             "max_branches": 15,
             "min_public_methods": 1,
         },
+        "pylint",
     )
     assert "--max-statements=60" in cmd
     assert "--max-attributes=12" in cmd
@@ -328,3 +329,43 @@ def test_resolve_smell_severity_default_when_no_rule_no_category():
     cfg["smell_default_weight"] = 0.33
     finding = {"smell": "mystery", "message": "x"}
     assert smell.resolve_smell_severity(finding, cfg) == pytest.approx(0.33)
+
+
+def test_collect_repo_smell_findings_runs_per_tracked_file(tmp_path, monkeypatch):
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@e.com"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "T"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    (repo / "mod.py").write_text("def f():\n    return 1\n")
+    subprocess.run(["git", "add", "mod.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+    paths: list[Path] = []
+
+    def capture(path: Path, merged=None):
+        paths.append(path)
+        return []
+
+    monkeypatch.setattr(smell, "compute_smells", capture)
+    rows = smell.collect_repo_smell_findings(str(repo))
+    assert rows == []
+    assert len(paths) == 1
+    assert paths[0].name == "mod.py"

@@ -314,7 +314,11 @@ def build_block_stats(
     blob_shas = _block_churn.file_blob_shas(repo)
     scan_total = sum(1 for f in files if f in blob_shas)
     scan_done = 0
-    cache = _cache.Cache(repo)
+
+    prev_rows_list = _cache.load_block_results(repo) or []
+    previous_rows: dict[str, dict] = {
+        r["path"]: r for r in prev_rows_list if isinstance(r, dict) and "path" in r
+    }
     
     current_time = int(datetime.now().timestamp())
     timestamps = _churn.get_file_timestamps(repo, files)
@@ -353,14 +357,14 @@ def build_block_stats(
         requests,
         since,
         until,
-        cache,
+        previous_rows=previous_rows,
         workers=workers,
         on_progress=_churn_progress if progress_callback else None,
     )
-    cache.save()
 
-    # Pass 3: assemble Statistic rows.
+    # Pass 3: assemble Statistic rows (track blob SHA + line range for caching).
     rows: list[tuple[str, _blocks.Block, dict[str, float]]] = []
+    row_cache_meta: list[dict[str, str | int]] = []
     for rel in files:
         if rel not in file_blocks:
             continue
@@ -395,6 +399,11 @@ def build_block_stats(
             )
             m["smells"] = block_summary
             rows.append((rel, b, m))
+            row_cache_meta.append({
+                "_blob_sha": blob_shas[rel],
+                "_start": b.start,
+                "_end": b.end,
+            })
 
     _finalize_smell_burden([m for _, _, m in rows])
 
@@ -475,6 +484,32 @@ def build_block_stats(
         and int(sim_agg.get("blocks_total") or 0) > 0
     ):
         out.append(_similarity_aggregate_statistic(sim_agg))
+
+    # Persist results with cache metadata for next run's churn lookup.
+    cache_rows = []
+    for stat, meta in zip(out, row_cache_meta):
+        d = stat.as_dict()
+        d.update(meta)
+        cache_rows.append(d)
+    try:
+        if files:
+            # Keep unaffected files' cache rows so scoped/filter runs do not
+            # wipe the whole repository cache.
+            targeted_files = set(files)
+            preserved_prev_rows: list[dict[str, Any]] = []
+            for row in prev_rows_list:
+                if not isinstance(row, dict):
+                    continue
+                path = str(row.get("path", ""))
+                if "::" not in path:
+                    continue
+                rel, _ = path.split("::", 1)
+                if rel not in targeted_files:
+                    preserved_prev_rows.append(row)
+            _cache.save_block_results(repo, [*preserved_prev_rows, *cache_rows])
+    except Exception:
+        pass
+
     return out
 
 

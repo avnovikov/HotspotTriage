@@ -3,6 +3,7 @@ from statistics import mean
 
 import pytest
 
+from hotspottriage import cache as _cache
 from hotspottriage.config import DEFAULTS
 from hotspottriage.stats import (
     Statistic,
@@ -140,6 +141,35 @@ def test_block_stats_sets_normalized_sloc_zscore(tmp_path: Path):
         assert 0.0 <= s.score <= 1.0
         assert s.score_band in ("low", "medium", "high", "critical")
         assert "complexity_burden" in s.score_subscores
+
+
+def test_build_block_stats_preserves_unrelated_cache_rows_on_scoped_run(tmp_path: Path):
+    repo = build_repo(tmp_path / "r")
+    # Seed cache with a normal run.
+    build_block_stats(
+        repo,
+        ["a.py", "b.py", "c/d.py"],
+        score_metrics=["cyclomatic"],
+        similarity_enabled=False,
+        similarity_aggregate_row=False,
+        merged_config=DEFAULTS,
+    )
+    first_rows = _cache.load_block_results(repo) or []
+    assert first_rows
+    assert any(str(r.get("path", "")).startswith("a.py::") for r in first_rows)
+
+    # Scoped run over a file with no Python blocks should not wipe prior entries.
+    (repo / "no_blocks.py").write_text("# comment-only file\n", encoding="utf-8")
+    build_block_stats(
+        repo,
+        ["no_blocks.py"],
+        score_metrics=["cyclomatic"],
+        similarity_enabled=False,
+        similarity_aggregate_row=False,
+        merged_config=DEFAULTS,
+    )
+    after_rows = _cache.load_block_results(repo) or []
+    assert any(str(r.get("path", "")).startswith("a.py::") for r in after_rows)
 
 
 def test_decay_reduces_churn_over_time():

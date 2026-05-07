@@ -14,8 +14,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable
 
-from hotspottriage.cache import Cache, cache_path_for
-
 
 def file_blob_shas(repo: Path) -> dict[str, str]:
     """Return blob SHA at HEAD for every tracked file (one ls-tree call)."""
@@ -66,8 +64,6 @@ def compute_one(
         cmd.append(f"--until={until}")
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
-        # Common cause: file added in a single commit and -L can't bracket it.
-        # Don't fail the whole run for one block.
         print(
             f"warning: git log -L failed for {file_path}:{start},{end}: "
             f"{r.stderr.strip().splitlines()[:1]}",
@@ -82,20 +78,35 @@ def compute_many(
     requests: list[tuple[str, str, int, int]],  # (file_path, blob_sha, start, end)
     since: str | None,
     until: str | None,
-    cache: Cache,
+    previous_rows: dict[str, dict] | None = None,
     workers: int | None = None,
     on_progress: Callable[[int, int], None] | None = None,
 ) -> dict[tuple[str, int, int], int]:
-    """Compute churn for many blocks in parallel, cached by blob SHA."""
+    """Compute churn for many blocks in parallel, with cache from previous results.
+
+    ``previous_rows`` maps ``path::symbol`` → row dict (must include
+    ``_blob_sha`` and ``churn``).  When the current blob SHA matches the
+    stored one, churn is reused without running ``git log -L``.
+    """
     workers = workers or min(16, (os.cpu_count() or 4) * 2)
+
+    # Build O(1) index: (file, start, end) → row with blob_sha check.
+    cache_index: dict[tuple[str, int, int], dict] = {}
+    for row in (previous_rows or {}).values():
+        fp = row.get("path", "")
+        file_part = fp.split("::")[0] if "::" in fp else fp
+        start_line = row.get("_start")
+        end_line = row.get("_end")
+        if file_part and start_line is not None and end_line is not None:
+            cache_index[(file_part, int(start_line), int(end_line))] = row
 
     results: dict[tuple[str, int, int], int] = {}
     pending: list[tuple[str, str, int, int]] = []
+
     for file_path, blob_sha, start, end in requests:
-        key = Cache.make_key(blob_sha, start, end, since, until)
-        cached = cache.get(key)
-        if cached is not None:
-            results[(file_path, start, end)] = cached
+        cached_row = cache_index.get((file_path, start, end))
+        if cached_row is not None and cached_row.get("_blob_sha") == blob_sha:
+            results[(file_path, start, end)] = int(cached_row.get("churn", 0))
         else:
             pending.append((file_path, blob_sha, start, end))
 
@@ -115,7 +126,6 @@ def compute_many(
         for fut in as_completed(futures):
             file_path, blob_sha, start, end, value = fut.result()
             results[(file_path, start, end)] = value
-            cache.put(Cache.make_key(blob_sha, start, end, since, until), value)
             done += 1
             if on_progress:
                 on_progress(done, total)
