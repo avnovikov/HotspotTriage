@@ -376,6 +376,62 @@ def test_analyze_compact_uses_configured_proposed_models(monkeypatch, test_repo)
             assert row["proposed_model"] == ""
 
 
+def test_analyze_uses_project_config_proposed_models(test_repo):
+    config_dir = test_repo / ".hotspottriage"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "project.yml").write_text(
+        """
+proposed_models:
+  low: local-low
+  medium: local-medium
+  high: local-high
+  critical: local-critical
+""".strip()
+    )
+    result = analyze(str(test_repo))
+    data = json.loads(result)
+    rows = data["results"]
+    assert rows
+    expected_by_band = {
+        "low": "local-low",
+        "medium": "local-medium",
+        "high": "local-high",
+        "critical": "local-critical",
+    }
+    for row in rows:
+        risk_band = row["risk_band"]
+        if risk_band in expected_by_band:
+            assert row["proposed_model"] == expected_by_band[risk_band]
+
+
+def test_analyze_uses_dashboard_patch_proposed_models(test_repo):
+    config_dir = test_repo / ".hotspottriage"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "dashboard_config_patch.yml").write_text(
+        """
+proposed_models:
+  low: ui-low
+  medium: ui-medium
+  high: ui-high
+  critical: ui-critical
+""".strip()
+    )
+    result = analyze(str(test_repo))
+    data = json.loads(result)
+    rows = data["results"]
+    assert rows
+    expected_by_band = {
+        "low": "ui-low",
+        "medium": "ui-medium",
+        "high": "ui-high",
+        "critical": "ui-critical",
+    }
+    for row in rows:
+        risk_band = row["risk_band"]
+        if risk_band in expected_by_band:
+            assert row["proposed_model"] == expected_by_band[risk_band]
+
+
 def test_ensure_root_logging_configured_lowers_warning_threshold():
     root = logging.getLogger()
     previous_level = root.level

@@ -190,6 +190,7 @@ def run_cached_block_analysis_dict(
     :func:`hotspottriage.stats.build_block_stats` progress events.
     """
     cfg = _build_analyze_config(
+        target,
         filter=filter,
         score_metrics=score_metrics,
         granularity="block",
@@ -481,6 +482,7 @@ def init_config(target: str = "", is_global: bool = False) -> str:
 
 
 def _build_analyze_config(
+    target: str,
     filter: str | None = None,
     score_metrics: str | None = None,
     granularity: str = "file",
@@ -495,6 +497,18 @@ def _build_analyze_config(
 ) -> dict[str, Any]:
     """Build analysis config from MCP tool arguments."""
     cfg = deepcopy(_config.DEFAULTS)
+    local_target = Path(target).expanduser()
+    if local_target.is_dir():
+        cfg = _config.load_config(
+            local_target.resolve(),
+            use_global=False,
+            use_project=True,
+        )
+        dashboard_patch = local_target.resolve() / ".hotspottriage" / "dashboard_config_patch.yml"
+        if dashboard_patch.is_file():
+            patch_data = _config._read_yaml(dashboard_patch)
+            if patch_data:
+                cfg = _config._deep_merge(cfg, patch_data)
 
     if filter:
         cfg["filter"] = [f.strip() for f in filter.split(",")]
