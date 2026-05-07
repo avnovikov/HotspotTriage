@@ -2,8 +2,9 @@
 
 Exposes analyze and init_config as MCP tools for Claude and other AI assistants.
 
-Usage:
-    hotspottriage-mcp  # Runs as an MCP server on stdio
+Usage (stdio MCP server):
+    hotspottriage start-mcp-server   # same layout as ``serena start-mcp-server``
+    hotspottriage-mcp                # legacy console_scripts alias
 """
 from __future__ import annotations
 
@@ -84,7 +85,7 @@ def _ensure_root_logging_configured() -> None:
 
 
 def get_mcp_dashboard_cli_args() -> argparse.Namespace | None:
-    """Return parsed ``hotspottriage-mcp`` dashboard flags, or ``None`` before :func:`main`."""
+    """Return parsed MCP dashboard flags (``start-mcp-server`` / ``hotspottriage-mcp``), or ``None`` before :func:`main`."""
     return _mcp_dashboard_cli
 
 
@@ -134,10 +135,10 @@ mcp = FastMCP("hotspottriage", lifespan=_mcp_lifespan)
 
 def _parse_mcp_dashboard_argv() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="hotspottriage-mcp",
+        prog="hotspottriage start-mcp-server",
         add_help=False,
         description="HotspotTriage MCP server (stdio). Dashboard flags are listed below; "
-        "other arguments are forwarded to the MCP runtime.",
+        "other arguments are forwarded to the MCP runtime. Same flags as `hotspottriage-mcp`.",
     )
     parser.add_argument(
         "--no-dashboard",

@@ -76,6 +76,8 @@ MCP tool **`clear_cache(target)`** deletes `blocks.pkl` (and attempts to remove 
 
 ## MCP-related entry points
 
+The stdio server process is **`hotspottriage start-mcp-server`** (Serena-style) or **`hotspottriage-mcp`**.
+
 | Tool | Purpose |
 |------|---------|
 | `analyze` / `analyze_with_cache` | Block runs warm or use cache as part of analysis |
