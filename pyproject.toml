@@ -19,6 +19,9 @@ dependencies = [
     "uvicorn>=0.32",
 ]
 
+[project.urls]
+Homepage = "https://github.com/avnovikov/HotspotTriage"
+
 [project.scripts]
 hotspottriage = "hotspottriage.cli:main"
 hotspottriage-mcp = "hotspottriage.mcp_server:main"

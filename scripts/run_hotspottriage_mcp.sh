@@ -12,4 +12,4 @@ fi
 # Serena-style deterministic runtime: always resolve tools from this venv first.
 export PATH="$VENV_BIN:$PATH"
 
-exec "$VENV_BIN/hotspottriage-mcp" "$@"
+exec "$VENV_BIN/hotspottriage" start-mcp-server "$@"

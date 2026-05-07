@@ -248,6 +248,14 @@ def _resolve_config(args: argparse.Namespace, target_path: Path | None) -> dict:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
+    # Serena-style MCP entry: `hotspottriage start-mcp-server` (keeps `hotspottriage-mcp` as an alias).
+    if argv and argv[0] == "start-mcp-server":
+        sys.argv = [sys.argv[0], *argv[1:]]
+        from hotspottriage import mcp_server as _mcp_server
+
+        _mcp_server.main()
+        return 0
+
     if argv and argv[0] == "init":
         return _run_init(argv[1:])
 
