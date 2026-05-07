@@ -202,10 +202,10 @@ DEFAULTS: dict[str, Any] = {
     },
     # MCP-only: recommended free-text model names by risk band.
     "proposed_models": {
-        "low": "",
-        "medium": "",
-        "high": "",
-        "critical": "",
+        "low": "Auto",
+        "medium": "Auto",
+        "high": "Auto",
+        "critical": "Auto",
     },
 }
 
