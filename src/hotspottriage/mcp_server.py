@@ -190,6 +190,7 @@ def run_cached_block_analysis_dict(
     :func:`hotspottriage.stats.build_block_stats` progress events.
     """
     cfg = _build_analyze_config(
+        target,
         filter=filter,
         score_metrics=score_metrics,
         granularity="block",
@@ -220,10 +221,16 @@ def run_cached_block_analysis_dict(
 
     if compact:
         results_list = _mcp_compact_score_rows(
-            results, granularity="block"
+            results, granularity="block", merged_config=cfg
         )
     else:
-        results_list = [_output.statistic_to_output_dict(r, cfg) for r in results]
+        results_list = []
+        for row in results:
+            output_row = _output.statistic_to_output_dict(row, cfg)
+            output_row["proposed_model"] = _proposed_model_for_band(
+                str(row.score_band), cfg
+            )
+            results_list.append(output_row)
     return {
         "results": results_list,
         "cache": cache_info,
@@ -475,6 +482,7 @@ def init_config(target: str = "", is_global: bool = False) -> str:
 
 
 def _build_analyze_config(
+    target: str,
     filter: str | None = None,
     score_metrics: str | None = None,
     granularity: str = "file",
@@ -489,6 +497,18 @@ def _build_analyze_config(
 ) -> dict[str, Any]:
     """Build analysis config from MCP tool arguments."""
     cfg = deepcopy(_config.DEFAULTS)
+    local_target = Path(target).expanduser()
+    if local_target.is_dir():
+        cfg = _config.load_config(
+            local_target.resolve(),
+            use_global=False,
+            use_project=True,
+        )
+        dashboard_patch = local_target.resolve() / ".hotspottriage" / "dashboard_config_patch.yml"
+        if dashboard_patch.is_file():
+            patch_data = _config._read_yaml(dashboard_patch)
+            if patch_data:
+                cfg = _config._deep_merge(cfg, patch_data)
 
     if filter:
         cfg["filter"] = [f.strip() for f in filter.split(",")]
@@ -617,9 +637,9 @@ def _initialize_repository(
 
 
 def _mcp_compact_score_rows(
-    rows: list[stats.Statistic], *, granularity: str
+    rows: list[stats.Statistic], *, granularity: str, merged_config: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """One dict per row: function symbol, score, risk band (for MCP summaries)."""
+    """One dict per row: function symbol, score, risk band, proposed model."""
     out: list[dict[str, Any]] = []
     for r in rows:
         p = r.path
@@ -627,10 +647,24 @@ def _mcp_compact_score_rows(
             fn = p.split("::", 1)[1]
         else:
             fn = p
+        score_band = str(r.score_band)
         out.append(
-            {"function": fn, "score": float(r.score), "risk_band": str(r.score_band)}
+            {
+                "function": fn,
+                "score": float(r.score),
+                "risk_band": score_band,
+                "proposed_model": _proposed_model_for_band(score_band, merged_config),
+            }
         )
     return out
+
+
+def _proposed_model_for_band(score_band: str, merged_config: dict[str, Any]) -> str:
+    proposed = merged_config.get("proposed_models")
+    if not isinstance(proposed, dict):
+        return ""
+    model = proposed.get(score_band)
+    return model if isinstance(model, str) else ""
 
 
 def _publish_block_metrics_to_dashboard(

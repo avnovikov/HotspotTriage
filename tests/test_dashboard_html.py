@@ -17,6 +17,8 @@ def test_dashboard_html_contains_required_panels():
     assert "No data yet" in DASHBOARD_HTML
     assert "scoreWeightsPanel" in DASHBOARD_HTML
     assert "scoreBandsPanel" in DASHBOARD_HTML
+    assert "proposedModelsPanel" in DASHBOARD_HTML
+    assert "Proposed models by risk band" in DASHBOARD_HTML
     assert "norm-metric-card" in DASHBOARD_HTML
     assert "weight-sum-badge" in DASHBOARD_HTML
     assert "heatmapUpdateBtn" in DASHBOARD_HTML

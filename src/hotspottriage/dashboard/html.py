@@ -476,6 +476,7 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
         <div id="configPanel" class="stack">
           <div class="muted">Loading config…</div>
         </div>
+        <div id="proposedModelsPanel" class="stack" style="margin-top:0.55rem;"></div>
         <div id="scoreBandsPanel" class="stack" style="margin-top:0.55rem;"></div>
         <div id="scoreWeightsPanel" class="stack" style="margin-top:0.55rem;"></div>
         <div id="configMetaPanel" class="stack muted" style="margin-top:0.55rem;font-size:0.78rem;"></div>
@@ -497,8 +498,10 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
       activeCacheJobId: null,
       editorMN: null,
       editorSA: null,
+      editorPM: null,
       baselineMN: null,
       baselineSA: null,
+      baselinePM: null,
       distributionCache: {},
       selectedBpIndex: {},
       normDrag: null,
@@ -882,6 +885,32 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
           });
         });
         updateWeightSumBadge(wg);
+      });
+    }
+
+    function renderProposedModels() {
+      const host = $("proposedModelsPanel");
+      const models = state.editorPM || {};
+      const bands = ["low", "medium", "high", "critical"];
+      const rows = bands
+        .map((band) => {
+          const value = String(models[band] || "");
+          return `<div class="weight-row" data-band="${band}">
+            <label>${band}</label>
+            <input type="text" data-role="model-text" value="${escapeAttr(value)}" style="grid-column: span 2;" />
+          </div>`;
+        })
+        .join("");
+      host.innerHTML = `<strong>Proposed models by risk band</strong>
+        <div class="weight-group">
+          ${rows}
+        </div>`;
+      host.querySelectorAll(".weight-row").forEach((row) => {
+        const band = row.getAttribute("data-band");
+        const input = row.querySelector('[data-role="model-text"]');
+        input.addEventListener("input", () => {
+          state.editorPM[band] = input.value;
+        });
       });
     }
 
@@ -1276,6 +1305,7 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
           body: JSON.stringify({
             metric_normalization: state.editorMN,
             score_aggregation: state.editorSA,
+            proposed_models: state.editorPM,
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -1305,10 +1335,13 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
         updateCacheContext("unknown");
         state.editorMN = clone(cfg.metric_normalization || {});
         state.editorSA = clone(cfg.score_aggregation || {});
+        state.editorPM = clone(cfg.proposed_models || {});
         state.baselineMN = clone(cfg.metric_normalization || {});
         state.baselineSA = clone(cfg.score_aggregation || {});
+        state.baselinePM = clone(cfg.proposed_models || {});
         renderOverviewSummary(cfg);
         renderNormEditors();
+        renderProposedModels();
         renderScoreBands();
         renderScoreWeights();
         renderConfigMeta(cfg);

@@ -489,6 +489,26 @@ def test_config_patch_rejects_unknown_keys():
     assert resp.status_code == 400
 
 
+def test_config_patch_accepts_proposed_models(tmp_path):
+    patch_path = tmp_path / ".hotspottriage" / "dashboard_config_patch.yml"
+    srv = _server(config_patch_path=patch_path)
+    client = TestClient(srv.app)
+    resp = client.post(
+        "/api/config/patch",
+        json={
+            "proposed_models": {
+                "low": "gpt-4o-mini",
+                "medium": "gpt-4.1",
+                "high": "o3",
+                "critical": "o3-pro",
+            }
+        },
+    )
+    assert resp.status_code == 200
+    merged = client.get("/api/config").json()
+    assert merged["proposed_models"]["critical"] == "o3-pro"
+
+
 def test_start_runs_daemon_thread(monkeypatch):
     srv = _server()
 
