@@ -290,6 +290,7 @@ def test_to_dashboard_snapshot_shape():
     assert snap["project"]["path"] == "/tmp/r"
     assert "score_metrics" in snap and isinstance(snap["score_metrics"], list)
     assert "dashboard" in snap and snap["dashboard"]["base_port"] == 9123
+    assert "proposed_models" in snap and isinstance(snap["proposed_models"], dict)
 
 
 def test_apply_mcp_dashboard_cli_overrides():
