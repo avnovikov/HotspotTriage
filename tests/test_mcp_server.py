@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from hotspottriage.mcp_server import (
     clear_cache,
     init_config,
     _effective_dashboard_config,
+    _ensure_root_logging_configured,
     _mcp_lifespan,
 )
 
@@ -311,6 +313,17 @@ def test_analyze_compact_default_returns_only_function_score_risk_band(monkeypat
     assert isinstance(first["function"], str)
     assert isinstance(first["score"], float)
     assert isinstance(first["risk_band"], str)
+
+
+def test_ensure_root_logging_configured_lowers_warning_threshold():
+    root = logging.getLogger()
+    previous_level = root.level
+    try:
+        root.setLevel(logging.WARNING)
+        _ensure_root_logging_configured()
+        assert root.level <= logging.INFO
+    finally:
+        root.setLevel(previous_level)
 
 
 def test_analyze_block_publishes_rows_to_dashboard(monkeypatch, test_repo):
