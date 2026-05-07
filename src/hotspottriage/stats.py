@@ -282,99 +282,131 @@ def _similarity_aggregate_statistic(agg: dict[str, Any]) -> Statistic:
     )
 
 
-def build_block_stats(
-    repo: Path,
-    files: Iterable[str],
-    score_metrics: Iterable[str],
-    since: str | None = None,
-    until: str | None = None,
-    workers: int | None = None,
-    decay_half_life: int | None = None,
-    smell_weight: float = 0.0,
-    progress_callback: Callable[[str, int, int], None] | None = None,
-    merged_config: dict[str, Any] | None = None,
-    *,
-    similarity_enabled: bool = True,
-    similarity_threshold: float = 80.0,
-    similarity_band_high: float = 85.0,
-    similarity_band_medium: float = 70.0,
-    similarity_band_low: float = 50.0,
-    similarity_max_pairwise_blocks: int = 2500,
-    similarity_aggregate_row: bool = True,
-) -> list[Statistic]:
-    """One Statistic per function/method (no class rows). Maintainability is
-    inherited from the file. Churn is computed via `git log -L` per block,
-    cached on disk by file blob SHA."""
-    from hotspottriage import churn as _churn
-    from hotspottriage import smell as _smell
-    from datetime import datetime
-    
-    sm = list(score_metrics)
-    files = list(files)
-    blob_shas = _block_churn.file_blob_shas(repo)
-    scan_total = sum(1 for f in files if f in blob_shas)
-    scan_done = 0
+@dataclass
+class _BlockAnalysisContext:
+    """Intermediate state for block-level analysis pipeline."""
 
+    repo: Path
+    files: list[str]
+    blob_shas: dict[str, str]
+    previous_rows: dict[str, dict[str, Any]]
+    prev_rows_list: list[dict[str, Any]]
+    timestamps: dict[str, int]
+    current_time: int
+    merged_config: dict[str, Any]
+
+
+def _load_previous_cache(
+    repo: Path, cache_manager: _cache.BlockCacheManager | None
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """Load previous cache rows from manager or disk."""
+    if cache_manager is not None:
+        previous_rows = cache_manager.get_previous_rows_index()
+        return previous_rows, list(previous_rows.values())
     prev_rows_list = _cache.load_block_results(repo) or []
-    previous_rows: dict[str, dict] = {
+    previous_rows = {
         r["path"]: r for r in prev_rows_list if isinstance(r, dict) and "path" in r
     }
-    
-    current_time = int(datetime.now().timestamp())
-    timestamps = _churn.get_file_timestamps(repo, files)
+    return previous_rows, prev_rows_list
 
-    # Pass 1: extract blocks + compute file/snippet metrics.
+
+def _scan_files_for_blocks(
+    ctx: _BlockAnalysisContext,
+    progress_callback: Callable[[str, int, int], None] | None,
+) -> tuple[
+    dict[str, dict[str, int]],
+    dict[str, list[_blocks.Block]],
+    dict[str, str],
+    dict[str, list[dict[str, Any]]],
+    list[tuple[str, str, int, int]],
+]:
+    """Pass 1: extract blocks + compute file/snippet metrics."""
+    from hotspottriage import smell as _smell
+
     file_metrics: dict[str, dict[str, int]] = {}
     file_blocks: dict[str, list[_blocks.Block]] = {}
     file_sources: dict[str, str] = {}
-    file_smells: dict[str, list[dict]] = {}
+    file_smells: dict[str, list[dict[str, Any]]] = {}
     requests: list[tuple[str, str, int, int]] = []
-    for rel in files:
-        if rel not in blob_shas:
+
+    scan_total = sum(1 for f in ctx.files if f in ctx.blob_shas)
+    scan_done = 0
+    if progress_callback and scan_total > 0:
+        progress_callback("Scanning files", 0, scan_total)
+
+    for rel in ctx.files:
+        if rel not in ctx.blob_shas:
             continue
+        if progress_callback:
+            progress_callback(f"Scanning {rel}", scan_done, scan_total)
         try:
-            src = (repo / rel).read_text(encoding="utf-8", errors="replace")
+            src = (ctx.repo / rel).read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         file_sources[rel] = src
-        file_metrics[rel] = _complexity.compute_all(repo / rel)
-        file_smells[rel] = _smell.compute_smells(repo / rel, merged_config)
+        file_metrics[rel] = _complexity.compute_all(ctx.repo / rel)
+        file_smells[rel] = _smell.compute_smells(ctx.repo / rel, ctx.merged_config)
         bs = _blocks.extract_blocks(src)
         file_blocks[rel] = bs
         for b in bs:
-            requests.append((rel, blob_shas[rel], b.start, b.end))
+            requests.append((rel, ctx.blob_shas[rel], b.start, b.end))
         scan_done += 1
         if progress_callback:
             progress_callback(f"Scanning {rel}", scan_done, scan_total)
 
-    # Pass 2: parallel git log -L for all blocks (cached).
+    return file_metrics, file_blocks, file_sources, file_smells, requests
+
+
+def _compute_block_churns(
+    ctx: _BlockAnalysisContext,
+    requests: list[tuple[str, str, int, int]],
+    since: str | None,
+    until: str | None,
+    workers: int | None,
+    progress_callback: Callable[[str, int, int], None] | None,
+) -> dict[tuple[str, int, int], int]:
+    """Pass 2: parallel git log -L for all blocks (cached)."""
+
     def _churn_progress(done: int, total: int) -> None:
         if progress_callback:
             progress_callback("Block churn (git log -L)", done, total)
 
-    churns = _block_churn.compute_many(
-        repo,
+    return _block_churn.compute_many(
+        ctx.repo,
         requests,
         since,
         until,
-        previous_rows=previous_rows,
+        previous_rows=ctx.previous_rows,
         workers=workers,
         on_progress=_churn_progress if progress_callback else None,
     )
 
-    # Pass 3: assemble Statistic rows (track blob SHA + line range for caching).
-    rows: list[tuple[str, _blocks.Block, dict[str, float]]] = []
+
+def _assemble_block_metrics(
+    ctx: _BlockAnalysisContext,
+    file_metrics: dict[str, dict[str, int]],
+    file_blocks: dict[str, list[_blocks.Block]],
+    file_sources: dict[str, str],
+    file_smells: dict[str, list[dict[str, Any]]],
+    churns: dict[tuple[str, int, int], int],
+    decay_half_life: int | None,
+) -> tuple[list[tuple[str, _blocks.Block, dict[str, Any]]], list[dict[str, str | int]]]:
+    """Pass 3: assemble block metric dicts with cache metadata."""
+    from hotspottriage import smell as _smell
+
+    rows: list[tuple[str, _blocks.Block, dict[str, Any]]] = []
     row_cache_meta: list[dict[str, str | int]] = []
-    for rel in files:
+
+    for rel in ctx.files:
         if rel not in file_blocks:
             continue
         src = file_sources[rel]
         file_mi = file_metrics[rel]["maintainability"]
-        age_seconds = current_time - timestamps.get(rel, current_time)
-        
+        age_seconds = ctx.current_time - ctx.timestamps.get(rel, ctx.current_time)
+
         for b in file_blocks[rel]:
             snippet = _complexity.slice_block(src, b.start, b.end)
-            m: dict[str, float] = dict(_complexity.compute_for_source(snippet))
+            m: dict[str, Any] = dict(_complexity.compute_for_source(snippet))
             m["maintainability"] = file_mi
             m["churn"] = churns.get((rel, b.start, b.end), 0)
             m["churn_per_sloc"] = _ratio(int(m["churn"]), int(m["sloc"]))
@@ -384,10 +416,9 @@ def build_block_stats(
                 else m["churn"]
             )
             m["decayed_churn_per_sloc"] = _ratio(m["decayed_churn"], int(m["sloc"]))
+
             block_raw = [
-                s
-                for s in file_smells.get(rel, [])
-                if _smell.finding_applies_to_block(s, b)
+                s for s in file_smells.get(rel, []) if _smell.finding_applies_to_block(s, b)
             ]
             block_summary = _smell.summarize_smells(block_raw)
             n_blk = len(block_raw)
@@ -398,37 +429,36 @@ def build_block_stats(
                 else 0.0
             )
             m["smells"] = block_summary
+
             rows.append((rel, b, m))
             row_cache_meta.append({
-                "_blob_sha": blob_shas[rel],
+                "_blob_sha": ctx.blob_shas[rel],
                 "_start": b.start,
                 "_end": b.end,
             })
 
-    _finalize_smell_burden([m for _, _, m in rows])
+    return rows, row_cache_meta
 
-    sim_agg = _block_similarity.attach_similarity_to_rows(
-        rows,
-        file_sources,
-        similarity_enabled=similarity_enabled,
-        similarity_threshold=similarity_threshold,
-        similarity_band_high=similarity_band_high,
-        similarity_band_medium=similarity_band_medium,
-        similarity_band_low=similarity_band_low,
-        similarity_max_pairwise_blocks=similarity_max_pairwise_blocks,
-    )
 
+def _build_statistics(
+    rows: list[tuple[str, _blocks.Block, dict[str, Any]]],
+    score_metrics: list[str],
+    smell_weight: float,
+    progress_callback: Callable[[str, int, int], None] | None,
+) -> list[Statistic]:
+    """Convert block metric rows to Statistic objects."""
     normalized_slocs = _normalize_sloc([int(m["sloc"]) for _, _, m in rows])
     out: list[Statistic] = []
     total_rows = len(rows)
     if progress_callback:
         progress_callback("Building block rows", 0, total_rows)
-    for i, ((rel, b, m), normalized_sloc) in enumerate(zip(rows, normalized_slocs), start=1):
+
+    for i, ((rel, b, m), norm_sloc) in enumerate(zip(rows, normalized_slocs), start=1):
         out.append(
             Statistic(
                 path=f"{rel}::{b.name}",
                 sloc=int(m["sloc"]),
-                normalized_sloc=normalized_sloc,
+                normalized_sloc=norm_sloc,
                 cyclomatic=int(m["cyclomatic"]),
                 halstead=int(m["halstead"]),
                 maintainability=int(m["maintainability"]),
@@ -443,40 +473,151 @@ def build_block_stats(
                 similarity_score=float(m.get("similarity_score", 0.0)),
                 similarity_band=str(m.get("similarity_band", "n/a")),
                 match_count=int(m.get("match_count", 0)),
-                score=_score(m, sm, smell_weight=smell_weight),
+                score=_score(m, score_metrics, smell_weight=smell_weight),
             )
         )
         if progress_callback:
             progress_callback(f"{rel}::{b.name}", i, total_rows)
 
-    cfg = merged_config if merged_config is not None else {}
-    if _risk_score.score_aggregation_enabled(cfg):
-        for idx, st in enumerate(out):
-            if st.path.startswith("__"):
+    return out
+
+
+def _apply_risk_scores(
+    out: list[Statistic], cfg: dict[str, Any], similarity_enabled: bool
+) -> None:
+    """Apply score aggregation in-place when enabled."""
+    if not _risk_score.score_aggregation_enabled(cfg):
+        return
+    for idx, st in enumerate(out):
+        if st.path.startswith("__"):
+            continue
+        rec = {
+            "normalized_sloc": float(st.normalized_sloc),
+            "cyclomatic": float(st.cyclomatic),
+            "halstead": float(st.halstead),
+            "maintainability": float(st.maintainability),
+            "churn": float(st.churn),
+            "churn_per_sloc": float(st.churn_per_sloc),
+            "decayed_churn": float(st.decayed_churn),
+            "decayed_churn_per_sloc": float(st.decayed_churn_per_sloc),
+            "smell_count": float(st.smell_count),
+            "smell_severity": float(st.smell_severity),
+            "similarity_score": float(st.similarity_score),
+            "match_count": float(st.match_count),
+        }
+        enriched = _risk_score.compute_score(rec, cfg, similarity_available=similarity_enabled)
+        out[idx] = replace(
+            st,
+            score=float(enriched["score"]),
+            score_band=str(enriched["score_band"]),
+            score_subscores=dict(enriched["score_subscores"]),
+        )
+
+
+def _persist_block_cache(
+    out: list[Statistic],
+    row_cache_meta: list[dict[str, str | int]],
+    files: list[str],
+    repo: Path,
+    cache_manager: _cache.BlockCacheManager | None,
+    prev_rows_list: list[dict[str, Any]],
+) -> None:
+    """Persist results with cache metadata for next run's churn lookup."""
+    cache_rows: list[dict[str, Any]] = []
+    for stat, meta in zip(out, row_cache_meta):
+        d = stat.as_dict()
+        d.update(meta)
+        cache_rows.append(d)
+
+    if not files:
+        return
+
+    targeted_files = set(files)
+    if cache_manager is not None:
+        cache_manager.put_rows(cache_rows, targeted_files=targeted_files)
+    else:
+        preserved: list[dict[str, Any]] = []
+        for row in prev_rows_list:
+            if not isinstance(row, dict):
                 continue
-            rec = {
-                "normalized_sloc": float(st.normalized_sloc),
-                "cyclomatic": float(st.cyclomatic),
-                "halstead": float(st.halstead),
-                "maintainability": float(st.maintainability),
-                "churn": float(st.churn),
-                "churn_per_sloc": float(st.churn_per_sloc),
-                "decayed_churn": float(st.decayed_churn),
-                "decayed_churn_per_sloc": float(st.decayed_churn_per_sloc),
-                "smell_count": float(st.smell_count),
-                "smell_severity": float(st.smell_severity),
-                "similarity_score": float(st.similarity_score),
-                "match_count": float(st.match_count),
-            }
-            enriched = _risk_score.compute_score(
-                rec, cfg, similarity_available=similarity_enabled
-            )
-            out[idx] = replace(
-                st,
-                score=float(enriched["score"]),
-                score_band=str(enriched["score_band"]),
-                score_subscores=dict(enriched["score_subscores"]),
-            )
+            path = str(row.get("path", ""))
+            if "::" not in path:
+                continue
+            rel, _ = path.split("::", 1)
+            if rel not in targeted_files:
+                preserved.append(row)
+        _cache.save_block_results(repo, [*preserved, *cache_rows])
+
+
+def build_block_stats(
+    repo: Path,
+    files: Iterable[str],
+    score_metrics: Iterable[str],
+    since: str | None = None,
+    until: str | None = None,
+    workers: int | None = None,
+    decay_half_life: int | None = None,
+    smell_weight: float = 0.0,
+    progress_callback: Callable[[str, int, int], None] | None = None,
+    merged_config: dict[str, Any] | None = None,
+    *,
+    cache_manager: _cache.BlockCacheManager | None = None,
+    similarity_enabled: bool = True,
+    similarity_threshold: float = 80.0,
+    similarity_band_high: float = 85.0,
+    similarity_band_medium: float = 70.0,
+    similarity_band_low: float = 50.0,
+    similarity_max_pairwise_blocks: int = 2500,
+    similarity_aggregate_row: bool = True,
+) -> list[Statistic]:
+    """One Statistic per function/method (no class rows).
+
+    Maintainability is inherited from the file. Churn is computed via
+    `git log -L` per block, cached on disk by file blob SHA.
+    """
+    from hotspottriage import churn as _churn
+    from datetime import datetime
+
+    sm = list(score_metrics)
+    files_list = list(files)
+    cfg = merged_config if merged_config is not None else {}
+
+    previous_rows, prev_rows_list = _load_previous_cache(repo, cache_manager)
+    ctx = _BlockAnalysisContext(
+        repo=repo,
+        files=files_list,
+        blob_shas=_block_churn.file_blob_shas(repo),
+        previous_rows=previous_rows,
+        prev_rows_list=prev_rows_list,
+        timestamps=_churn.get_file_timestamps(repo, files_list),
+        current_time=int(datetime.now().timestamp()),
+        merged_config=cfg,
+    )
+
+    file_metrics, file_blocks, file_sources, file_smells, requests = _scan_files_for_blocks(
+        ctx, progress_callback
+    )
+    churns = _compute_block_churns(ctx, requests, since, until, workers, progress_callback)
+    rows, row_cache_meta = _assemble_block_metrics(
+        ctx, file_metrics, file_blocks, file_sources, file_smells, churns, decay_half_life
+    )
+
+    _finalize_smell_burden([m for _, _, m in rows])
+
+    sim_agg = _block_similarity.attach_similarity_to_rows(
+        rows,
+        file_sources,
+        similarity_enabled=similarity_enabled,
+        similarity_threshold=similarity_threshold,
+        similarity_band_high=similarity_band_high,
+        similarity_band_medium=similarity_band_medium,
+        similarity_band_low=similarity_band_low,
+        similarity_max_pairwise_blocks=similarity_max_pairwise_blocks,
+    )
+
+    out = _build_statistics(rows, sm, smell_weight, progress_callback)
+    _apply_risk_scores(out, cfg, similarity_enabled)
+
     if (
         similarity_enabled
         and similarity_aggregate_row
@@ -485,28 +626,8 @@ def build_block_stats(
     ):
         out.append(_similarity_aggregate_statistic(sim_agg))
 
-    # Persist results with cache metadata for next run's churn lookup.
-    cache_rows = []
-    for stat, meta in zip(out, row_cache_meta):
-        d = stat.as_dict()
-        d.update(meta)
-        cache_rows.append(d)
     try:
-        if files:
-            # Keep unaffected files' cache rows so scoped/filter runs do not
-            # wipe the whole repository cache.
-            targeted_files = set(files)
-            preserved_prev_rows: list[dict[str, Any]] = []
-            for row in prev_rows_list:
-                if not isinstance(row, dict):
-                    continue
-                path = str(row.get("path", ""))
-                if "::" not in path:
-                    continue
-                rel, _ = path.split("::", 1)
-                if rel not in targeted_files:
-                    preserved_prev_rows.append(row)
-            _cache.save_block_results(repo, [*preserved_prev_rows, *cache_rows])
+        _persist_block_cache(out, row_cache_meta, files_list, repo, cache_manager, prev_rows_list)
     except Exception:
         pass
 

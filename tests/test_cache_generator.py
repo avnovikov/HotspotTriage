@@ -234,3 +234,20 @@ def test_generate_full_cache_verbose_output(test_repo, capsys):
     assert "Initializing block-level" in captured.out
     assert "class/method structure" in captured.out
     assert "✅ Cache generation complete" in captured.out
+
+
+def test_generate_full_cache_emits_stage_entry_progress(test_repo):
+    seen: list[tuple[str, int, int]] = []
+
+    def cb(label: str, done: int, total: int) -> None:
+        seen.append((label, done, total))
+
+    result = generate_full_cache(str(test_repo), progress_callback=cb)
+    assert result["metadata"]["status"] == "success"
+    assert seen
+    labels = [label for label, _, _ in seen]
+    assert labels[0] == "Starting cache generation"
+    assert "Initializing block-level cache" in labels
+    assert "Analyzing class/method structure" in labels
+    assert "Checking cache status" in labels
+    assert labels[-1] == "Cache generation complete"
