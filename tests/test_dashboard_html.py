@@ -45,6 +45,7 @@ def test_dashboard_html_hash_routing_and_heatmap():
     assert "heatmapColumnHeaderHtml" in DASHBOARD_HTML
     assert "#view-config .norm-svg-wrap" in DASHBOARD_HTML
     assert "normChartTabWidth" in DASHBOARD_HTML
+    assert "Necessary when configuration changes." in DASHBOARD_HTML
     assert ".heatmap-file-col .heatmap-file-label" in DASHBOARD_HTML
     assert "function truncateLeftLabelToWidth(value, maxWidthPx = 168)" in DASHBOARD_HTML
     assert "measureText(candidate).width <= maxWidth" in DASHBOARD_HTML
@@ -69,3 +70,17 @@ def test_dashboard_html_exposes_score_band_threshold_editor():
     assert "band_names" in DASHBOARD_HTML
     assert "renderScoreBands()" in DASHBOARD_HTML
     assert 'data-role="band-slider"' in DASHBOARD_HTML
+
+
+def test_dashboard_html_exposes_final_burden_weights_editor():
+    assert "final_weights" in DASHBOARD_HTML
+    assert "top composite parameters (must sum to 1.0)" in DASHBOARD_HTML
+    assert "complexity_burden" in DASHBOARD_HTML
+    assert "churn_burden" in DASHBOARD_HTML
+    assert "maintainability_burden" in DASHBOARD_HTML
+    assert "smell_burden" in DASHBOARD_HTML
+    assert "similarity_burden" in DASHBOARD_HTML
+    assert "setFinalWeight" in DASHBOARD_HTML
+    assert "ensureFinalWeights" in DASHBOARD_HTML
+    assert "toFixed(2)" in DASHBOARD_HTML
+    assert "must be 1.000" in DASHBOARD_HTML
