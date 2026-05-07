@@ -7,7 +7,8 @@ GitHub renders images in [`README.md`](../README.md) when you use **paths relati
 When the dashboard UI changes enough that the README should reflect it:
 
 1. Run the MCP server with the dashboard open, for example:  
-   `uv run hotspottriage start-mcp-server --open-browser`
+   `uv run hotspottriage start-mcp-server --open-browser`  
+   optional default repo for tools: add `--default-target /absolute/path/to/repo`.
 2. Capture the browser viewport (or window) and export as PNG.
 3. Replace the files below **in place** (same filenames so [`README.md`](../README.md) keeps working).
 
