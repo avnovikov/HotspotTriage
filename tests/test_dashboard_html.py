@@ -17,6 +17,8 @@ def test_dashboard_html_contains_required_panels():
     assert "No data yet" in DASHBOARD_HTML
     assert "scoreWeightsPanel" in DASHBOARD_HTML
     assert "scoreBandsPanel" in DASHBOARD_HTML
+    assert "proposedModelsPanel" in DASHBOARD_HTML
+    assert "Proposed models by risk band" in DASHBOARD_HTML
     assert "norm-metric-card" in DASHBOARD_HTML
     assert "weight-sum-badge" in DASHBOARD_HTML
     assert "heatmapUpdateBtn" in DASHBOARD_HTML
@@ -44,6 +46,10 @@ def test_dashboard_html_hash_routing_and_heatmap():
     assert "#view-config .norm-svg-wrap" in DASHBOARD_HTML
     assert "normChartTabWidth" in DASHBOARD_HTML
     assert "Necessary when configuration changes." in DASHBOARD_HTML
+    assert ".heatmap-file-col .heatmap-file-label" in DASHBOARD_HTML
+    assert "function truncateLeftLabelToWidth(value, maxWidthPx = 168)" in DASHBOARD_HTML
+    assert "measureText(candidate).width <= maxWidth" in DASHBOARD_HTML
+    assert "truncateLeftLabelToWidth(r.file || \"\")" in DASHBOARD_HTML
 
 
 def test_dashboard_html_is_self_contained():
