@@ -45,6 +45,10 @@ def test_dashboard_html_hash_routing_and_heatmap():
     assert "heatmapColumnHeaderHtml" in DASHBOARD_HTML
     assert "#view-config .norm-svg-wrap" in DASHBOARD_HTML
     assert "normChartTabWidth" in DASHBOARD_HTML
+    assert ".heatmap-file-col .heatmap-file-label" in DASHBOARD_HTML
+    assert "function truncateLeftLabelToWidth(value, maxWidthPx = 168)" in DASHBOARD_HTML
+    assert "measureText(candidate).width <= maxWidth" in DASHBOARD_HTML
+    assert "truncateLeftLabelToWidth(r.file || \"\")" in DASHBOARD_HTML
 
 
 def test_dashboard_html_is_self_contained():
