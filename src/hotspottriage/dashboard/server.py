@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
+from dataclasses import dataclass
 import json
 import socket
 import subprocess
@@ -9,28 +11,217 @@ import sys
 import threading
 import time
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
 import uvicorn
+import yaml
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 from hotspottriage import cache as _cache
-from hotspottriage.dashboard.heatmap import build_heatmap_fragment
+from hotspottriage import config as _config
+from hotspottriage import normalize as _normalize
+from hotspottriage import score as _score_mod
 from hotspottriage.dashboard.html import DASHBOARD_HTML
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.stats import StatsCollector
 
 BASE_PORT = 9123
-RECENT_TARGETS_LIMIT = 15
-LOG_STREAM_INTERVAL_S = 1.0
-STATS_STREAM_INTERVAL_S = 5.0
 
-# Sentinel words that the UI may send for "no value"; treated as empty string.
-_FILTER_SENTINELS = frozenset({"none", "null", "<none>"})
-_SCORE_SENTINELS = frozenset({"none", "null", "<default>"})
+# Numeric Statistic fields eligible for /api/stats/distribution histograms.
+_DISTRIBUTION_METRICS: frozenset[str] = frozenset(
+    {
+        "sloc",
+        "normalized_sloc",
+        "cyclomatic",
+        "halstead",
+        "maintainability",
+        "churn",
+        "churn_per_sloc",
+        "decayed_churn",
+        "decayed_churn_per_sloc",
+        "smell_count",
+        "smell_severity",
+        "smell_burden",
+        "similarity_score",
+        "match_count",
+        "score",
+    }
+)
+
+# Upper cap for ``/api/stats/heatmap`` limit (query param).
+_HEATMAP_MAX_LIMIT = 500
+
+
+def _slim_cache_job_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Strip huge ``results`` lists before storing on the cache job.
+
+    The dashboard poll endpoint returns ``job.result`` as JSON; including
+    hundreds of full block/class rows can exceed what browsers reliably parse
+    or hold in memory. Rows are already applied via ``publish_latest_block_metrics``.
+    """
+    out: dict[str, Any] = {
+        "timestamp": result.get("timestamp"),
+        "target": result.get("target"),
+        "filter": result.get("filter"),
+        "score_metrics": result.get("score_metrics"),
+        "metadata": dict(result.get("metadata") or {}),
+        "cache_status": dict(result.get("cache_status") or {}),
+    }
+    blocks = result.get("blocks")
+    if isinstance(blocks, dict):
+        slim_b = {k: v for k, v in blocks.items() if k != "results"}
+        res = blocks.get("results")
+        if isinstance(res, list) and "count" not in slim_b:
+            slim_b["count"] = len(res)
+        out["blocks"] = slim_b
+    classes = result.get("classes")
+    if isinstance(classes, dict):
+        slim_c = {k: v for k, v in classes.items() if k != "results"}
+        res = classes.get("results")
+        if isinstance(res, list) and "count" not in slim_c:
+            slim_c["count"] = len(res)
+        out["classes"] = slim_c
+    return out
+
+
+def _normalize_cache_target(raw_target: str) -> str:
+    """Normalize cache target paths so ``./`` inputs persist as absolute paths."""
+    target = str(raw_target).strip()
+    if not target:
+        return ""
+    if "://" in target or target.startswith("git@"):
+        return target
+    try:
+        return str(Path(target).expanduser().resolve())
+    except OSError:
+        return target
+
+
+_HEATMAP_SCORE_COLUMNS: tuple[str, ...] = (
+    "score",
+    "complexity_burden",
+    "churn_burden",
+    "maintainability_burden",
+    "smell_burden",
+    "similarity_burden",
+)
+
+
+def _split_block_path(raw_path: str) -> tuple[str, str]:
+    path = str(raw_path).strip()
+    if not path:
+        return "", ""
+    if "::" not in path:
+        return path, ""
+    file_path, symbol = path.split("::", 1)
+    return file_path, symbol
+
+
+def _as_float_or_zero(raw: Any) -> float:
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _build_heatmap_rows(rows: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    """Return matrix rows sorted by file score, then method score."""
+    table_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        path = row.get("path")
+        if not path:
+            continue
+        file_path, method_name = _split_block_path(str(path))
+        subs = row.get("score_subscores")
+        subs_map = subs if isinstance(subs, dict) else {}
+        item: dict[str, Any] = {
+            "path": str(path),
+            "file": file_path,
+            "method": method_name,
+        }
+        for col in _HEATMAP_SCORE_COLUMNS:
+            value = row.get(col)
+            if value is None:
+                value = subs_map.get(col)
+            item[col] = _as_float_or_zero(value)
+        band = row.get("score_band")
+        if band is not None and str(band).strip():
+            item["score_band"] = str(band)
+        table_rows.append(item)
+
+    file_max_score: dict[str, float] = {}
+    for row in table_rows:
+        file_name = str(row["file"])
+        score = _as_float_or_zero(row.get("score"))
+        prev = file_max_score.get(file_name)
+        if prev is None or score > prev:
+            file_max_score[file_name] = score
+
+    table_rows.sort(
+        key=lambda r: (
+            -file_max_score.get(str(r["file"]), 0.0),
+            str(r["file"]),
+            -_as_float_or_zero(r.get("score")),
+            str(r["method"]),
+        )
+    )
+    return table_rows[:limit]
+
+
+def _heatmap_column_maxima(
+    table_rows: list[dict[str, Any]], *, columns: tuple[str, ...]
+) -> dict[str, float]:
+    """Per-column maxima for heatmap cell tinting.
+
+    Excludes meta rows whose ``path`` starts with ``__`` (e.g. similarity aggregate),
+    which often have an outsized ``score`` and would flatten tinting for real blocks.
+    """
+    eligible = [r for r in table_rows if not str(r.get("path", "")).startswith("__")]
+    if not eligible:
+        eligible = table_rows
+    out: dict[str, float] = {}
+    for col in columns:
+        vals = [_as_float_or_zero(r.get(col)) for r in eligible]
+        m = float(max(vals)) if vals else 0.0
+        out[col] = m if m > 0 else 1e-9
+    return out
+
+
+def _histogram_buckets(values: list[float], *, bins: int = 20) -> tuple[list[list[float]], list[int]]:
+    """Return ``buckets`` as ``[low, high]`` pairs and ``counts`` (same length)."""
+    if not values:
+        return [], []
+    if bins < 1:
+        raise ValueError("bins must be positive")
+    vmin = float(min(values))
+    vmax = float(max(values))
+    if vmin == vmax:
+        return [[vmin, vmax]], [len(values)]
+    width = (vmax - vmin) / bins
+    counts = [0] * bins
+    buckets: list[list[float]] = []
+    for i in range(bins):
+        lo = vmin + i * width
+        hi = vmin + (i + 1) * width
+        if i == bins - 1:
+            hi = vmax
+        buckets.append([lo, hi])
+    for v in values:
+        fv = float(v)
+        if fv >= vmax:
+            idx = bins - 1
+        elif fv <= vmin:
+            idx = 0
+        else:
+            idx = int((fv - vmin) / width)
+            if idx >= bins:
+                idx = bins - 1
+        counts[idx] += 1
+    return buckets, counts
 
 
 @dataclass
@@ -39,37 +230,9 @@ class CacheJob:
     status: str
     progress: int
     message: str
+    started_at_monotonic: float
     result: dict[str, Any] | None = None
     error: str | None = None
-
-
-@dataclass(frozen=True)
-class CacheRequest:
-    """Normalized parameters extracted from a cache-related JSON payload.
-
-    All fields are non-None strings; empty string means "unset".
-    """
-
-    target: str
-    filt: str
-    score: str
-
-    @property
-    def filter_or_none(self) -> str | None:
-        return self.filt or None
-
-    @property
-    def score_or_none(self) -> str | None:
-        return self.score or None
-
-
-@dataclass(frozen=True)
-class HeatmapOutcome:
-    """Result of attempting to rebuild the heatmap fragment."""
-
-    updated: bool
-    error: str | None
-    rows: int
 
 
 def _find_free_port(host: str, base: int, *, span: int = 20) -> int:
@@ -96,8 +259,10 @@ class DashboardServer:
         host: str = "127.0.0.1",
         base_port: int = BASE_PORT,
         open_on_start: bool = False,
+        config_patch_path: Path | None = None,
     ) -> None:
-        self._config = config
+        self._base_snapshot = deepcopy(config)
+        self._ensure_snapshot_defaults()
         self._stats = stats
         self._log_handler = log_handler
         self._host = host
@@ -106,21 +271,23 @@ class DashboardServer:
         self._started_at = time.monotonic()
         self._cache_jobs: dict[str, CacheJob] = {}
         self._cache_jobs_lock = threading.Lock()
-        self._heatmap_lock = threading.Lock()
-        self._heatmap_fragment = build_heatmap_fragment([])
         self._state_file = Path(".hotspottriage") / "dashboard_state.json"
         self._state_lock = threading.Lock()
+        self._config_patch_path = config_patch_path or (
+            Path(".hotspottriage") / "dashboard_config_patch.yml"
+        )
+        self._patch_lock = threading.Lock()
+        self._block_metrics_rows: list[dict[str, Any]] = []
+        self._block_metrics_lock = threading.Lock()
         self._app = self._build_app()
         self._thread: threading.Thread | None = None
         self._server: uvicorn.Server | None = None
-
-    # ----- local persisted state ------------------------------------------
 
     def _empty_local_state(self) -> dict[str, Any]:
         return {
             "last_target": "",
             "last_filter": "",
-            "last_score_metrics": "",
+            "last_score_metrics": "churn_per_sloc,cyclomatic",
             "recent_targets": [],
         }
 
@@ -129,280 +296,107 @@ class DashboardServer:
             return self._empty_local_state()
         try:
             data = json.loads(self._state_file.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return self._empty_local_state()
+            return data
         except Exception:
             return self._empty_local_state()
-        if not isinstance(data, dict):
-            return self._empty_local_state()
-        return data
 
     def _load_local_state(self) -> dict[str, Any]:
         with self._state_lock:
             return self._load_local_state_unlocked()
 
+    def _ensure_snapshot_defaults(self) -> None:
+        snap = self._base_snapshot
+        if not isinstance(snap.get("metric_normalization"), dict):
+            snap["metric_normalization"] = deepcopy(_config.DEFAULTS["metric_normalization"])
+        if not isinstance(snap.get("score_aggregation"), dict):
+            snap["score_aggregation"] = deepcopy(_config.DEFAULTS["score_aggregation"])
+
+    def publish_latest_block_metrics(self, rows: list[dict[str, Any]]) -> None:
+        """Replace stored raw block rows used by distribution histograms."""
+        with self._block_metrics_lock:
+            self._block_metrics_rows = list(rows)
+
+    def _load_patch_unlocked(self) -> dict[str, Any]:
+        path = self._config_patch_path
+        if not path.exists():
+            return {}
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return {}
+        if not text.strip():
+            return {}
+        try:
+            data = yaml.safe_load(text)
+        except yaml.YAMLError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _write_patch_unlocked(self, data: dict[str, Any]) -> None:
+        self._config_patch_path.parent.mkdir(parents=True, exist_ok=True)
+        self._config_patch_path.write_text(
+            yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+
+    def _merged_snapshot(self) -> dict[str, Any]:
+        """Base dashboard snapshot merged with persisted YAML overlay."""
+        out = deepcopy(self._base_snapshot)
+        patch = self._load_patch_unlocked()
+        mn_patch = patch.get("metric_normalization")
+        if isinstance(mn_patch, dict):
+            mn_base = out.get("metric_normalization")
+            if isinstance(mn_base, dict):
+                out["metric_normalization"] = _config._deep_merge(mn_base, mn_patch)
+            else:
+                out["metric_normalization"] = deepcopy(mn_patch)
+        sa_patch = patch.get("score_aggregation")
+        if isinstance(sa_patch, dict):
+            sa_base = out.get("score_aggregation")
+            if isinstance(sa_base, dict):
+                out["score_aggregation"] = _config._deep_merge(sa_base, sa_patch)
+            else:
+                out["score_aggregation"] = deepcopy(sa_patch)
+        return out
+
+    def _validate_merged_patch(self, merged_patch: dict[str, Any]) -> None:
+        """Raise ``ValueError`` if overlay produces invalid normalization/score config."""
+        probe = deepcopy(_config.DEFAULTS)
+        mn_base = deepcopy(self._base_snapshot.get("metric_normalization") or {})
+        mn_patch = merged_patch.get("metric_normalization")
+        if isinstance(mn_patch, dict):
+            mn_full = _config._deep_merge(mn_base, mn_patch)
+        else:
+            mn_full = mn_base
+        probe["metric_normalization"] = mn_full
+
+        sa_base = deepcopy(self._base_snapshot.get("score_aggregation") or {})
+        sa_patch = merged_patch.get("score_aggregation")
+        if isinstance(sa_patch, dict):
+            sa_full = _config._deep_merge(sa_base, sa_patch)
+        else:
+            sa_full = sa_base
+        probe["score_aggregation"] = sa_full
+
+        _normalize.validate_metric_normalization(probe)
+        _score_mod.validate_score_aggregation(probe)
+
     def _save_local_state(self, updates: dict[str, Any]) -> dict[str, Any]:
         with self._state_lock:
-            merged = {**self._load_local_state_unlocked(), **updates}
-            merged["recent_targets"] = self._merge_recent_targets(merged)
+            base = self._load_local_state_unlocked()
+            merged = {**base, **updates}
+            tgt = str(merged.get("last_target", "")).strip()
+            rec = [str(x) for x in (merged.get("recent_targets") or []) if str(x).strip()]
+            if tgt:
+                rec = [t for t in rec if t != tgt]
+                rec.insert(0, tgt)
+                rec = rec[:15]
+            merged["recent_targets"] = rec
             self._state_file.parent.mkdir(parents=True, exist_ok=True)
             self._state_file.write_text(json.dumps(merged, indent=2), encoding="utf-8")
             return merged
-
-    @staticmethod
-    def _merge_recent_targets(state: dict[str, Any]) -> list[str]:
-        recent = [str(x) for x in (state.get("recent_targets") or []) if str(x).strip()]
-        target = str(state.get("last_target", "")).strip()
-        if not target:
-            return recent
-        deduped = [t for t in recent if t != target]
-        deduped.insert(0, target)
-        return deduped[:RECENT_TARGETS_LIMIT]
-
-    # ----- payload normalization ------------------------------------------
-
-    def _normalize_target(self, raw_target: str) -> str:
-        target = str(raw_target).strip()
-        if not target:
-            return ""
-        return str(Path(target).expanduser().resolve())
-
-    @staticmethod
-    def _normalize_optional(raw: Any, sentinels: frozenset[str]) -> str:
-        """Return stripped text, or '' for None and any configured sentinel word."""
-        if raw is None:
-            return ""
-        text = str(raw).strip()
-        if text.lower() in sentinels:
-            return ""
-        return text
-
-    def _normalize_filter(self, raw: Any) -> str:
-        return self._normalize_optional(raw, _FILTER_SENTINELS)
-
-    def _normalize_score_metrics(self, raw: Any) -> str:
-        return self._normalize_optional(raw, _SCORE_SENTINELS)
-
-    def _parse_cache_request(self, payload: dict[str, Any] | None) -> CacheRequest:
-        """Validate, normalize, and persist a cache-endpoint payload.
-
-        Raises HTTPException(400) when ``target`` is missing.
-        """
-        body = payload or {}
-        target = self._normalize_target(body.get("target", ""))
-        if not target:
-            raise HTTPException(status_code=400, detail="target is required")
-        request = CacheRequest(
-            target=target,
-            filt=self._normalize_filter(body.get("filter", "")),
-            score=self._normalize_score_metrics(body.get("score_metrics", "")),
-        )
-        self._save_local_state(
-            {
-                "last_target": request.target,
-                "last_filter": request.filt,
-                "last_score_metrics": request.score,
-            }
-        )
-        return request
-
-    # ----- heatmap fragment management ------------------------------------
-
-    def _set_heatmap_fragment(self, rows: list[Any]) -> None:
-        with self._heatmap_lock:
-            self._heatmap_fragment = build_heatmap_fragment(rows)
-
-    def _rebuild_heatmap_from_cache(self, request: CacheRequest) -> HeatmapOutcome:
-        """Rebuild the heatmap fragment from cache-backed block analysis."""
-        try:
-            from hotspottriage import mcp_server as _mcp_server
-
-            raw = _mcp_server.analyze_with_cache(
-                target=request.target,
-                filter=request.filter_or_none,
-                score_metrics=request.score_or_none,
-            )
-            payload = json.loads(raw)
-            outcome = self._validate_block_payload(payload, request)
-            if outcome is not None:
-                return outcome
-            rows = payload.get("results", [])
-            self._set_heatmap_fragment(rows)
-            return HeatmapOutcome(True, None, len(rows))
-        except Exception as exc:  # pragma: no cover - defensive, non-fatal
-            return HeatmapOutcome(False, str(exc), 0)
-
-    @staticmethod
-    def _validate_block_payload(
-        payload: Any, request: CacheRequest
-    ) -> HeatmapOutcome | None:
-        """Return a failure outcome when the payload is unusable, else None."""
-        if not isinstance(payload, dict):
-            return HeatmapOutcome(False, "invalid response from analyze_with_cache", 0)
-        if "error" in payload:
-            return HeatmapOutcome(False, str(payload["error"]), 0)
-        rows = payload.get("results", [])
-        if not isinstance(rows, list):
-            return HeatmapOutcome(False, "invalid results payload from analyze_with_cache", 0)
-        if not rows:
-            details = f"target={request.target}"
-            if request.filt:
-                details += f", filter={request.filt}"
-            return HeatmapOutcome(False, f"no block rows returned ({details})", 0)
-        return None
-
-    @staticmethod
-    def _heatmap_response(
-        *,
-        repo: Path,
-        cache_dir: Path,
-        exists: bool,
-        outcome: HeatmapOutcome,
-        extras: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        response: dict[str, Any] = {
-            "target": str(repo),
-            "cache_dir": str(cache_dir),
-            "exists": exists,
-            "heatmap_updated": outcome.updated,
-            "heatmap_error": outcome.error,
-            "heatmap_rows": outcome.rows,
-        }
-        if extras:
-            response.update(extras)
-        return response
-
-    # ----- cache job state ------------------------------------------------
-
-    def _create_cache_job(self, target: str) -> CacheJob:
-        job = CacheJob(
-            job_id=str(uuid.uuid4()),
-            status="running",
-            progress=5,
-            message=f"Starting cache generation for {target}",
-        )
-        with self._cache_jobs_lock:
-            self._cache_jobs[job.job_id] = job
-        return job
-
-    def _update_job(self, job_id: str, **fields: Any) -> None:
-        with self._cache_jobs_lock:
-            job = self._cache_jobs.get(job_id)
-            if job is None:
-                return
-            for name, value in fields.items():
-                setattr(job, name, value)
-
-    def _run_cache_job(self, job_id: str, request: CacheRequest) -> None:
-        # Local import avoids circular dependency with mcp_server.
-        from hotspottriage import cache_generator as _cache_generator
-
-        try:
-            self._update_job(job_id, progress=30, message="Generating block cache...")
-            result = _cache_generator.generate_full_cache(
-                target=request.target,
-                filter=request.filter_or_none,
-                score_metrics=request.score_or_none,
-                verbose=False,
-            )
-            block_results = result.get("blocks", {}).get("results", [])
-            if isinstance(block_results, list):
-                self._set_heatmap_fragment(block_results)
-            self._update_job(
-                job_id,
-                status="done",
-                progress=100,
-                message="Cache generation complete",
-                result=result,
-            )
-        except Exception as exc:
-            self._update_job(
-                job_id,
-                status="error",
-                progress=100,
-                message="Cache generation failed",
-                error=str(exc),
-            )
-
-    def _start_cache_job(self, request: CacheRequest) -> CacheJob:
-        job = self._create_cache_job(request.target)
-        threading.Thread(
-            target=self._run_cache_job,
-            args=(job.job_id, request),
-            daemon=True,
-            name=f"cache-job-{job.job_id[:8]}",
-        ).start()
-        return job
-
-    # ----- cache endpoint handlers ----------------------------------------
-
-    def _handle_cache_status(self, payload: dict[str, Any] | None) -> dict[str, Any]:
-        request = self._parse_cache_request(payload)
-        repo = Path(request.target)
-        cache_dir = _cache.cache_path_for(repo)
-        cache_file = cache_dir / "blocks.pkl"
-        metadata = _cache.Cache(repo).get_metadata()
-        exists = cache_file.exists()
-        size = cache_file.stat().st_size if exists else 0
-        entries = metadata.get("entry_count", 0) if isinstance(metadata, dict) else 0
-        outcome = (
-            self._rebuild_heatmap_from_cache(request)
-            if exists
-            else HeatmapOutcome(False, None, 0)
-        )
-        return self._heatmap_response(
-            repo=repo,
-            cache_dir=cache_dir,
-            exists=exists,
-            outcome=outcome,
-            extras={
-                "entries": int(entries),
-                "size_bytes": int(size),
-                "metadata": metadata,
-            },
-        )
-
-    def _handle_rebuild_heatmap(self, payload: dict[str, Any] | None) -> dict[str, Any]:
-        request = self._parse_cache_request(payload)
-        repo = Path(request.target)
-        cache_dir = _cache.cache_path_for(repo)
-        cache_exists = (cache_dir / "blocks.pkl").exists()
-        if not cache_exists:
-            return self._heatmap_response(
-                repo=repo,
-                cache_dir=cache_dir,
-                exists=False,
-                outcome=HeatmapOutcome(False, "cache file not found", 0),
-            )
-        return self._heatmap_response(
-            repo=repo,
-            cache_dir=cache_dir,
-            exists=True,
-            outcome=self._rebuild_heatmap_from_cache(request),
-        )
-
-    def _handle_generate_cache(self, payload: dict[str, Any] | None) -> dict[str, Any]:
-        request = self._parse_cache_request(payload)
-        job = self._start_cache_job(request)
-        return {"job_id": job.job_id, "status": "running", "target": request.target}
-
-    def _read_cache_job(self, job_id: str) -> dict[str, Any]:
-        with self._cache_jobs_lock:
-            job = self._cache_jobs.get(job_id)
-            if job is None:
-                raise HTTPException(status_code=404, detail="cache job not found")
-            return {
-                "job_id": job.job_id,
-                "status": job.status,
-                "progress": job.progress,
-                "message": job.message,
-                "error": job.error,
-                "result": job.result,
-            }
-
-    def _read_heatmap_fragment(self) -> str:
-        with self._heatmap_lock:
-            return self._heatmap_fragment
-
-    # ----- properties / lifecycle -----------------------------------------
 
     @property
     def app(self) -> FastAPI:
@@ -429,20 +423,12 @@ class DashboardServer:
             stdin=subprocess.DEVNULL,
         )
 
-    # ----- app builder ----------------------------------------------------
-
     def _build_app(self) -> FastAPI:
         app = FastAPI(title="HotspotTriage Dashboard", docs_url=None, redoc_url=None)
-        self._register_health_routes(app)
-        self._register_cache_routes(app)
-        self._register_heatmap_routes(app)
-        self._register_observability_routes(app)
-        self._register_dashboard_route(app)
-        return app
-
-    def _register_health_routes(self, app: FastAPI) -> None:
+        stats_ref = self._stats
+        log_ref = self._log_handler
+        dash_self = self
         started = self._started_at
-        cfg_ref = self._config
 
         @app.get("/api/health")
         def health() -> dict[str, Any]:
@@ -453,9 +439,87 @@ class DashboardServer:
 
         @app.get("/api/config")
         def get_config() -> dict[str, Any]:
-            return cfg_ref
+            return dash_self._merged_snapshot()
 
-    def _register_cache_routes(self, app: FastAPI) -> None:
+        @app.post("/api/config/patch")
+        def patch_config(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+            body = payload if isinstance(payload, dict) else {}
+            allowed = {"metric_normalization", "score_aggregation"}
+            extra = set(body.keys()) - allowed
+            if extra:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"unsupported patch key(s): {sorted(extra)}",
+                )
+            if not body:
+                raise HTTPException(
+                    status_code=400,
+                    detail="patch body must include metric_normalization and/or score_aggregation",
+                )
+            with dash_self._patch_lock:
+                current = dash_self._load_patch_unlocked()
+                merged_file = _config._deep_merge(current, body)
+                try:
+                    dash_self._validate_merged_patch(merged_file)
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e)) from e
+                dash_self._write_patch_unlocked(merged_file)
+            return {"status": "ok", "merged_keys": sorted(body.keys())}
+
+        @app.get("/api/stats/heatmap")
+        def stats_heatmap(
+            limit: int = 500,
+        ) -> dict[str, Any]:
+            if not isinstance(limit, int) or isinstance(limit, bool):
+                raise HTTPException(
+                    status_code=400,
+                    detail="limit must be an integer",
+                )
+            if limit < 1:
+                raise HTTPException(status_code=400, detail="limit must be >= 1")
+            if limit > _HEATMAP_MAX_LIMIT:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"limit must be <= {_HEATMAP_MAX_LIMIT}",
+                )
+            with dash_self._block_metrics_lock:
+                raw_rows = list(dash_self._block_metrics_rows)
+            rows = _build_heatmap_rows(raw_rows, limit=limit)
+            column_maxima = _heatmap_column_maxima(
+                rows, columns=_HEATMAP_SCORE_COLUMNS
+            )
+            return {
+                "limit": limit,
+                "columns": list(_HEATMAP_SCORE_COLUMNS),
+                "rows": rows,
+                "column_maxima": column_maxima,
+            }
+
+        @app.get("/api/stats/distribution")
+        def stats_distribution(metric: str = "") -> dict[str, Any]:
+            name = str(metric).strip()
+            if not name:
+                return {"metric": "", "buckets": [], "counts": []}
+            if name not in _DISTRIBUTION_METRICS:
+                return {"metric": name, "buckets": [], "counts": []}
+            with dash_self._block_metrics_lock:
+                rows = list(dash_self._block_metrics_rows)
+            values: list[float] = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                raw = row.get(name)
+                if raw is None:
+                    continue
+                try:
+                    values.append(float(raw))
+                except (TypeError, ValueError):
+                    continue
+            if not values:
+                return {"metric": name, "buckets": [], "counts": []}
+            buckets, counts = _histogram_buckets(values)
+            return {"metric": name, "buckets": buckets, "counts": counts}
+
         @app.get("/api/cache/context")
         def get_cache_context() -> dict[str, Any]:
             return self._load_local_state()
@@ -463,42 +527,165 @@ class DashboardServer:
         @app.post("/api/cache/context")
         def set_cache_context(payload: dict[str, Any] | None = None) -> dict[str, Any]:
             body = payload or {}
-            return self._save_local_state(
-                {
-                    "last_target": self._normalize_target(body.get("target", "")),
-                    "last_filter": str(body.get("filter", "")).strip(),
-                    "last_score_metrics": self._normalize_score_metrics(
-                        body.get("score_metrics", "")
-                    ),
-                }
-            )
+            updates = {
+                "last_target": _normalize_cache_target(body.get("target", "")),
+                "last_filter": str(body.get("filter", "")).strip(),
+                "last_score_metrics": str(
+                    body.get("score_metrics", "churn_per_sloc,cyclomatic")
+                ).strip()
+                or "churn_per_sloc,cyclomatic",
+            }
+            return self._save_local_state(updates)
 
         @app.post("/api/cache/status")
         def cache_status(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-            return self._handle_cache_status(payload)
+            body = payload or {}
+            target = _normalize_cache_target(body.get("target", ""))
+            if not target:
+                raise HTTPException(status_code=400, detail="target is required")
+            filt = str(body.get("filter", "")).strip()
+            score = str(body.get("score_metrics", "churn_per_sloc,cyclomatic")).strip()
+            self._save_local_state(
+                {
+                    "last_target": target,
+                    "last_filter": filt,
+                    "last_score_metrics": score or "churn_per_sloc,cyclomatic",
+                }
+            )
+            repo = Path(target).resolve()
+            cache_dir = _cache.cache_path_for(repo)
+            cache_file = cache_dir / _cache._CACHE_FILE
+            metadata = _cache.get_metadata(repo)
+            exists = cache_file.exists()
+            size = cache_file.stat().st_size if exists else 0
+            entries = metadata.get("entry_count", 0) if isinstance(metadata, dict) else 0
+            with self._block_metrics_lock:
+                has_rows = bool(self._block_metrics_rows)
+            if exists and not has_rows:
+                loaded = _cache.load_block_results(repo)
+                if loaded:
+                    self.publish_latest_block_metrics(loaded)
+            return {
+                "target": str(repo),
+                "cache_dir": str(cache_dir),
+                "exists": exists,
+                "entries": int(entries),
+                "size_bytes": int(size),
+                "metadata": metadata,
+            }
 
         @app.post("/api/cache/generate")
         def generate_cache(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-            return self._handle_generate_cache(payload)
+            # Local import avoids circular dependency with mcp_server.
+            from hotspottriage import cache_generator as _cache_generator
+
+            body = payload or {}
+            target = _normalize_cache_target(body.get("target", ""))
+            if not target:
+                raise HTTPException(status_code=400, detail="target is required")
+            filt = None if body.get("filter") in (None, "") else str(body.get("filter"))
+            score = str(body.get("score_metrics", "churn_per_sloc,cyclomatic"))
+            self._save_local_state(
+                {
+                    "last_target": target,
+                    "last_filter": "" if filt is None else filt,
+                    "last_score_metrics": score,
+                }
+            )
+            job_id = str(uuid.uuid4())
+            job = CacheJob(
+                job_id=job_id,
+                status="running",
+                progress=5,
+                message=f"Starting cache generation for {target}",
+                started_at_monotonic=time.monotonic(),
+            )
+            with self._cache_jobs_lock:
+                self._cache_jobs[job_id] = job
+
+            dash_self = self
+
+            def _cache_progress(label: str, done: int, total: int) -> None:
+                t = max(int(total), 1)
+                d = min(max(int(done), 0), t)
+                if label.startswith("Scanning "):
+                    msg = label
+                    pct = 26 + int(24 * d / t)
+                elif label.startswith("Block churn"):
+                    msg = f"Block churn (git log -L) {d}/{t}"
+                    pct = 50 + int(18 * d / t)
+                elif label.startswith("Building block rows"):
+                    msg = "Assembling block rows…" if d == 0 else label
+                    pct = 70 + int(12 * d / t)
+                elif "::" in label:
+                    msg = label
+                    pct = 72 + int(14 * d / t)
+                elif label.startswith("Indexing "):
+                    msg = label
+                    pct = 86 + int(9 * d / t)
+                else:
+                    msg = label
+                    pct = 40
+                with dash_self._cache_jobs_lock:
+                    job = dash_self._cache_jobs.get(job_id)
+                    if job is None:
+                        return
+                    job.message = msg
+                    job.progress = min(96, max(job.progress, pct))
+
+            def _run() -> None:
+                try:
+                    with self._cache_jobs_lock:
+                        self._cache_jobs[job_id].progress = 8
+                        self._cache_jobs[job_id].message = "Starting…"
+                    result = _cache_generator.generate_full_cache(
+                        target=target,
+                        filter=filt,
+                        score_metrics=score,
+                        verbose=False,
+                        progress_callback=_cache_progress,
+                    )
+                    with self._cache_jobs_lock:
+                        self._cache_jobs[job_id].status = "done"
+                        self._cache_jobs[job_id].progress = 100
+                        self._cache_jobs[job_id].message = "Cache generation complete"
+                        self._cache_jobs[job_id].result = _slim_cache_job_result(
+                            result if isinstance(result, dict) else {}
+                        )
+                    block_results = (
+                        result.get("blocks", {}).get("results", [])
+                        if isinstance(result, dict)
+                        else []
+                    )
+                    if isinstance(block_results, list) and block_results:
+                        self.publish_latest_block_metrics(
+                            [r for r in block_results if isinstance(r, dict)]
+                        )
+                except Exception as e:
+                    with self._cache_jobs_lock:
+                        self._cache_jobs[job_id].status = "error"
+                        self._cache_jobs[job_id].progress = 100
+                        self._cache_jobs[job_id].message = "Cache generation failed"
+                        self._cache_jobs[job_id].error = str(e)
+
+            threading.Thread(target=_run, daemon=True, name=f"cache-job-{job_id[:8]}").start()
+            return {"job_id": job_id, "status": "running"}
 
         @app.get("/api/cache/jobs/{job_id}")
         def cache_job_status(job_id: str) -> dict[str, Any]:
-            return self._read_cache_job(job_id)
-
-    def _register_heatmap_routes(self, app: FastAPI) -> None:
-        @app.post("/api/heatmap/rebuild")
-        def rebuild_heatmap(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-            return self._handle_rebuild_heatmap(payload)
-
-        @app.get("/api/heatmap/fragment")
-        def get_heatmap_fragment() -> HTMLResponse:
-            response = HTMLResponse(self._read_heatmap_fragment())
-            response.headers["Cache-Control"] = "no-store, max-age=0"
-            return response
-
-    def _register_observability_routes(self, app: FastAPI) -> None:
-        stats_ref = self._stats
-        log_ref = self._log_handler
+            with self._cache_jobs_lock:
+                job = self._cache_jobs.get(job_id)
+                if job is None:
+                    raise HTTPException(status_code=404, detail="cache job not found")
+                return {
+                    "job_id": job.job_id,
+                    "status": job.status,
+                    "progress": job.progress,
+                    "message": job.message,
+                    "running_for_s": round(max(0.0, time.monotonic() - job.started_at_monotonic), 1),
+                    "error": job.error,
+                    "result": job.result,
+                }
 
         @app.get("/api/stats")
         def get_stats() -> dict[str, Any]:
@@ -522,7 +709,7 @@ class DashboardServer:
                     for msg in result.messages:
                         yield "data: " + json.dumps(msg) + "\n\n"
                     last_idx = result.max_idx
-                await asyncio.sleep(LOG_STREAM_INTERVAL_S)
+                await asyncio.sleep(1.0)
 
         @app.get("/api/logs/stream")
         def log_stream() -> StreamingResponse:
@@ -530,19 +717,19 @@ class DashboardServer:
 
         async def _stats_sse() -> AsyncGenerator[str, None]:
             while True:
-                yield "data: " + json.dumps(stats_ref.get_snapshot()) + "\n\n"
-                await asyncio.sleep(STATS_STREAM_INTERVAL_S)
+                snap = stats_ref.get_snapshot()
+                yield "data: " + json.dumps(snap) + "\n\n"
+                await asyncio.sleep(5.0)
 
         @app.get("/api/stats/stream")
         def stats_stream() -> StreamingResponse:
             return StreamingResponse(_stats_sse(), media_type="text/event-stream")
 
-    def _register_dashboard_route(self, app: FastAPI) -> None:
         @app.get("/dashboard/")
         def dashboard() -> HTMLResponse:
             return HTMLResponse(DASHBOARD_HTML)
 
-    # ----- start ----------------------------------------------------------
+        return app
 
     def start(self) -> None:
         if self._thread is not None:
@@ -556,12 +743,12 @@ class DashboardServer:
         )
         self._server = uvicorn.Server(config)
 
-        def _serve() -> None:
+        def _run() -> None:
             assert self._server is not None
             asyncio.run(self._server.serve())
 
         self._thread = threading.Thread(
-            target=_serve,
+            target=_run,
             daemon=True,
             name="hotspottriage-dashboard",
         )

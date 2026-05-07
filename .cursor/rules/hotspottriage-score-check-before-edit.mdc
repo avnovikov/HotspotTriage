@@ -5,35 +5,26 @@ alwaysApply: true
 
 # HotspotTriage Score Check Before Edits
 
-Before changing existing code, run a HotspotTriage MCP score check for the exact function/block you plan to edit.
-
-This is a blocking gate. If this check is missing, do not edit files.
+Before changing existing code, run a HotspotTriage MCP score check for the function/block you plan to edit.
 
 ## Required workflow
 
 1. Identify the exact function or method you plan to modify.
-2. Use HotspotTriage MCP `analyze` with `granularity=block` scoped to the target repo/path.
+2. Use HotspotTriage MCP `analyze` (always block-level + cache) for the target repo/path; pass `compact=false` when you need full metric rows.
 3. Locate the matching block row (`path::symbol`) and capture:
    - `score`
    - `score_band`
-4. Report the pre-edit result in notes before making changes:
-   - Target symbol/path
-   - Tool call used
-   - `score` and `score_band`
-5. Make the code change.
-6. Re-run HotspotTriage MCP `analyze` on the same target and report post-edit `score` and `score_band`.
-7. Include a one-line risk rationale based on score movement (or unchanged score).
+   - `score_subscores` (if present)
+4. Use that result to guide edit priority and risk framing in your plan/notes.
 
 ## Minimum reporting in planning notes
 
 - Target symbol/path
-- Pre-edit score and band
-- Post-edit score and band
-- One-line rationale based on score movement
+- Current score and band
+- One-line rationale based on score/subscores
 
 ## Example
 
 - Target: `src/module.py::MyClass.process`
-- Pre-edit: `0.74` (`high`)
-- Post-edit: `0.69` (`medium`)
-- Rationale: score dropped after simplifying branching; still moderate risk, so keep tests focused.
+- Score: `0.74` (`high`)
+- Rationale: high churn burden and maintainability burden; keep change minimal and add focused tests.
