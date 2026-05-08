@@ -126,6 +126,8 @@ argument overrides **only**. It does **not** call `load_config` for the target
 repo. Project YAML files do not affect MCP `analyze`
 unless settings are explicitly passed as tool arguments.
 
+Editor-side MCP client config (e.g. Cursor **`.cursor/mcp.json`**: launcher paths, **`PATH`**, **`--default-target`**, git worktrees) is covered in **§6.1.2**.
+
 ### 4.3 Dashboard Config Overlay
 
 The dashboard server maintains a `dashboard_config_patch.yml` file
@@ -221,6 +223,12 @@ should therefore include only flags meant for **`start-mcp-server`** (not a seco
 `start-mcp-server` token). Clients that fail on shell wrappers should set **`command`**
 to **`.venv/bin/hotspottriage`** and put **`start-mcp-server`** first in **`args`**,
 merging the same system dirs into **`env.PATH`** if **`git`** is still missing.
+
+### 6.1.2 Cursor workspaces and git worktrees
+
+Editor MCP config (e.g. Cursor **`.cursor/mcp.json`**) is resolved relative to the **workspace root** the IDE opened. A **`git worktree`** adds a second checkout path on disk; launcher **`command`**, venv **`env.PATH`**, and **`--default-target`** must reference locations that exist from **that** workspace. Tool argument **`target`** names the **repository to analyze** (often the same path as the open project, not necessarily the HotspotTriage install).
+
+Git allows only **one** linked worktree to hold a given branch; `git checkout main` fails locally when **`main`** is already checked out in another worktree (`git worktree list`). That limitation affects local CLI/git workflows and some **`gh pr merge`** invocations that update **`main`** in the current directory; it does not change MCP semantics. Prefer merging on GitHub or using the worktree that already has the base branch checked out.
 
 ### 6.2 Tool → Pipeline Mapping
 
