@@ -123,25 +123,37 @@ def _placeholder_fragment() -> str:
     )
 
 
-def build_heatmap_fragment(results: list[dict[str, Any]]) -> str:
-    """Build a pre-rendered heatmap fragment for dashboard injection."""
-    if not isinstance(results, list):
-        raise ValueError("results must be a list of dict rows")
-    if not results:
-        return _placeholder_fragment()
+_VISIBLE_FILE_ROWS = 10
+_VISIBLE_CLASS_ROWS = 4
 
-    method_rows = [row for row in results if isinstance(row, dict) and "::" in str(row.get("path", ""))]
-    if not method_rows:
-        return _placeholder_fragment()
 
+def _rollup_ui_band(score: float) -> str:
+    """Severity label for rolled-up file/class rows (not the stored ``score_band``)."""
+    if score >= 0.8:
+        return "critical"
+    if score >= 0.6:
+        return "high"
+    return "normal"
+
+
+def _extract_method_rows(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in results
+        if isinstance(row, dict) and "::" in str(row.get("path", ""))
+    ]
+
+
+def _norm_keys_for_columns(method_rows: list[dict[str, Any]]) -> list[str]:
     present_norm_keys = {
-        key
-        for row in method_rows
-        for key in row.keys()
-        if key.startswith("norm_")
+        key for row in method_rows for key in row.keys() if key.startswith("norm_")
     }
-    norm_keys = [k for k in _SCORE_NORM_METRICS if k in present_norm_keys]
+    return [k for k in _SCORE_NORM_METRICS if k in present_norm_keys]
 
+
+def _group_rows_by_file_and_class(
+    method_rows: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
     grouped: dict[str, dict[str, Any]] = {}
     for row in method_rows:
         file_path, symbol = _split_path_symbol(str(row.get("path", "")))
@@ -160,47 +172,109 @@ def build_heatmap_fragment(results: list[dict[str, Any]]) -> str:
         file_entry["max_score"] = max(file_entry["max_score"], score)
         class_entry["max_score"] = max(class_entry["max_score"], score)
         class_entry["rows"].append(row)
+    return grouped
 
-    files_sorted = sorted(
-        grouped.items(),
-        key=lambda item: item[1]["max_score"],
-        reverse=True,
+
+def _max_norm_in_class(class_entry: dict[str, Any], norm_key: str) -> float:
+    return max(
+        (_to_float(r.get(norm_key, 0.0)) for r in class_entry["rows"]),
+        default=0.0,
     )
 
-    columns_html = "".join(
+
+def _file_aggregate_norms(
+    class_entries: list[tuple[str, dict[str, Any]]],
+    norm_keys: list[str],
+) -> dict[str, float]:
+    out = {key: 0.0 for key in norm_keys}
+    for key in norm_keys:
+        best = 0.0
+        for _, class_entry in class_entries:
+            best = max(best, _max_norm_in_class(class_entry, key))
+        out[key] = best
+    return out
+
+
+def _heatmap_columns_header(norm_keys: list[str]) -> str:
+    return "".join(
         f'<th data-sort-key="{escape(key)}">{escape(key)}</th>'
         for key in norm_keys
     )
 
-    tbody_rows: list[str] = []
-    visible_files = 10
-    row_idx = 0
 
+def _rollup_metric_cells(norm_keys: list[str], norms: dict[str, float]) -> str:
+    return "".join(_metric_cell(key, {}, norms[key]) for key in norm_keys)
+
+
+def _append_method_rows_for_class(
+    tbody_rows: list[str],
+    *,
+    class_entry: dict[str, Any],
+    class_expanded: bool,
+    class_id: str,
+    file_path: str,
+    class_name: str,
+    norm_keys: list[str],
+    row_idx: int,
+) -> int:
+    method_rows_sorted = sorted(
+        class_entry["rows"],
+        key=lambda row: _to_float(row.get("score", 0.0)),
+        reverse=True,
+    )
+    hidden = "" if class_expanded else "heatmap-hidden"
+    idx = row_idx
+    for method_row in method_rows_sorted:
+        _, symbol = _split_path_symbol(str(method_row.get("path", "")))
+        _, method_name = _split_class_method(symbol)
+        method_score = _to_float(method_row.get("score", 0.0))
+        method_band = str(method_row.get("score_band", ""))
+        method_metrics = _row_metrics(method_row, norm_keys)
+        metric_cells = "".join(
+            _metric_cell(key, method_row, method_metrics[key]) for key in norm_keys
+        )
+        score_cell = _score_cell(method_score, method_band)
+        detail = _detail_attr(method_row, file_path, class_name, symbol)
+        method_id = f"m-{idx}"
+        data_attrs = " ".join(
+            f'data-{k.replace("_", "-")}="{method_metrics[k]:.6f}"' for k in method_metrics
+        )
+        tbody_rows.append(
+            f'<tr class="heatmap-row method-row {hidden}" data-row-id="{method_id}" data-kind="method" '
+            f'data-parent="{class_id}" data-expanded="false" data-score="{method_score:.6f}" '
+            f'data-score-band="{escape(method_band)}" data-detail="{detail}" '
+            f"{data_attrs}>"
+            '<td class="heatmap-name heatmap-indent-2">'
+            '<span class="heatmap-toggle-placeholder"></span>'
+            f'<span class="heatmap-label">{escape(method_name)}</span>'
+            "</td>"
+            f"{metric_cells}{score_cell}</tr>"
+        )
+        idx += 1
+    return idx
+
+
+def _build_tbody_rows(
+    files_sorted: list[tuple[str, dict[str, Any]]],
+    norm_keys: list[str],
+) -> list[str]:
+    tbody_rows: list[str] = []
+    row_idx = 0
     for file_index, (file_path, file_entry) in enumerate(files_sorted):
         file_id = f"f-{file_index}"
-        file_expanded = file_index < visible_files
+        file_expanded = file_index < _VISIBLE_FILE_ROWS
         file_score = _to_float(file_entry["max_score"])
-        file_band = "critical" if file_score >= 0.8 else "high" if file_score >= 0.6 else "normal"
-        file_metrics = {"score": file_score}
-        file_metrics.update({key: 0.0 for key in norm_keys})
-
+        file_band = _rollup_ui_band(file_score)
         class_entries = sorted(
             file_entry["classes"].items(),
             key=lambda item: item[1]["max_score"],
             reverse=True,
         )
-
-        for key in norm_keys:
-            best_value = 0.0
-            for _, class_entry in class_entries:
-                class_best = max((_to_float(r.get(key, 0.0)) for r in class_entry["rows"]), default=0.0)
-                best_value = max(best_value, class_best)
-            file_metrics[key] = best_value
-
-        file_cells = "".join(_metric_cell(key, {}, file_metrics[key]) for key in norm_keys)
+        file_norms = _file_aggregate_norms(class_entries, norm_keys)
+        file_cells = _rollup_metric_cells(norm_keys, file_norms)
         file_score_cell = _score_cell(file_score, file_band)
         file_toggle = "v" if file_expanded else ">"
-        file_row = (
+        tbody_rows.append(
             f'<tr class="heatmap-row file-row" data-row-id="{file_id}" data-kind="file" '
             f'data-parent="" data-expanded="{str(file_expanded).lower()}" '
             f'data-score="{file_score:.6f}" data-score-band="{file_band}">'
@@ -210,23 +284,21 @@ def build_heatmap_fragment(results: list[dict[str, Any]]) -> str:
             "</td>"
             f"{file_cells}{file_score_cell}</tr>"
         )
-        tbody_rows.append(file_row)
         row_idx += 1
 
         for class_idx, (class_name, class_entry) in enumerate(class_entries):
             class_id = f"{file_id}-c-{class_idx}"
-            class_expanded = file_expanded and class_idx < 4
+            class_expanded = file_expanded and class_idx < _VISIBLE_CLASS_ROWS
             class_score = _to_float(class_entry["max_score"])
-            class_band = "critical" if class_score >= 0.8 else "high" if class_score >= 0.6 else "normal"
+            class_band = _rollup_ui_band(class_score)
             class_hidden = "" if file_expanded else "heatmap-hidden"
-            class_metrics = {"score": class_score}
-            class_metrics.update(
-                {key: max((_to_float(r.get(key, 0.0)) for r in class_entry["rows"]), default=0.0) for key in norm_keys}
-            )
-            class_cells = "".join(_metric_cell(key, {}, class_metrics[key]) for key in norm_keys)
+            class_norms = {
+                key: _max_norm_in_class(class_entry, key) for key in norm_keys
+            }
+            class_cells = _rollup_metric_cells(norm_keys, class_norms)
             class_score_cell = _score_cell(class_score, class_band)
             class_toggle = "v" if class_expanded else ">"
-            class_row = (
+            tbody_rows.append(
                 f'<tr class="heatmap-row class-row {class_hidden}" data-row-id="{class_id}" data-kind="class" '
                 f'data-parent="{file_id}" data-expanded="{str(class_expanded).lower()}" '
                 f'data-score="{class_score:.6f}" data-score-band="{class_band}">'
@@ -236,43 +308,23 @@ def build_heatmap_fragment(results: list[dict[str, Any]]) -> str:
                 "</td>"
                 f"{class_cells}{class_score_cell}</tr>"
             )
-            tbody_rows.append(class_row)
             row_idx += 1
-
-            method_rows_sorted = sorted(
-                class_entry["rows"],
-                key=lambda row: _to_float(row.get("score", 0.0)),
-                reverse=True,
+            row_idx = _append_method_rows_for_class(
+                tbody_rows,
+                class_entry=class_entry,
+                class_expanded=class_expanded,
+                class_id=class_id,
+                file_path=file_path,
+                class_name=class_name,
+                norm_keys=norm_keys,
+                row_idx=row_idx,
             )
-            for method_row in method_rows_sorted:
-                _, symbol = _split_path_symbol(str(method_row.get("path", "")))
-                _, method_name = _split_class_method(symbol)
-                method_score = _to_float(method_row.get("score", 0.0))
-                method_band = str(method_row.get("score_band", ""))
-                method_metrics = _row_metrics(method_row, norm_keys)
-                hidden = "" if class_expanded else "heatmap-hidden"
-                metric_cells = "".join(
-                    _metric_cell(key, method_row, method_metrics[key]) for key in norm_keys
-                )
-                score_cell = _score_cell(method_score, method_band)
-                detail = _detail_attr(method_row, file_path, class_name, symbol)
-                method_id = f"m-{row_idx}"
-                method_row_html = (
-                    f'<tr class="heatmap-row method-row {hidden}" data-row-id="{method_id}" data-kind="method" '
-                    f'data-parent="{class_id}" data-expanded="false" data-score="{method_score:.6f}" '
-                    f'data-score-band="{escape(method_band)}" data-detail="{detail}" '
-                    + " ".join(f'data-{k.replace("_", "-")}="{method_metrics[k]:.6f}"' for k in method_metrics)
-                    + ">"
-                    '<td class="heatmap-name heatmap-indent-2">'
-                    '<span class="heatmap-toggle-placeholder"></span>'
-                    f'<span class="heatmap-label">{escape(method_name)}</span>'
-                    "</td>"
-                    f"{metric_cells}{score_cell}</tr>"
-                )
-                tbody_rows.append(method_row_html)
-                row_idx += 1
+    return tbody_rows
 
-    table_html = (
+
+def _heatmap_table_html(norm_keys: list[str], tbody_rows: list[str]) -> str:
+    columns_html = _heatmap_columns_header(norm_keys)
+    return (
         '<div class="heatmap" data-default-sort="score">'
         '<div class="heatmap-toolbar">'
         '<button class="heatmap-filter is-active" type="button" data-filter="all">All</button>'
@@ -288,5 +340,26 @@ def build_heatmap_fragment(results: list[dict[str, Any]]) -> str:
         "</aside>"
         "</div>"
     )
-    return table_html
+
+
+def build_heatmap_fragment(results: list[dict[str, Any]]) -> str:
+    """Build a pre-rendered heatmap fragment for dashboard injection."""
+    if not isinstance(results, list):
+        raise ValueError("results must be a list of dict rows")
+    if not results:
+        return _placeholder_fragment()
+
+    method_rows = _extract_method_rows(results)
+    if not method_rows:
+        return _placeholder_fragment()
+
+    norm_keys = _norm_keys_for_columns(method_rows)
+    grouped = _group_rows_by_file_and_class(method_rows)
+    files_sorted = sorted(
+        grouped.items(),
+        key=lambda item: item[1]["max_score"],
+        reverse=True,
+    )
+    tbody_rows = _build_tbody_rows(files_sorted, norm_keys)
+    return _heatmap_table_html(norm_keys, tbody_rows)
 
