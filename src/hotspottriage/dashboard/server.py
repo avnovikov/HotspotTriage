@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Callable
 
 import uvicorn
 import yaml
@@ -54,6 +54,33 @@ _DISTRIBUTION_METRICS: frozenset[str] = frozenset(
 
 # Upper cap for ``/api/stats/heatmap`` limit (query param).
 _HEATMAP_MAX_LIMIT = 500
+
+_DEFAULT_SCORE_METRICS = "churn_per_sloc,cyclomatic"
+
+
+def _merge_config_overlay(
+    base_doc: dict[str, Any],
+    patch_doc: dict[str, Any],
+    key: str,
+) -> dict[str, Any]:
+    """Deep-merge ``patch_doc[key]`` into the corresponding section of ``base_doc``."""
+    patch_chunk = patch_doc.get(key)
+    if not isinstance(patch_chunk, dict):
+        return deepcopy(base_doc.get(key) or {})
+    base_chunk = base_doc.get(key)
+    if isinstance(base_chunk, dict):
+        return _config._deep_merge(deepcopy(base_chunk), patch_chunk)
+    return deepcopy(patch_chunk)
+
+
+async def _sse_json_every(
+    interval_s: float,
+    build_payload: Callable[[], Any],
+) -> AsyncGenerator[str, None]:
+    """SSE stream: emit JSON snapshots on a fixed interval."""
+    while True:
+        yield "data: " + json.dumps(build_payload()) + "\n\n"
+        await asyncio.sleep(interval_s)
 
 
 def _scores_doc_html() -> str:
@@ -314,7 +341,7 @@ class DashboardServer:
         return {
             "last_target": "",
             "last_filter": "",
-            "last_score_metrics": "churn_per_sloc,cyclomatic",
+            "last_score_metrics": _DEFAULT_SCORE_METRICS,
             "recent_targets": [],
         }
 
@@ -411,27 +438,14 @@ class DashboardServer:
         """Base dashboard snapshot merged with persisted YAML overlay."""
         out = deepcopy(self._base_snapshot)
         patch = self._load_patch_unlocked()
-        mn_patch = patch.get("metric_normalization")
-        if isinstance(mn_patch, dict):
-            mn_base = out.get("metric_normalization")
-            if isinstance(mn_base, dict):
-                out["metric_normalization"] = _config._deep_merge(mn_base, mn_patch)
-            else:
-                out["metric_normalization"] = deepcopy(mn_patch)
-        sa_patch = patch.get("score_aggregation")
-        if isinstance(sa_patch, dict):
-            sa_base = out.get("score_aggregation")
-            if isinstance(sa_base, dict):
-                out["score_aggregation"] = _config._deep_merge(sa_base, sa_patch)
-            else:
-                out["score_aggregation"] = deepcopy(sa_patch)
-        pm_patch = patch.get("proposed_models")
-        if isinstance(pm_patch, dict):
-            pm_base = out.get("proposed_models")
-            if isinstance(pm_base, dict):
-                out["proposed_models"] = _config._deep_merge(pm_base, pm_patch)
-            else:
-                out["proposed_models"] = deepcopy(pm_patch)
+        for key in ("metric_normalization", "score_aggregation", "proposed_models"):
+            sub = patch.get(key)
+            if isinstance(sub, dict):
+                base_chunk = out.get(key)
+                if isinstance(base_chunk, dict):
+                    out[key] = _config._deep_merge(base_chunk, sub)
+                else:
+                    out[key] = deepcopy(sub)
         return out
 
     def _analysis_config_overrides(self) -> dict[str, Any]:
@@ -447,30 +461,8 @@ class DashboardServer:
     def _validate_merged_patch(self, merged_patch: dict[str, Any]) -> None:
         """Raise ``ValueError`` if overlay produces invalid normalization/score config."""
         probe = deepcopy(_config.DEFAULTS)
-        mn_base = deepcopy(self._base_snapshot.get("metric_normalization") or {})
-        mn_patch = merged_patch.get("metric_normalization")
-        if isinstance(mn_patch, dict):
-            mn_full = _config._deep_merge(mn_base, mn_patch)
-        else:
-            mn_full = mn_base
-        probe["metric_normalization"] = mn_full
-
-        sa_base = deepcopy(self._base_snapshot.get("score_aggregation") or {})
-        sa_patch = merged_patch.get("score_aggregation")
-        if isinstance(sa_patch, dict):
-            sa_full = _config._deep_merge(sa_base, sa_patch)
-        else:
-            sa_full = sa_base
-        probe["score_aggregation"] = sa_full
-
-        pm_base = deepcopy(self._base_snapshot.get("proposed_models") or {})
-        pm_patch = merged_patch.get("proposed_models")
-        if isinstance(pm_patch, dict):
-            pm_full = _config._deep_merge(pm_base, pm_patch)
-        else:
-            pm_full = pm_base
-        probe["proposed_models"] = pm_full
-
+        for key in ("metric_normalization", "score_aggregation", "proposed_models"):
+            probe[key] = _merge_config_overlay(self._base_snapshot, merged_patch, key)
         _normalize.validate_metric_normalization(probe)
         _score_mod.validate_score_aggregation(probe)
         _config._validate_proposed_models(probe)
@@ -489,6 +481,167 @@ class DashboardServer:
             self._state_file.parent.mkdir(parents=True, exist_ok=True)
             self._state_file.write_text(json.dumps(merged, indent=2), encoding="utf-8")
             return merged
+
+    def _persist_last_analysis_inputs(
+        self,
+        *,
+        target: str,
+        filt: str | None,
+        score_metrics: str,
+    ) -> None:
+        score = str(score_metrics).strip() or _DEFAULT_SCORE_METRICS
+        self._save_local_state(
+            {
+                "last_target": target,
+                "last_filter": "" if filt is None else str(filt),
+                "last_score_metrics": score,
+            }
+        )
+
+    def _hydrate_block_metrics_when_missing(
+        self, repo: Path, *, cache_file_exists: bool
+    ) -> bool:
+        """Populate live heatmap rows from MCP manager or disk when memory is empty."""
+        with self._block_metrics_lock:
+            has_rows = bool(self._block_metrics_rows)
+        if not has_rows:
+            try:
+                from hotspottriage.mcp_server import _get_cache_manager
+
+                mgr = _get_cache_manager(repo)
+                live_rows = mgr.get_all_rows()
+                if live_rows:
+                    self.publish_latest_block_metrics(live_rows)
+                    has_rows = True
+            except Exception:
+                pass
+        if cache_file_exists and not has_rows:
+            loaded_rows = _cache.load_block_results(repo)
+            if loaded_rows:
+                self.publish_latest_block_metrics(loaded_rows)
+                has_rows = True
+        return has_rows
+
+    def _make_cache_job_progress_callback(self, job_id: str):
+        def _cache_progress(label: str, done: int, total: int) -> None:
+            t = max(int(total), 1)
+            d = min(max(int(done), 0), t)
+            if label.startswith("Scanning "):
+                msg = label
+                pct = 26 + int(24 * d / t)
+            elif label.startswith("Block churn"):
+                msg = f"Block churn (git log -L) {d}/{t}"
+                pct = 50 + int(18 * d / t)
+            elif label.startswith("Building block rows"):
+                msg = "Assembling block rows…" if d == 0 else label
+                pct = 70 + int(12 * d / t)
+            elif "::" in label:
+                msg = label
+                pct = 72 + int(14 * d / t)
+            elif label.startswith("Indexing "):
+                msg = label
+                pct = 86 + int(9 * d / t)
+            else:
+                msg = label
+                pct = 40
+            with self._cache_jobs_lock:
+                job = self._cache_jobs.get(job_id)
+                if job is None:
+                    return
+                job.message = msg
+                job.progress = min(96, max(job.progress, pct))
+
+        return _cache_progress
+
+    def _run_cache_generation_job(
+        self,
+        job_id: str,
+        *,
+        target: str,
+        filt: str | None,
+        score_metrics: str,
+        cache_generator_mod: Any,
+    ) -> None:
+        progress_cb = self._make_cache_job_progress_callback(job_id)
+        try:
+            with self._cache_jobs_lock:
+                job = self._cache_jobs.get(job_id)
+                if job is not None:
+                    job.progress = 8
+                    job.message = "Starting…"
+            result = cache_generator_mod.generate_full_cache(
+                target=target,
+                filter=filt,
+                score_metrics=score_metrics,
+                verbose=False,
+                progress_callback=progress_cb,
+                config_overrides=self._analysis_config_overrides(),
+            )
+            with self._cache_jobs_lock:
+                job = self._cache_jobs.get(job_id)
+                if job is None:
+                    return
+                job.status = "done"
+                job.progress = 100
+                job.message = "Cache generation complete"
+                job.result = _slim_cache_job_result(
+                    result if isinstance(result, dict) else {}
+                )
+            block_results = (
+                result.get("blocks", {}).get("results", [])
+                if isinstance(result, dict)
+                else []
+            )
+            if isinstance(block_results, list) and block_results:
+                self.publish_latest_block_metrics(
+                    [r for r in block_results if isinstance(r, dict)]
+                )
+        except Exception as e:
+            with self._cache_jobs_lock:
+                job = self._cache_jobs.get(job_id)
+                if job is None:
+                    return
+                job.status = "error"
+                job.progress = 100
+                job.message = "Cache generation failed"
+                job.error = str(e)
+
+    def _enqueue_cache_generation_job(
+        self,
+        *,
+        target: str,
+        filt: str | None,
+        score_metrics: str,
+    ) -> str:
+        # Local import avoids circular dependency with mcp_server consumers.
+        from hotspottriage import cache_generator as _cache_generator
+
+        job_id = str(uuid.uuid4())
+        job = CacheJob(
+            job_id=job_id,
+            status="running",
+            progress=5,
+            message=f"Starting cache generation for {target}",
+            started_at_monotonic=time.monotonic(),
+        )
+        with self._cache_jobs_lock:
+            self._cache_jobs[job_id] = job
+
+        def _thread_main() -> None:
+            self._run_cache_generation_job(
+                job_id,
+                target=target,
+                filt=filt,
+                score_metrics=score_metrics,
+                cache_generator_mod=_cache_generator,
+            )
+
+        threading.Thread(
+            target=_thread_main,
+            daemon=True,
+            name=f"cache-job-{job_id[:8]}",
+        ).start()
+        return job_id
 
     @property
     def app(self) -> FastAPI:
@@ -623,9 +776,9 @@ class DashboardServer:
                 "last_target": _normalize_cache_target(body.get("target", "")),
                 "last_filter": str(body.get("filter", "")).strip(),
                 "last_score_metrics": str(
-                    body.get("score_metrics", "churn_per_sloc,cyclomatic")
+                    body.get("score_metrics", _DEFAULT_SCORE_METRICS)
                 ).strip()
-                or "churn_per_sloc,cyclomatic",
+                or _DEFAULT_SCORE_METRICS,
             }
             return self._save_local_state(updates)
 
@@ -636,13 +789,12 @@ class DashboardServer:
             if not target:
                 raise HTTPException(status_code=400, detail="target is required")
             filt = str(body.get("filter", "")).strip()
-            score = str(body.get("score_metrics", "churn_per_sloc,cyclomatic")).strip()
-            self._save_local_state(
-                {
-                    "last_target": target,
-                    "last_filter": filt,
-                    "last_score_metrics": score or "churn_per_sloc,cyclomatic",
-                }
+            score = (
+                str(body.get("score_metrics", _DEFAULT_SCORE_METRICS)).strip()
+                or _DEFAULT_SCORE_METRICS
+            )
+            dash_self._persist_last_analysis_inputs(
+                target=target, filt=filt, score_metrics=score
             )
             repo = Path(target).resolve()
             cache_dir = _cache.cache_path_for(repo)
@@ -651,26 +803,9 @@ class DashboardServer:
             exists = cache_file.exists()
             size = cache_file.stat().st_size if exists else 0
             entries = metadata.get("entry_count", 0) if isinstance(metadata, dict) else 0
-            loaded_rows: list[dict[str, Any]] | None = None
-            with self._block_metrics_lock:
-                has_rows = bool(self._block_metrics_rows)
-            if not has_rows:
-                # Try live manager rows first, then fall back to disk.
-                try:
-                    from hotspottriage.mcp_server import _get_cache_manager
-                    mgr = _get_cache_manager(repo)
-                    live_rows = mgr.get_all_rows()
-                    if live_rows:
-                        self.publish_latest_block_metrics(live_rows)
-                        has_rows = True
-                except Exception:
-                    pass
-            if exists and not has_rows:
-                loaded_rows = _cache.load_block_results(repo)
-                if loaded_rows:
-                    self.publish_latest_block_metrics(loaded_rows)
-                    has_rows = True
-            usable = has_rows or bool(loaded_rows)
+            usable = dash_self._hydrate_block_metrics_when_missing(
+                repo, cache_file_exists=exists
+            )
             stale = exists and not usable
             return {
                 "target": str(repo),
@@ -690,100 +825,18 @@ class DashboardServer:
 
         @app.post("/api/cache/generate")
         def generate_cache(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-            # Local import avoids circular dependency with mcp_server.
-            from hotspottriage import cache_generator as _cache_generator
-
             body = payload or {}
             target = _normalize_cache_target(body.get("target", ""))
             if not target:
                 raise HTTPException(status_code=400, detail="target is required")
             filt = None if body.get("filter") in (None, "") else str(body.get("filter"))
-            score = str(body.get("score_metrics", "churn_per_sloc,cyclomatic"))
-            self._save_local_state(
-                {
-                    "last_target": target,
-                    "last_filter": "" if filt is None else filt,
-                    "last_score_metrics": score,
-                }
+            score = str(body.get("score_metrics", _DEFAULT_SCORE_METRICS))
+            dash_self._persist_last_analysis_inputs(
+                target=target, filt=filt, score_metrics=score
             )
-            job_id = str(uuid.uuid4())
-            job = CacheJob(
-                job_id=job_id,
-                status="running",
-                progress=5,
-                message=f"Starting cache generation for {target}",
-                started_at_monotonic=time.monotonic(),
+            job_id = dash_self._enqueue_cache_generation_job(
+                target=target, filt=filt, score_metrics=score
             )
-            with self._cache_jobs_lock:
-                self._cache_jobs[job_id] = job
-
-            dash_self = self
-
-            def _cache_progress(label: str, done: int, total: int) -> None:
-                t = max(int(total), 1)
-                d = min(max(int(done), 0), t)
-                if label.startswith("Scanning "):
-                    msg = label
-                    pct = 26 + int(24 * d / t)
-                elif label.startswith("Block churn"):
-                    msg = f"Block churn (git log -L) {d}/{t}"
-                    pct = 50 + int(18 * d / t)
-                elif label.startswith("Building block rows"):
-                    msg = "Assembling block rows…" if d == 0 else label
-                    pct = 70 + int(12 * d / t)
-                elif "::" in label:
-                    msg = label
-                    pct = 72 + int(14 * d / t)
-                elif label.startswith("Indexing "):
-                    msg = label
-                    pct = 86 + int(9 * d / t)
-                else:
-                    msg = label
-                    pct = 40
-                with dash_self._cache_jobs_lock:
-                    job = dash_self._cache_jobs.get(job_id)
-                    if job is None:
-                        return
-                    job.message = msg
-                    job.progress = min(96, max(job.progress, pct))
-
-            def _run() -> None:
-                try:
-                    with self._cache_jobs_lock:
-                        self._cache_jobs[job_id].progress = 8
-                        self._cache_jobs[job_id].message = "Starting…"
-                    result = _cache_generator.generate_full_cache(
-                        target=target,
-                        filter=filt,
-                        score_metrics=score,
-                        verbose=False,
-                        progress_callback=_cache_progress,
-                        config_overrides=dash_self._analysis_config_overrides(),
-                    )
-                    with self._cache_jobs_lock:
-                        self._cache_jobs[job_id].status = "done"
-                        self._cache_jobs[job_id].progress = 100
-                        self._cache_jobs[job_id].message = "Cache generation complete"
-                        self._cache_jobs[job_id].result = _slim_cache_job_result(
-                            result if isinstance(result, dict) else {}
-                        )
-                    block_results = (
-                        result.get("blocks", {}).get("results", [])
-                        if isinstance(result, dict)
-                        else []
-                    )
-                    if isinstance(block_results, list) and block_results:
-                        self.publish_latest_block_metrics(
-                            [r for r in block_results if isinstance(r, dict)]
-                        )
-                except Exception as e:
-                    with self._cache_jobs_lock:
-                        self._cache_jobs[job_id].status = "error"
-                        self._cache_jobs[job_id].progress = 100
-                        self._cache_jobs[job_id].message = "Cache generation failed"
-                        self._cache_jobs[job_id].error = str(e)
-
-            threading.Thread(target=_run, daemon=True, name=f"cache-job-{job_id[:8]}").start()
             return {"job_id": job_id, "status": "running"}
 
         @app.get("/api/cache/jobs/{job_id}")
@@ -830,15 +883,12 @@ class DashboardServer:
         def log_stream() -> StreamingResponse:
             return StreamingResponse(_log_sse(), media_type="text/event-stream")
 
-        async def _stats_sse() -> AsyncGenerator[str, None]:
-            while True:
-                snap = stats_ref.get_snapshot()
-                yield "data: " + json.dumps(snap) + "\n\n"
-                await asyncio.sleep(5.0)
-
         @app.get("/api/stats/stream")
         def stats_stream() -> StreamingResponse:
-            return StreamingResponse(_stats_sse(), media_type="text/event-stream")
+            return StreamingResponse(
+                _sse_json_every(5.0, stats_ref.get_snapshot),
+                media_type="text/event-stream",
+            )
 
         @app.get("/dashboard/")
         def dashboard() -> HTMLResponse:
