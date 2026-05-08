@@ -1,22 +1,38 @@
 # HotspotTriage
 
-Rank Python hotspots where complexity meets churn—then wire that signal into your agent through MCP.
+Find where Python code gets messy and constantly changing — then stream that signal to supercharge your coding agent.
 
-HotspotTriage analyzes tracked `.py` files in a Git repo, blends AST metrics (Radon) with history (`git log`), and per-function churn (in block mode), smells (Pylint heuristics), and block similarity (DeepCSIM). Built for engineers and coding agents who want numbers, not guesswork. Open source (MIT). Python 3.11+.
+HotspotTriage analyzes tracked `.py` files in a Git repo, blends AST metrics (Radon) with history (`git log`), per-function churn (in block mode), smells (Pylint heuristics), and block similarity (DeepCSIM) — all wired through MCP for integration with agents.
+
+Designed for engineers and coding agents who want precise, actionable metrics to improve coding style, accelerate refactoring, and boost code quality.
+
+Open source (MIT). Python 3.11+.
 
 ## The Problem
 
-Coding agents are not yet there—they churn out **duplicated, smelly, bad code**. You can run always-expensive models everywhere, but that's just **tokens burning**. Humans can't be fast enough for code review, and bad code slips into the repo. Even the best models can't do a good code review for various reasons.
+Even with real breakthroughs like Claude Opus 4.5 and GPT‑5.3‑Codex — frontier models that pushed agentic coding, planning, and code quality forward in late 2025 and early 2026 — the core problems remain:
 
-We need a mechanism to **automatically understand the problems with the code** and **route refactoring + the most expensive models to the particular areas, not everywhere**.
+Coding agents fall short: they regularly introduce duplicated, hard-to-maintain, and smell-prone code into real codebases, even when it passes basic tests.
+
+Running only the most expensive models on every change wastes tokens and slows teams down, without guaranteeing better engineering outcomes.
+
+Human reviewers cannot keep up with every diff in fast-moving repositories, so quality issues still slip through. And even top-tier models are not yet reliable, end‑to‑end code reviewers: they lack full architectural context, can misinterpret nuanced requirements, and often miss performance, maintainability, and security concerns that still require static analysis and focused human review.
+
+We need a mechanism to automatically identify code problems and route refactoring and expensive models to relevant areas, not everywhere.
 
 ## 💡 The Solution
 
-HotspotTriage makes the overlap visible **per file or per function**—so you can prioritize reviews, safer edits, and stronger models **where risk is highest**. Coding agents can automatically understand which model to use, if the code should be refactored before the start of the change, if the changes improved the code or make it worth. After a few iterations your coding agents will start to pay attention to the numbers and after some time general code quality will be improved automagically.
+HotspotTriage makes the overlap visible per file or function, so you can prioritize reviews, make safer edits, and use stronger models where risk is highest. Coding agents can automatically determine which model to use, whether code should be refactored before changes, whether changes improved the code, and whether they were worth it. After a few iterations, your coding agents will start paying attention to the numbers, and over time, general code quality will improve automagically.
+
+HotspotTriage's composite score isn't fixed — it's fully customizable through normalization coefficients that let you dial in what matters most right now. Want to prioritize code smells over raw complexity? Crank up the Pylint heuristics weight. Obsessed with duplication? Boost DeepCSIM's block similarity factor. As your team's priorities shift — maybe code smells during cleanup season, or churn during a big refactor — you simply adjust the sliders in the config, and your agents adapt instantly.
+
+This puts engineers in control: the metric evolves alongside your codebase's real pain points, ensuring agents focus on where humans see the biggest risks — whether that's eliminating duplication patterns, taming cyclomatic complexity spikes, or catching maintainability red flags before they spread.
+
+---
 
 ![Web dashboard overview](docs/screenshots/dashboard-overview.png)
 
-*The FastAPI UI (starts with `hotspottriage start-mcp-server --open-browser`): tool activity, logs, cache controls, and project context. This is a real screenshot of the running dashboard (not a mock). Replace `docs/screenshots/dashboard-overview.png` only when you intentionally refresh repo imagery (see `docs/screenshots/README.md`).*
+*The FastAPI UI (starts with `hotspottriage start-mcp-server --open-browser`): tool activity, logs, cache controls, and project context. This is a real screenshot of the running dashboard (not a mock). *
 
 ## Key Benefits
 
@@ -25,11 +41,6 @@ HotspotTriage makes the overlap visible **per file or per function**—so you ca
 - **Block mode**: function/method rows with cached churn (`git log -L`), optional similarity, and interpretable risk bands for agent routing.
 - **Layered YAML config**: global, project, and local overrides (Serena-inspired layering); `hotspottriage init` scaffolds templates.
 
-## Who It's For
-
-- Agent workflows: quantify risk before edits; route expensive reasoning to the worst hotspots.
-- Teams shipping Python: repeatable hotspot lists from CI or local runs.
-- Maintainers: one tool for complexity, churn, smells, and (in block mode) similarity pressure.
 ## Quick Start
 
 **Python version:** HotspotTriage requires **Python 3.11, 3.12, or 3.13** (`requires-python` matches **deepcsim** on PyPI). On **3.14+**, pip reports `No matching distribution found for deepcsim` — use a supported interpreter (the install script checks this early).
@@ -66,20 +77,22 @@ After install, `hotspottriage`, `hotspottriage-mcp`, and `hotspottriage-cache` a
 
 **Run as an MCP Server**
 
-The `hotspottriage-mcp` entry point is an alias. While MCP talks over stdio, the process can also bring up a local web dashboard (FastAPI: logs, cache actions, and block metrics). Use `--open-browser` to open it when the server starts, `--no-dashboard` to disable it, or `--dashboard-port` / `--dashboard-host` to tune binding. **`--default-target PATH_OR_URL`** sets the repo used when MCP tools omit `target` (or pass an empty string): `analyze`, `generate_cache`, `cache_status`, `clear_cache`, and project-scoped `init_config`. See [ARCHITECTRE.md](ARCHITECTRE.md) for dashboard wiring.
+HotspotTriage exposes an MCP server over stdio. The `hotspottriage-mcp` command is just an alias for starting that server. The same process can also launch the local FastAPI dashboard for logs, cache actions, and block metrics.
+
+Use `--open-browser` to open the dashboard when the server starts, `--no-dashboard` to disable it, and `--dashboard-port` / `--dashboard-host` to control where it binds. Use **`--default-target PATH_OR_URL`** to set the repo HotspotTriage should analyze when MCP tools omit `target` or pass an empty string. That default applies to `analyze`, `generate_cache`, `cache_status`, `clear_cache`, and project-scoped `init_config`. See [ARCHITECTRE.md](ARCHITECTRE.md) for dashboard internals.
 ```bash
 uv run hotspottriage start-mcp-server --help
 ```
-Ephemeral run from Git (can resync on upstream churn):
+One-off run from Git (useful when you do not want a local editable install):
 ```bash
 uvx -p 3.13 --from git+https://github.com/avnovikov/HotspotTriage hotspottriage start-mcp-server --open-browser --default-target /absolute/path/to/your/git/repo
 ```
 
-Arguments after `start-mcp-server` are parsed by HotspotTriage (dashboard flags and `--default-target`), then the MCP runtime receives the rest.
+Arguments after `start-mcp-server` are handled by HotspotTriage first (`--open-browser`, `--default-target`, dashboard flags), then any remaining arguments are passed through to the MCP runtime.
 
-Example MCP client config for **Cursor** (save as `.cursor/mcp.json` in your project, or merge into your editor’s MCP settings—the paths below are placeholders). When using **`scripts/run_hotspottriage_mcp.sh`**, put only dashboard / default-repo flags in **`args`**—the script already runs `hotspottriage start-mcp-server` for you.
+Example **Cursor** config (save as `.cursor/mcp.json` in the workspace you opened, or merge it into your editor's MCP settings). The paths below are placeholders. When you use **`scripts/run_hotspottriage_mcp.sh`**, put only dashboard and default-target flags in **`args`** because the script already launches `hotspottriage start-mcp-server`.
 
-**PATH / `git`:** Cursor often starts MCP with a minimal `PATH`, which triggers `[Errno 2] No such file or directory: 'git'`. The launcher prepends `.venv/bin` plus usual system dirs (`/usr/bin`, `/bin`, `/usr/local/bin`, `/opt/homebrew/bin`). Prefer **omitting** the `env` block below so that wiring applies; if you set `PATH` yourself, Cursor may **not** expand `$PATH`—use a full string (venv first, then those dirs, then any extra dirs where your tools live).
+**PATH / `git`:** Cursor often starts MCP with a minimal `PATH`, which can cause `[Errno 2] No such file or directory: 'git'`. The launcher script prepends `.venv/bin` and common system directories (`/usr/bin`, `/bin`, `/usr/local/bin`, `/opt/homebrew/bin`). Prefer **omitting** the `env` block unless you need it. If you do set `PATH` yourself, Cursor may **not** expand `$PATH`, so provide the full value explicitly with your venv first.
 
 ```json
 {
@@ -91,6 +104,8 @@ Example MCP client config for **Cursor** (save as `.cursor/mcp.json` in your pro
   }
 }
 ```
+
+In Cursor `mcp.json`, you can often use `${workspaceFolder}` instead of an absolute path.
 
 Optional explicit `PATH` (only if you need it; replace placeholders with absolute paths on your machine):
 
@@ -107,7 +122,7 @@ Optional explicit `PATH` (only if you need it; replace placeholders with absolut
   }
 }
 ```
-Direct **`hotspottriage` binary** (use `start-mcp-server` in **`args`**; preferred if shell wrappers fail on your host). Ensure **`git`** is on `PATH`—see **PATH / `git`** above; avoid relying on `$PATH` inside JSON unless your client expands it:
+Direct **`hotspottriage` binary** configuration (put `start-mcp-server` in **`args`**). This is the safest option if shell wrappers do not work correctly on your MCP host. Make sure **`git`** is on `PATH`; see **PATH / `git`** above, and do not rely on `$PATH` expansion inside JSON unless your client explicitly supports it.
 
 ```json
 {
@@ -122,9 +137,13 @@ Direct **`hotspottriage` binary** (use `start-mcp-server` in **`args`**; preferr
   }
 }
 ```
-For predictable tooling (e.g., pylint for smells), run from a dedicated venv and put that `bin` first on `PATH`. [`scripts/run_hotspottriage_mcp.sh`](scripts/run_hotspottriage_mcp.sh) uses **`#!/bin/sh`** (POSIX; no **bash** required). It discovers the HotspotTriage checkout from the script path, prepends `.venv/bin` and common system locations to `PATH`, and **`exec`s `hotspottriage start-mcp-server`**. If your MCP host cannot run shell scripts, set **`command`** to `.venv/bin/hotspottriage` and put **`start-mcp-server`** plus flags in **`args`** (see JSON above).
+For reliable tooling resolution, use a dedicated virtual environment and keep that `bin` directory first on `PATH`. [`scripts/run_hotspottriage_mcp.sh`](scripts/run_hotspottriage_mcp.sh) is POSIX `sh`, not `bash`. It resolves the HotspotTriage checkout from the script location, prepends `.venv/bin` and common system directories to `PATH`, and then **`exec`s `hotspottriage start-mcp-server`**. If your MCP host cannot run shell scripts, point **`command`** at `.venv/bin/hotspottriage` and move `start-mcp-server` plus the same flags into **`args`**.
 
-**Tools exposed over MCP**: `analyze`, `generate_cache`, `cache_status`, `clear_cache`, and `init_config`. Pass `compact=false` on `analyze` when you need full metric rows. With **`--default-target`** on the server, tools may omit **`target`** when it should always be that repo.
+**Cursor, workspaces, and git worktrees:** Cursor resolves MCP settings from **the folder you opened**. Each **`git worktree`** is a separate directory, so when you switch worktrees you should update **`.cursor/mcp.json`** so **`command`**, **`env.PATH`**, and **`--default-target`** all point at paths that exist in that checkout. In practice, that usually means the HotspotTriage launcher or venv in the current tree, plus the absolute path of the repo you want to analyze. Stale paths are a common cause of “wrong repo” results or missing **`git`** errors.
+
+Git also allows only **one** linked worktree to check out a branch at a time. If **`main`** is already checked out elsewhere, `git checkout main` in the current worktree will fail; `git worktree list` shows where each branch is bound. That does not affect MCP analysis as long as the tool **`target`** is correct, but it can affect local merge flows. In those cases, merge through GitHub or use the worktree that already has **`main`** checked out.
+
+**Tools exposed over MCP:** `analyze`, `generate_cache`, `cache_status`, `clear_cache`, and `init_config`. Pass `compact=false` to `analyze` when you want full metric rows. If the server was started with **`--default-target`**, tools can omit **`target`** when they should always operate on that repo.
 
 **Use with Claude Code**: discovers the server through its standard MCP config. From inside the cloned repo (so the launcher and venv resolve correctly):
 ```bash
