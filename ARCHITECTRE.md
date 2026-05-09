@@ -183,7 +183,7 @@ Protected by `_block_metrics_lock`.
 | Aspect   | Detail |
 |----------|--------|
 | **Path** | `<cwd>/.hotspottriage/dashboard_state.json` (relative to process CWD, not analyzed repo) |
-| **Content** | `last_target`, `last_filter`, `last_score_metrics`, `recent_targets` (up to 15) |
+| **Content** | `last_target`, `last_filter` (combined include/exclude patterns), `last_include`, `last_exclude`, `last_score_metrics` (comma-separated recipe derived from the merged dashboard config snapshot—**not** from the UI), `recent_targets` (up to 15) |
 | **Read/Write** | `GET/POST /api/cache/context`, `POST /api/cache/status`, `POST /api/cache/generate` |
 
 ### 5.5 Dashboard Config Patch — `dashboard_config_patch.yml`
@@ -432,10 +432,9 @@ Single-file HTML/CSS/JS served at `/dashboard/`. Three views via hash routing:
 
 | Route       | Content |
 |-------------|---------|
-| `#overview` | Project path, granularity, score metrics; cache actions (check/generate); log viewer |
-| `#heatmap`  | Target/filter/score inputs; Update Heatmap button; color-coded matrix table |
+| `#overview` | Project path, granularity; labeled cache fields (repository root, include/exclude patterns); **Save cache settings**; check/generate cache; log viewer |
+| `#heatmap`  | Read-only **repository root** (copied from Overview); limit control; **Update Heatmap**; color-coded matrix |
 | `#config`   | Normalization breakpoint editors; weight sliders; save/refresh config |
 
-Input fields across views are kept in sync via `mirrorCacheInputs`.
-Path resolution triggers immediately on `blur` and `Enter` keypress
-via `saveCacheContext` with `overwrite: true`.
+The Heatmap tab shows the same repo path as Overview via `syncHeatmapRepoDisplay()` (not editable there).
+Cache context is persisted when the user clicks **Save cache settings** or when **Check Cache** / **Generate Cache** runs (best-effort save before the action).
