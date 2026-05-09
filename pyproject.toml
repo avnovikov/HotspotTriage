@@ -30,6 +30,7 @@ hotspottriage-cache = "hotspottriage.cache_generator:main"
 
 [dependency-groups]
 dev = [
+    "cyclonedx-bom>=7.3.0",
     "pytest>=8.0",
 ]
 
