@@ -107,6 +107,14 @@ HotspotTriage enforces a **two-layer SSH signing policy** that establishes an un
 This provides cryptographic proof of authorship for every change and every release, satisfying NIST SSDF PS.3.1 (release integrity), ISO 27001:2022 A.8.32 (change management), and NIST SP 800-53 SA-12 (supply chain protection).
 
 > **SSH signing setup is documented in `CONTRIBUTING.md` §1.3.** All contributors and maintainers must complete that one-time workstation configuration before committing.
+**Required git configuration (one-time setup per workstation):**
+
+```bash
+git config --global gpg.format ssh
+git config --global user.signingKey ~/.ssh/id_ed25519.pub   # or your key path
+git config --global commit.gpgSign true    # auto-sign all commits
+git config --global tag.gpgSign true       # auto-sign all tags
+```
 
 **GitHub requirement:** The SSH key must be registered under **Settings → SSH and GPG keys** as a *Signing Key* (distinct from the authentication key entry). GitHub will then display the `Verified` badge on signed commits and tags, which serves as audit evidence.
 
@@ -236,4 +244,4 @@ Hotfix release SLAs are defined in `docs/SECURITY_REQUIREMENTS.md` §6.1:
 | Last reviewed | 2026-05-09 |
 | Next review | At next release milestone |
 | Approved by | @avnovikov |
-| Related documents | `SECURITY.md`, `CHANGELOG.md`, `docs/SECURITY_REQUIREMENTS.md`, `CONTRIBUTING.md`, SBOM workflow (issue #107) |
+| Related documents | `SECURITY.md`, `CHANGELOG.md`, `docs/SECURITY_REQUIREMENTS.md`, `CONTRIBUTING.md` (issue #108), SBOM workflow (issue #107) |
