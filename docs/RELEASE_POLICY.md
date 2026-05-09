@@ -106,6 +106,7 @@ HotspotTriage enforces a **two-layer SSH signing policy** that establishes an un
 
 This provides cryptographic proof of authorship for every change and every release, satisfying NIST SSDF PS.3.1 (release integrity), ISO 27001:2022 A.8.32 (change management), and NIST SP 800-53 SA-12 (supply chain protection).
 
+> **SSH signing setup is documented in `CONTRIBUTING.md` §1.3.** All contributors and maintainers must complete that one-time workstation configuration before committing.
 **Required git configuration (one-time setup per workstation):**
 
 ```bash
