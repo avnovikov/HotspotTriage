@@ -1,6 +1,6 @@
 # HotspotTriage
 
-[![SOC 2 Compliant](https://img.shields.io/badge/SOC2-Compliant-blue?style=flat&logo=github)](https://github.com/avnovikov/HotspotTriage/security) [![Security Scans](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml) [![Dependabot](https://img.shields.io/badge/Dependabot-enabled-brightgreen?style=flat&logo=dependabot)](https://github.com/avnovikov/HotspotTriage/security/dependabot) [![Tests](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml)
+[![SOC 2 Compliant](https://img.shields.io/badge/SOC2-Compliant-blue?style=flat&logo=github)](https://github.com/avnovikov/HotspotTriage/security) [![NIST SSDF](https://img.shields.io/badge/NIST%20SSDF-SP%20800--218-blue?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![ISO 27001](https://img.shields.io/badge/ISO%2027001-2022%20Aligned-blue?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![Security Scans](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml) [![Dependabot](https://img.shields.io/badge/Dependabot-enabled-brightgreen?style=flat&logo=dependabot)](https://github.com/avnovikov/HotspotTriage/security/dependabot) [![Tests](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml)
 
 > This codebase is built to support SOC 2 controls and is part of the audited system scope.
 
@@ -119,7 +119,7 @@ In Cursor `mcp.json`, you can often use `${workspaceFolder}` instead of an absol
 ```bash
 claude mcp add hotspottriage -- ./scripts/run_hotspottriage_mcp.sh --open-browser --default-target /absolute/path/to/your/git/repo
 ```
-Or register it manually by adding the same JSON as above to `~/.claude.json` under `mcpServers` (same shape as Cursor’s MCP config). Then in a Claude Code session:
+Or register it manually by adding the same JSON as above to `~/.claude.json` under `mcpServers` (same shape as Cursor's MCP config). Then in a Claude Code session:
 
 ```text
 /mcp                                    # confirm "hotspottriage" is connected
@@ -171,18 +171,18 @@ Tips:
 - Project-level `.hotspottriage/project.yml` is **not** read by the MCP server (only by the CLI). Pass overrides as tool arguments, or change them via the dashboard config view.
 - For your own projects, drop a `CLAUDE.md` at the repo root pointing at the modules you care about; Claude Code auto-loads it as system context.
 
-**Make it a standing rule for agents:** Add the workflow from [`docs/agent-hotspottriage-score-check.md`](docs/agent-hotspottriage-score-check.md) to your repo’s **`CLAUDE.md`**, Cursor **Rules**, Copilot instructions, or any agent playbook—so assistants **run MCP `analyze` on the target block before editing** and record score, band, and (when needed) subscores / proposed model.
+**Make it a standing rule for agents:** Add the workflow from [`docs/agent-hotspottriage-score-check.md`](docs/agent-hotspottriage-score-check.md) to your repo's **`CLAUDE.md`**, Cursor **Rules**, Copilot instructions, or any agent playbook—so assistants **run MCP `analyze` on the target block before editing** and record score, band, and (when needed) subscores / proposed model.
 
 ---
 
 ## Learn More
 
-| Doc | What’s inside |
+| Doc | What's inside |
 |-----|----------------|
 | [ARCHITECTRE.md](ARCHITECTRE.md) | Pipeline, caching, dashboard, MCP wiring, module map |
 | [SCORES.md](SCORES.md) | Metrics, normalization, composite score, risk bands |
 | [docs/block-cache-model.md](docs/block-cache-model.md) | Block cache format and semantics |
 | [docs/agent-hotspottriage-score-check.md](docs/agent-hotspottriage-score-check.md) | MCP score check before editing hotspots (agent workflow) |
-| [docs/git-ssh-signing.md](docs/git-ssh-signing.md) | Optional: SSH-signed commits with Git (verified on GitHub) |
+| [CONTRIBUTING.md](CONTRIBUTING.md#13-ssh-commit-and-tag-signing-required) | SSH-signed commits and tags setup (one-time workstation config) |
 
 Developing this repo: **`./scripts/install_hotspottriage.sh --venv`** (or **`uv sync`**); run **`uv lock`** after dependency changes in `pyproject.toml`. Run **`pytest`** (or `uv run pytest`) before merging; architecture notes live in [ARCHITECTRE.md](ARCHITECTRE.md) above.

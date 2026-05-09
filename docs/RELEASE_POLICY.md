@@ -16,6 +16,7 @@ It satisfies the following NIST Secure Software Development Framework (SSDF) SP 
 
 | Practice | Description |
 |----------|-------------|
+| **PS.2.1** | Document the provenance of all third-party components included in each release |
 | **PS.3.1** | Archive each release and protect it from tampering |
 | **PW.8.2** | Ensure that all security findings are addressed prior to public release |
 
@@ -81,7 +82,10 @@ All items in the following checklist must be satisfied before a release tag is c
 **Release Artefacts**
 - [ ] Version bumped in `pyproject.toml`
 - [ ] `CHANGELOG.md` updated: `[Unreleased]` section promoted to `[vX.Y.Z] — YYYY-MM-DD`
-- [ ] SBOM generated (see [Issue #107](https://github.com/avnovikov/HotspotTriage/issues/107)): `uv run cyclonedx-py environment --of JSON -o sbom.cdx.json`
+- [ ] SBOM generated in CycloneDX JSON format and verified clean (see §4.4):
+  ```bash
+  uv run cyclonedx-py environment --of JSON -o sbom.cdx.json
+  ```
 - [ ] Wheel and sdist built cleanly: `uv build` (produces `dist/hotspottriage-X.Y.Z-*.whl` and `dist/hotspottriage-X.Y.Z.tar.gz`)
 
 **Governance**
@@ -107,14 +111,6 @@ HotspotTriage enforces a **two-layer SSH signing policy** that establishes an un
 This provides cryptographic proof of authorship for every change and every release, satisfying NIST SSDF PS.3.1 (release integrity), ISO 27001:2022 A.8.32 (change management), and NIST SP 800-53 SA-12 (supply chain protection).
 
 > **SSH signing setup is documented in `CONTRIBUTING.md` §1.3.** All contributors and maintainers must complete that one-time workstation configuration before committing.
-**Required git configuration (one-time setup per workstation):**
-
-```bash
-git config --global gpg.format ssh
-git config --global user.signingKey ~/.ssh/id_ed25519.pub   # or your key path
-git config --global commit.gpgSign true    # auto-sign all commits
-git config --global tag.gpgSign true       # auto-sign all tags
-```
 
 **GitHub requirement:** The SSH key must be registered under **Settings → SSH and GPG keys** as a *Signing Key* (distinct from the authentication key entry). GitHub will then display the `Verified` badge on signed commits and tags, which serves as audit evidence.
 
@@ -141,7 +137,7 @@ git config --global tag.gpgSign true       # auto-sign all tags
    #           dist/hotspottriage-X.Y.Z.tar.gz
    ```
 
-6. **Generate SBOM** (ref [Issue #107](https://github.com/avnovikov/HotspotTriage/issues/107)):
+6. **Generate SBOM** (see §4.4):
    ```bash
    uv run cyclonedx-py environment --of JSON -o sbom.cdx.json
    ```
@@ -168,6 +164,41 @@ Release tags (`v*`) must be protected:
 - No force-push to release tags
 - No deletion of release tags
 - Enforced via GitHub repository **tag protection rules** (Settings → Rules → Tag protection)
+
+### 4.4 SBOM Generation Policy
+
+> *NIST SSDF PS.2.1 — document the provenance of all third-party components included in each software release*
+> *ISO 27001:2022 reference: A.5.19 (Information security in supplier relationships), A.5.20 (Addressing security within supplier agreements)*
+> *COBIT 2019 reference: APO10 (Vendor Management), BAI03 (Solution Identification and Build)*
+> *NIST SP 800-53 reference: SR-3 (Supply Chain Controls and Processes), SR-4 (Provenance)*
+
+A **Software Bill of Materials (SBOM)** in CycloneDX JSON format must be generated and published as part of every release. The SBOM documents the complete provenance of all runtime and development components included in the release, satisfying NIST SSDF PS.2.1 and supporting downstream supply chain transparency.
+
+#### Requirements
+
+- **Format:** CycloneDX JSON (`sbom.cdx.json`) — machine-readable, widely supported by enterprise security tooling
+- **Scope:** All components in the active Python environment at release time (runtime + dev dependencies)
+- **Timing:** Generated after `uv sync` and `uv build` complete, before the release tag is pushed
+- **Publication:** Attached to the GitHub Release entry alongside the wheel and sdist artefacts
+- **Tooling:** `cyclonedx-bom` via `cyclonedx-py` (see [Issue #107](https://github.com/avnovikov/HotspotTriage/issues/107) for CI automation)
+
+#### Generation command
+
+```bash
+# Install tool if not present
+uv tool install cyclonedx-bom
+
+# Generate SBOM from active environment
+uv run cyclonedx-py environment --of JSON -o sbom.cdx.json
+```
+
+#### Automation
+
+SBOM generation will be automated via a dedicated GitHub Actions workflow triggered on `v*` tags, as specified in [Issue #107](https://github.com/avnovikov/HotspotTriage/issues/107). Until that workflow is merged, SBOM generation is a **manual pre-release step** as listed in §3.1 and §4.2 step 6.
+
+#### Hotfix releases
+
+SBOM regeneration is a **deferred** item for hotfix releases (see §6.2) — it must be completed and attached to the GitHub Release within **24 hours post-release**.
 
 ---
 
@@ -223,7 +254,7 @@ The following is the mandatory subset of the full pre-release gate (Section 3.1)
 - [ ] Dependency vetting table in `docs/SECURITY_REQUIREMENTS.md` §5.2 updated if a dependency was changed
 - [ ] GitHub Security Advisory published
 - [ ] `pylint` full review (score ≥ 9.0 check) — *(deferred to next regular release if fix is surgical)*
-- [ ] SBOM regenerated and attached to GitHub Release
+- [ ] SBOM regenerated and attached to GitHub Release (see §4.4)
 
 ### 6.3 SLA Alignment
 
@@ -244,4 +275,4 @@ Hotfix release SLAs are defined in `docs/SECURITY_REQUIREMENTS.md` §6.1:
 | Last reviewed | 2026-05-09 |
 | Next review | At next release milestone |
 | Approved by | @avnovikov |
-| Related documents | `SECURITY.md`, `CHANGELOG.md`, `docs/SECURITY_REQUIREMENTS.md`, `CONTRIBUTING.md` (issue #108), SBOM workflow (issue #107) |
+| Related documents | `SECURITY.md`, `CHANGELOG.md`, `docs/SECURITY_REQUIREMENTS.md`, `CONTRIBUTING.md`, SBOM workflow ([Issue #107](https://github.com/avnovikov/HotspotTriage/issues/107)) |
