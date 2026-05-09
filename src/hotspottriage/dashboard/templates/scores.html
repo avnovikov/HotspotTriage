@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+    <div id="view-scores" class="view-section active" data-view="scores">
+      <section class="wide">
+        <h2>HotspotTriage Scores</h2>
+        <div class="muted" style="margin-bottom: 0.45rem;">Live view of <code>SCORES.md</code></div>
+        <iframe class="doc-frame" src="/dashboard/scores/raw" title="SCORES.md"></iframe>
+      </section>
+    </div>
+{% endblock %}

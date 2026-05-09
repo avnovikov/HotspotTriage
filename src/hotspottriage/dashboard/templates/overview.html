@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+    <div id="view-overview" class="view-section active" data-view="overview">
+      <div class="section-grid">
+        <section class="wide">
+          <h2>Summary</h2>
+          <div id="overviewSummaryPanel" class="stack muted" style="font-size:0.82rem;">Loading…</div>
+        </section>
+        <section class="wide">
+          <h2>Cache Actions</h2>
+          <div class="cache-form stack" style="margin-bottom: 0.5rem;">
+            <label class="field" for="cacheTargetInput">
+              <span class="field-label">Repository root</span>
+              <input id="cacheTargetInput" class="wide-input" type="text" placeholder="/absolute/path/to/repo or ../OtherProject" />
+            </label>
+            <label class="field" for="cacheIncludeInput">
+              <span class="field-label">Include pattern(s)</span>
+              <input id="cacheIncludeInput" class="wide-input" type="text" placeholder="**/*.py" />
+            </label>
+            <label class="field" for="cacheExcludeInput">
+              <span class="field-label">Exclude pattern(s)</span>
+              <input id="cacheExcludeInput" class="wide-input" type="text" placeholder="comma-separated globs (leading ! optional)" />
+            </label>
+            <p class="muted" style="font-size:0.72rem; margin:0.35rem 0 0;">Use gitignore syntax: comma-separated patterns, combined with AND; prefix with <code>!</code> to exclude. Leading <code>./</code> is stripped automatically.</p>
+          </div>
+          <div class="toolbar" style="flex-wrap: wrap;">
+            <button id="cacheSaveCtxBtn" type="button">Save cache settings</button>
+            <span id="cacheSaveCtxStatus" class="muted" style="font-size:0.78rem;"></span>
+            <button id="checkCacheBtn" type="button">Check Cache</button>
+            <button id="generateCacheBtn" type="button">Generate Cache</button>
+          </div>
+          <div id="cacheContextPanel" class="mono" style="margin-top: 0.45rem;">
+Path: n/a
+Cache Status: unknown
+Build Parameters: include=<default **/*.py>, exclude=<none>
+          </div>
+          <div id="cacheStatus" class="status-box muted">Idle</div>
+          <div class="progress-wrap"><div id="cacheProgress" class="progress-bar"></div></div>
+        </section>
+        <section class="wide">
+          <h2>Log Viewer</h2>
+          <div class="toolbar" style="margin-bottom: 0.5rem;">
+            <button id="clearLogsBtn" type="button">Clear Logs</button>
+            <button id="pauseLogsBtn" type="button">Pause Scroll: Off</button>
+            <span class="muted">Live via SSE</span>
+          </div>
+          <div id="logs"></div>
+        </section>
+      </div>
+    </div>
+{% endblock %}
+{% block scripts %}
+<script src="/dashboard/static/js/overview.js"></script>
+{% endblock %}

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from hotspottriage import timestamps
+from hotspottriage.path_utils import sanitize_log_value
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ def _write_versioned_pickle(path: Path, rows: list[dict]) -> None:
         try:
             os.unlink(tmp)
         except OSError:
+            # Best-effort cleanup of temp file after failed pickle write.
             pass
         raise
 
@@ -71,9 +73,15 @@ def _read_versioned_pickle(path: Path) -> list[dict] | None:
         obj = raw.get("obj")
         return obj if isinstance(obj, list) else None
     if isinstance(raw, list):
-        logger.info("Legacy unversioned cache at %s — starting fresh", path)
+        logger.info(
+            "Legacy unversioned cache at %s — starting fresh",
+            sanitize_log_value(str(path)),
+        )
         return None
-    logger.info("Cache version mismatch at %s — starting fresh", path)
+    logger.info(
+        "Cache version mismatch at %s — starting fresh",
+        sanitize_log_value(str(path)),
+    )
     return None
 
 
@@ -256,6 +264,7 @@ class BlockCacheManager:
             if cache_file.exists():
                 cache_file.unlink()
         except OSError:
+            # Ignore missing file or concurrent delete.
             pass
 
     def start_periodic_flush(self) -> None:

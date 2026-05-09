@@ -29,6 +29,7 @@ from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.server import DashboardServer
 from hotspottriage.dashboard.stats import StatsCollector
 from hotspottriage import discovery, filtering, output as _output, stats
+from hotspottriage.path_utils import resolve_local_repo_path
 
 logger = logging.getLogger(__name__)
 
@@ -110,17 +111,22 @@ def _resolve_mcp_target(target: str) -> str:
 
 
 def _effective_dashboard_config() -> dict[str, Any]:
-    cfg = dict(_config.DEFAULTS)
+    """Layered YAML (global + ``<cwd>/.hotspottriage/``) plus MCP CLI dashboard flags."""
+    cfg = _config.load_config(Path.cwd())
     cli = get_mcp_dashboard_cli_args()
-    if cli is None:
-        return cfg
-    cfg = _config.apply_mcp_dashboard_cli_overrides(
-        cfg,
-        no_dashboard=bool(cli.no_dashboard),
-        dashboard_port=cli.dashboard_port,
-        dashboard_host=cli.dashboard_host,
-        open_browser=bool(cli.open_browser),
-    )
+    if cli is not None:
+        cfg = _config.apply_mcp_dashboard_cli_overrides(
+            cfg,
+            no_dashboard=bool(cli.no_dashboard),
+            dashboard_port=cli.dashboard_port,
+            dashboard_host=cli.dashboard_host,
+            open_browser=bool(cli.open_browser),
+        )
+    dt = get_mcp_default_target()
+    if dt:
+        dash = dict(cfg.get("dashboard") or {})
+        dash["default_target"] = dt
+        cfg["dashboard"] = dash
     return cfg
 
 
@@ -133,7 +139,10 @@ async def _mcp_lifespan(_: Any):
     if bool(dash_cfg.get("enabled", True)):
         try:
             dashboard = DashboardServer(
-                config=_config.to_dashboard_snapshot(cfg),
+                config=_config.to_dashboard_snapshot(
+                    cfg,
+                    project_path=str(Path.cwd().resolve()),
+                ),
                 stats=_dashboard_stats,
                 log_handler=_dashboard_log_handler,
                 host=str(dash_cfg.get("host", "127.0.0.1")),
@@ -384,7 +393,13 @@ def cache_status(target: str = "") -> str:
         JSON with cache statistics (size, entries, age)
     """
     try:
-        repo_path = Path(_resolve_mcp_target(target))
+        raw = _resolve_mcp_target(target).strip()
+        if discovery.is_git_url(raw):
+            return json.dumps({
+                "status": "error",
+                "message": "cache_status requires a local repository path, not a remote URL",
+            })
+        repo_path = resolve_local_repo_path(raw)
         cache_dir = _cache.cache_path_for(repo_path)
 
         if not cache_dir.exists():
@@ -431,7 +446,13 @@ def clear_cache(target: str = "") -> str:
         Status message
     """
     try:
-        repo_path = Path(_resolve_mcp_target(target))
+        raw = _resolve_mcp_target(target).strip()
+        if discovery.is_git_url(raw):
+            return json.dumps({
+                "status": "error",
+                "message": "clear_cache requires a local repository path, not a remote URL",
+            })
+        repo_path = resolve_local_repo_path(raw)
         cache_dir = _cache.cache_path_for(repo_path)
 
         if not cache_dir.exists():
@@ -524,7 +545,7 @@ def init_config(target: str = "", is_global: bool = False) -> str:
             t = (target or "").strip()
             if not t:
                 t = (_mcp_default_target or ".").strip()
-            repo_path = Path(t).expanduser()
+            repo_path = resolve_local_repo_path(t)
             written = _config.init_config(scope="project", target=repo_path)
             # Project scope returns a single Path, convert to list
             files = [str(written)] if isinstance(written, Path) else [str(f) for f in written]
@@ -555,18 +576,19 @@ def _build_analyze_config(
 ) -> dict[str, Any]:
     """Build analysis config from MCP tool arguments."""
     cfg = deepcopy(_config.DEFAULTS)
-    local_target = Path(target).expanduser()
-    if local_target.is_dir():
-        cfg = _config.load_config(
-            local_target.resolve(),
-            use_global=False,
-            use_project=True,
-        )
-        dashboard_patch = local_target.resolve() / ".hotspottriage" / "dashboard_config_patch.yml"
-        if dashboard_patch.is_file():
-            patch_data = _config._read_yaml(dashboard_patch)
-            if patch_data:
-                cfg = _config._deep_merge(cfg, patch_data)
+    if not discovery.is_git_url(target):
+        local_target = Path(target).expanduser()
+        if local_target.is_dir():
+            cfg = _config.load_config(
+                local_target.resolve(),
+                use_global=False,
+                use_project=True,
+            )
+            dashboard_patch = local_target.resolve() / ".hotspottriage" / "dashboard_config_patch.yml"
+            if dashboard_patch.is_file():
+                patch_data = _config._read_yaml(dashboard_patch)
+                if patch_data:
+                    cfg = _config._deep_merge(cfg, patch_data)
 
     if filter:
         cfg["filter"] = [f.strip() for f in filter.split(",")]
@@ -784,7 +806,7 @@ def _publish_manager_rows_to_dashboard(
             if out:
                 dash.publish_latest_block_metrics(out)
     except Exception:
-        pass
+        logger.debug("Publishing block metrics to dashboard skipped", exc_info=True)
 
 
 def _analyze_repository(

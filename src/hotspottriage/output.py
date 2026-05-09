@@ -16,7 +16,7 @@ from typing import Any, Iterable
 from tabulate import tabulate
 
 from hotspottriage import normalize as _normalize
-from hotspottriage.stats import Statistic
+from hotspottriage.statistic_row import Statistic
 
 Format = str
 FORMATS: tuple[Format, ...] = ("table", "json", "csv")

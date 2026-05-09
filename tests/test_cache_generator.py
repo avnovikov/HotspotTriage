@@ -1,7 +1,6 @@
 """Tests for cache generator module."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -227,7 +226,7 @@ def test_print_cache_summary(test_repo, capsys):
 
 def test_generate_full_cache_verbose_output(test_repo, capsys):
     """Test verbose output during generation."""
-    result = generate_full_cache(str(test_repo), verbose=True)
+    generate_full_cache(str(test_repo), verbose=True)
 
     captured = capsys.readouterr()
     assert "Generating cache" in captured.out
