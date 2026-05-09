@@ -1,6 +1,6 @@
 # HotspotTriage
 
-[![SOC 2 Compliant](https://img.shields.io/badge/SOC2-Compliant-blue?style=flat&logo=github)](https://github.com/avnovikov/HotspotTriage/security) [![NIST SSDF](https://img.shields.io/badge/NIST%20SSDF-SP%20800--218-blue?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![ISO 27001](https://img.shields.io/badge/ISO%2027001-2022%20Aligned-blue?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![GDPR](https://img.shields.io/badge/GDPR-data%20minimisation-003399?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![Security Scans](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml) [![Dependabot](https://img.shields.io/badge/Dependabot-enabled-brightgreen?style=flat&logo=dependabot)](https://github.com/avnovikov/HotspotTriage/security/dependabot) [![Tests](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml)
+[![SOC 2 Compliant](https://img.shields.io/badge/SOC2-Compliant-blue?style=flat&logo=github)](https://github.com/avnovikov/HotspotTriage/security) [![NIST SSDF](https://img.shields.io/badge/NIST%20SSDF-SP%20800--218-blue?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![NIST SP 800-53](https://img.shields.io/badge/NIST%20SP%20800--53-Rev%205-blue?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![ISO 27001](https://img.shields.io/badge/ISO%2027001-2022%20Aligned-blue?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![COBIT 2019](https://img.shields.io/badge/COBIT-2019-blue?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![EU CRA](https://img.shields.io/badge/EU%20CRA-Art.%2013%20SBOM-003399?style=flat)](docs/RELEASE_POLICY.md) [![GDPR](https://img.shields.io/badge/GDPR-data%20minimisation-003399?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![OWASP](https://img.shields.io/badge/OWASP-Top%2010-orange?style=flat)](CONTRIBUTING.md) [![CycloneDX SBOM](https://img.shields.io/badge/SBOM-CycloneDX-brightgreen?style=flat)](https://github.com/avnovikov/HotspotTriage/releases) [![SemVer](https://img.shields.io/badge/SemVer-2.0.0-blue?style=flat)](https://semver.org) [![Security Scans](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml) [![Dependabot](https://img.shields.io/badge/Dependabot-enabled-brightgreen?style=flat&logo=dependabot)](https://github.com/avnovikov/HotspotTriage/security/dependabot) [![Tests](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat)](LICENSE) [![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-blue?style=flat&logo=python)](pyproject.toml) [![SSH Signed](https://img.shields.io/badge/Commits-SSH%20Signed-green?style=flat&logo=git)](CONTRIBUTING.md#13-ssh-commit-and-tag-signing-required)
 
 > This codebase is built to support SOC 2 controls and is part of the audited system scope.
 
@@ -11,6 +11,8 @@ HotspotTriage analyzes tracked `.py` files in a Git repo, blends AST metrics (Ra
 Designed for engineers and coding agents who want precise, actionable metrics to improve coding style, accelerate refactoring, and boost code quality.
 
 Open source (MIT). Python 3.11+.
+
+![Geiser Control Room](docs/screenshots/geiser_conrolroom.png)
 
 ## The Problem
 
@@ -160,7 +162,7 @@ Direct **`hotspottriage` binary** configuration (put `start-mcp-server` in **`ar
 ```
 For reliable tooling resolution, use a dedicated virtual environment and keep that `bin` directory first on `PATH`. [`scripts/run_hotspottriage_mcp.sh`](scripts/run_hotspottriage_mcp.sh) is POSIX `sh`, not `bash`. It resolves the HotspotTriage checkout from the script location, prepends `.venv/bin` and common system directories to `PATH`, and then **`exec`s `hotspottriage start-mcp-server`**. If your MCP host cannot run shell scripts, point **`command`** at `.venv/bin/hotspottriage` and move `start-mcp-server` plus the same flags into **`args`**.
 
-**Tools exposed over MCP:** `analyze`, `generate_cache`, `cache_status`, `clear_cache`, and `init_config`. Pass `compact=false` to `analyze` when you want full metric rows. If the server was started with **`--default-target`**, tools can omit **`target`** when they should always operate on that repo.
+**Tools exposed over MCP:** `analyze`, `generate_cache`, `cache_status`, `clear_cache`, and `init_config`. Default `analyze` rows are **compact** (`function`, `score`, `risk_band`, `proposed_model`, `score_driver`, and a short **`rationale`** string). Pass `compact=false` when you need full metrics, `score_explanation`, and multi-line `score_narrative`. If the server was started with **`--default-target`**, tools can omit **`target`** when they should always operate on that repo.
 
 
 

@@ -3,11 +3,21 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 
 import pytest
 
 import hotspottriage.mcp_server as mcp_server
 from hotspottriage import config as _config
+
+
+def test_build_analyze_config_local_matches_load_analyze_for_scoring(test_repo):
+    """MCP local analyze must use the same scoring layers as ``load_analyze_config_for_local_repo``."""
+    cfg = mcp_server._build_analyze_config(str(test_repo))
+    want = _config.load_analyze_config_for_local_repo(Path(test_repo))
+    assert cfg["metric_normalization"] == want["metric_normalization"]
+    assert cfg["score_aggregation"] == want["score_aggregation"]
+    assert cfg.get("proposed_models") == want.get("proposed_models")
 
 
 @pytest.fixture(autouse=True)
@@ -134,13 +144,39 @@ def test_analyze_basic(test_repo):
     assert "norm_similarity_score" in first
 
 
-def test_analyze_compact_includes_narrative_fields(test_repo):
+def test_analyze_compact_includes_rationale_fields(test_repo):
     result = mcp_server.analyze(str(test_repo), compact=True)
     data = json.loads(result)
     row = data["results"][0]
-    assert "score_narrative" in row
+    assert "rationale" in row
     assert "score_driver" in row
-    assert isinstance(row.get("score_explanation"), list)
+    assert isinstance(row.get("rationale"), str)
+    assert "Main driver:" in row["rationale"]
+
+
+def test_analyze_compact_rows_never_include_score_explanation_or_narrative(test_repo):
+    """Contract: triage (compact) rows stay small—no embedded explanation blobs."""
+    result = mcp_server.analyze(str(test_repo), compact=True)
+    data = json.loads(result)
+    for row in data["results"]:
+        assert "score_explanation" not in row
+        assert "score_narrative" not in row
+        assert "path" not in row
+
+
+def test_analyze_full_rows_score_explanation_items_never_contain_raw(test_repo):
+    """Contract: full-mode score_explanation must not expose legacy raw counters."""
+    result = mcp_server.analyze(str(test_repo), compact=False)
+    data = json.loads(result)
+    for row in data["results"]:
+        expl = row.get("score_explanation")
+        if not expl:
+            continue
+        if isinstance(expl, str):
+            expl = json.loads(expl)
+        for item in expl:
+            assert isinstance(item, dict)
+            assert "raw" not in item
 def test_analyze_with_limit(test_repo):
     """Test analyze with limit (non-aggregate rows only; limit excludes similarity summary)."""
     result = mcp_server.analyze(str(test_repo), limit=1, similarity=False)
@@ -340,16 +376,14 @@ def test_analyze_compact_default_returns_function_score_risk_band_and_model(monk
         "risk_band",
         "proposed_model",
         "score_driver",
-        "score_explanation",
-        "score_narrative",
+        "rationale",
     }
     assert isinstance(first["function"], str)
     assert isinstance(first["score"], float)
     assert isinstance(first["risk_band"], str)
     assert isinstance(first["proposed_model"], str)
     assert isinstance(first["score_driver"], str)
-    assert isinstance(first["score_explanation"], list)
-    assert isinstance(first["score_narrative"], str)
+    assert isinstance(first["rationale"], str)
 
 
 def test_analyze_compact_uses_configured_proposed_models(monkeypatch, test_repo):
@@ -463,7 +497,7 @@ def test_analyze_block_publishes_rows_to_dashboard(monkeypatch, test_repo):
         def __init__(self) -> None:
             self.rows = None
 
-        def publish_latest_block_metrics(self, rows):
+        def publish_latest_block_metrics(self, rows, **kwargs):
             self.rows = rows
 
     cap = _Capturing()
@@ -484,7 +518,7 @@ def test_analyze_publishes_before_limit(monkeypatch, test_repo):
     captured: dict[str, object] = {}
 
     class _Capturing:
-        def publish_latest_block_metrics(self, rows):
+        def publish_latest_block_metrics(self, rows, **kwargs):
             captured["rows"] = rows
 
     monkeypatch.setattr(mcp_server, "_dashboard_server_instance", _Capturing())
@@ -540,7 +574,7 @@ def test_analyze_filtered_dashboard_publish_excludes_other_cached_files(
     publishes: list[list] = []
 
     class _Capturing:
-        def publish_latest_block_metrics(self, rows):
+        def publish_latest_block_metrics(self, rows, **kwargs):
             publishes.append(list(rows))
 
     monkeypatch.setattr(mcp_server, "_dashboard_server_instance", _Capturing())

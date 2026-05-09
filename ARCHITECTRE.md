@@ -109,40 +109,54 @@ scoring and as the block fallback when `score_aggregation.enabled` is false.
 
 ### 4.1 CLI Resolution (Layered, Last Wins)
 
+For `hotspottriage <repo>` **analyze** (the default main command):
+
 ```
-DEFAULTS → ~/.hotspottriage/config.yml → <repo>/.hotspottriage/project.yml
-         → project.local.yml → --config <PATH> → CLI flags
+DEFAULTS → <repo>/.hotspottriage/project.yml → project.local.yml → --config <PATH>
+         → dashboard_config_patch.yml → CLI flags
 ```
 
-`config.load_config(target_path=repo)` merges all layers.
+The global file `~/.hotspottriage/config.yml` is **not** read for analyze, so
+CLI block scores match MCP `analyze` on the same local repo. Other entry
+points (for example `init`) may still use `load_config(..., use_global=True)`
+where applicable.
+
+`config.load_config` merges the YAML file stack; `config.merge_dashboard_config_patch`
+layers the patch; `config.apply_cli_overrides` applies flags.
 `config.validate(cfg)` enforces type/range constraints via focused private
 helpers (`_validate_score_metrics`, `_validate_format_sort_granularity_log`,
 `_validate_limit_and_block_workers`, etc.).
 
 ### 4.2 MCP Config Path
 
-`mcp_server._build_analyze_config` starts from `DEFAULTS.copy()` + tool
-argument overrides **only**. It does **not** call `load_config` for the target
-repo. Project YAML files do not affect MCP `analyze`
-unless settings are explicitly passed as tool arguments.
+`mcp_server._build_analyze_config` for a **local** directory starts from
+`config.load_analyze_config_for_local_repo(repo)`, then applies MCP tool arguments
+(`filter`, `score_metrics`, `config_overrides`, etc.). Remote git URL targets
+still start from defaults plus tool arguments only (no checked-out
+`.hotspottriage/` tree).
 
 Editor-side MCP client config (e.g. Cursor **`.cursor/mcp.json`**: launcher paths, **`PATH`**, **`--default-target`**, git worktrees) is covered in **§6.1.2**.
 
 ### 4.3 Dashboard Config Overlay
 
 The dashboard server maintains a `dashboard_config_patch.yml` file
-(under `<cwd>/.hotspottriage/`). Only two top-level keys are accepted:
+(under `<repo>/.hotspottriage/` for the analyzed tree). Typical top-level keys:
 
 - `metric_normalization`
 - `score_aggregation`
+- `proposed_models`
 
 `GET /api/config` returns `_merged_snapshot()`: the base snapshot
 deep-merged with the YAML patch. `POST /api/config/patch` validates
 the merged result before writing.
 
-**Caveat**: The merged snapshot drives the dashboard UI but does **not**
-automatically rewire MCP `analyze` config. Block scores in published rows
-still use the config built in `_build_analyze_config` (DEFAULTS + args).
+The same patch file is merged into **CLI analyze** and **MCP local analyze**,
+so heatmap / dashboard tuning and terminal scores share one source of truth.
+
+`DashboardServer.publish_latest_block_metrics(..., analysis_repo=PATH)` records
+the analyzed checkout; `_derive_block_rows`, lazy `block_narrative`, and
+cache-job `config_overrides` then call `load_analyze_config_for_local_repo` on
+that path so dashboard explanations use the same weights as MCP/CLI.
 
 ---
 
@@ -188,8 +202,8 @@ Protected by `_block_metrics_lock`.
 
 ### 5.5 Dashboard Config Patch — `dashboard_config_patch.yml`
 
-See §4.3 above. YAML file, only `metric_normalization` and `score_aggregation`
-keys, merged via `_config._deep_merge`.
+See §4.3 above. YAML file merged via `_config._deep_merge` (unknown top-level
+keys are rejected the same way as other config files).
 
 ---
 
@@ -393,11 +407,14 @@ for future instrumentation.
 normalization in `score.py` and `output.py`. Different purposes, different
 computation, easy to confuse.
 
-### 9.7 MCP Config Ignores Project YAML
+### 9.7 MCP vs CLI Analyze Config
 
-`_build_analyze_config` starts from `DEFAULTS.copy()` + tool args.
-Project-level `project.yml` / `project.local.yml` are **not loaded**.
-Dashboard patch YAML only drives the UI snapshot, not MCP analysis.
+For a **local** repo path, `_build_analyze_config` loads `project.yml` /
+`project.local.yml` (`use_global=False`), merges `dashboard_config_patch.yml`,
+then tool arguments. CLI analyze uses the same stack (plus optional
+`--config`), so scores align. **Remote URL** MCP targets have no checkout
+config tree until clone completes inside the tool pipeline; treat those as
+defaults-plus-args unless the client passes overrides.
 
 ---
 

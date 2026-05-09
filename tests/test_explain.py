@@ -6,7 +6,9 @@ import copy
 from hotspottriage.config import DEFAULTS
 from hotspottriage.explain import (
     build_score_explanation,
+    compact_agent_rationale,
     explain_score,
+    sanitize_score_explanation_entries,
     score_driver_from_subscores,
 )
 from hotspottriage.score import (
@@ -102,12 +104,28 @@ def test_weighted_score_driver_can_differ_from_unweighted_max():
     assert score_driver_from_subscores(s.score_subscores) == "complexity"
 
 
+def test_sanitize_score_explanation_entries_strips_raw():
+    dirty = [
+        {
+            "driver": "complexity",
+            "burden": 0.5,
+            "raw": {"cyclomatic": 99},
+            "normalized": {"cyclomatic": 0.5},
+        }
+    ]
+    clean = sanitize_score_explanation_entries(dirty)
+    assert len(clean) == 1
+    assert "raw" not in clean[0]
+    assert clean[0]["driver"] == "complexity"
+
+
 def test_build_score_explanation_orders_by_burden():
     s = _block_stat()
     expl = build_score_explanation(s)
     drivers = [x["driver"] for x in expl]
     assert drivers[0] == "complexity"
-    assert expl[0]["raw"]["cyclomatic"] == 18
+    for item in expl:
+        assert "raw" not in item
     assert "normalized" in expl[0]
     assert 0.0 <= float(expl[0]["normalized"]["cyclomatic"]) <= 1.0
     assert "score_contribution" in expl[0]
@@ -133,3 +151,55 @@ def test_explain_score_empty_when_no_subscores():
 def test_explain_score_falls_back_to_human_review():
     s = _block_stat()
     assert "Human review" in explain_score(s)
+
+
+def test_explain_score_score_only_skips_weight_times_burden_formula():
+    s = _block_stat()
+    text = explain_score(s, contribution_detail="score_only")
+    assert "Primary driver:" in text
+    assert "(score " in text
+    assert "final_weight" not in text
+    assert "×" not in text
+    assert "score contribution" not in text
+    # Similarity contribution is below the heatmap display floor for this fixture.
+    assert "Similarity" not in text
+
+
+def test_explain_score_score_only_hides_drivers_below_score_floor():
+    fw = {
+        "complexity_burden": 0.5,
+        "churn_burden": 0.5,
+        "maintainability_burden": 0.0,
+        "smell_burden": 0.0,
+        "similarity_burden": 0.0,
+    }
+    s = _block_stat(
+        score_subscores={
+            "complexity_burden": 1.0,
+            "churn_burden": 0.01,
+            "maintainability_burden": 0.0,
+            "smell_burden": 0.0,
+            "similarity_burden": 0.0,
+        },
+        score_final_weights=fw,
+    )
+    text = explain_score(s, contribution_detail="score_only")
+    assert "Complexity" in text
+    assert "Churn" not in text
+    full = explain_score(s, contribution_detail="full")
+    assert "Churn" in full
+
+
+def test_compact_agent_rationale_is_short_plain_language():
+    s = _block_stat()
+    t = compact_agent_rationale(s)
+    assert t.startswith("Main driver:")
+    assert "complexity" in t
+    assert "score contribution" not in t
+    assert "final_weight" not in t
+    assert "n_" not in t
+
+
+def test_compact_agent_rationale_empty_without_subscores():
+    s = _block_stat(score_subscores={})
+    assert compact_agent_rationale(s) == ""

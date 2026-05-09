@@ -4,6 +4,16 @@
 
 ## Learned Workspace Facts
 
+### MCP `analyze` triage and `score_explanation` (agent contract)
+
+- **Triage order:** Call MCP **`analyze`** with **`compact=true`** first (it is the default). Use **`compact=false`** only when you need full block rows (`path`, all metrics, **`score_subscores`**, **`score_explanation`**, **`score_narrative`**, optional **`norm_*`**). Same guidance is spelled out in [docs/agent-hotspottriage-score-check.md](docs/agent-hotspottriage-score-check.md).
+- **Compact rows:** Only **`function`**, **`score`**, **`risk_band`**, **`proposed_model`**, **`score_driver`**, and **`rationale`**—no embedded **`score_explanation`** or long narrative in each compact row.
+- **No `raw` in explanations:** **`score_explanation`** list items never expose a **`raw`** object (normalized inputs and weights only). Persisted rows with legacy **`raw`** are sanitized when deserialized.
+
+### HotspotTriage MCP vs CLI analyze config
+
+CLI analyze without `--no-config` uses the same stack as MCP local `analyze` (`use_global=False`, project YAML, `dashboard_config_patch.yml`, then CLI flags or MCP tool args). Repository tests pass `--no-config` so a developer `~/.hotspottriage/config.yml` cannot change assertions.
+
 ### HotspotTriage MCP composite score — branch vs `main` (`mcp_server.py`)
 
 To compare **composite `score` only** across branches, call MCP **`analyze`** twice (there is no git-ref parameter): once with `target=<repo>` on the feature branch, once with `target=<second checkout>` on `main` (e.g. a sibling **`git worktree add ../<name> main`**). Use the same options (e.g. `compact=false`, `similarity=false`, `filter=src/hotspottriage/mcp_server.py`) and compare raw **`score`** (not `norm_*`, which is repo-relative).

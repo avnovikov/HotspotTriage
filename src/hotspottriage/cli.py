@@ -218,14 +218,21 @@ def _run_init(argv: list[str]) -> int:
 
 
 def _resolve_config(args: argparse.Namespace, target_path: Path | None) -> dict:
-    """Build the merged config: files first (unless --no-config), then CLI."""
+    """Build merged config for ``analyze``, aligned with MCP local ``analyze``.
+
+    Uses ``load_config(..., use_global=False)`` plus
+    ``merge_dashboard_config_patch`` so CLI scores match MCP for the same repo
+    (skips ``~/.hotspottriage/config.yml``; still honors project YAML,
+    ``--config``, dashboard patch, then CLI flags).
+    """
     if args.no_config:
         merged = _config.load_config(
             target_path=None, use_global=False, use_project=False
         )
     else:
-        merged = _config.load_config(
-            target_path=target_path,
+        assert target_path is not None, "analyze always resolves a repo path"
+        merged = _config.load_analyze_config_for_local_repo(
+            target_path,
             explicit=args.config,
         )
     merged = _config.apply_cli_overrides(merged, args)

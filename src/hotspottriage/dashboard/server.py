@@ -346,6 +346,8 @@ class DashboardServer:
         self._patch_lock = threading.Lock()
         self._block_metrics_rows: list[dict[str, Any]] = []
         self._block_metrics_lock = threading.Lock()
+        # Local repo whose ``.hotspottriage/`` config drives scoring (MCP/CLI parity).
+        self._analysis_repo: Path | None = None
         self._app = self._build_app()
         self._thread: threading.Thread | None = None
         self._server: uvicorn.Server | None = None
@@ -420,15 +422,38 @@ class DashboardServer:
         if not isinstance(snap.get("score_aggregation"), dict):
             snap["score_aggregation"] = deepcopy(_config.DEFAULTS["score_aggregation"])
 
-    def publish_latest_block_metrics(self, rows: list[dict[str, Any]]) -> None:
-        """Replace stored raw block rows used by distribution histograms."""
+    def publish_latest_block_metrics(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        analysis_repo: Path | None = None,
+    ) -> None:
+        """Replace stored raw block rows used by distribution histograms.
+
+        When *analysis_repo* is set (e.g. MCP ``analyze``), derived scores and
+        lazy narratives use :func:`config.load_analyze_config_for_local_repo`
+        for that path — same as CLI and MCP for that checkout.
+        """
+        if analysis_repo is not None:
+            p = Path(analysis_repo).expanduser().resolve()
+            if p.is_dir():
+                self._analysis_repo = p
         scored_rows = self._derive_block_rows(rows)
         with self._block_metrics_lock:
             self._block_metrics_rows = scored_rows
 
+    def _full_analyze_config_for_scoring(self) -> dict[str, Any]:
+        """Merged config for block scoring / explanations (CLI + MCP parity)."""
+        root = (
+            self._analysis_repo
+            if self._analysis_repo is not None
+            else Path.cwd().resolve()
+        )
+        return _config.load_analyze_config_for_local_repo(root)
+
     def _derive_block_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Score raw block rows using the current dashboard config snapshot."""
-        snapshot = self._merged_snapshot()
+        """Score raw block rows using the same merged config as CLI / MCP analyze."""
+        merged = self._full_analyze_config_for_scoring()
         scored_rows: list[dict[str, Any]] = []
         raw_metric_keys = {
             "path",
@@ -454,10 +479,10 @@ class DashboardServer:
                 scored_rows.extend(
                     _stats_mod.derive_block_score_rows(
                         [row],
-                        snapshot,
-                        score_metrics=list(snapshot.get("score_metrics") or []),
-                        smell_weight=float(snapshot.get("smell_weight", 0.0)),
-                        similarity_enabled=bool(snapshot.get("similarity_enabled", True)),
+                        merged,
+                        score_metrics=list(merged.get("score_metrics") or []),
+                        smell_weight=float(merged.get("smell_weight", 0.0)),
+                        similarity_enabled=bool(merged.get("similarity_enabled", True)),
                     )
                 )
             else:
@@ -513,12 +538,19 @@ class DashboardServer:
             return raw.strip()
         return _DEFAULT_SCORE_METRICS
 
-    def _analysis_config_overrides(self) -> dict[str, Any]:
-        """Return saved dashboard scoring config used when regenerating heatmap rows."""
-        snapshot = self._merged_snapshot()
+    def _analysis_config_overrides(self, *, target: str | None = None) -> dict[str, Any]:
+        """Return MN/SA overrides for cache generation (same repo layers as MCP analyze)."""
+        if target and not is_git_url(target):
+            cand = Path(target).expanduser().resolve()
+            root = cand if cand.is_dir() else (
+                self._analysis_repo or Path.cwd().resolve()
+            )
+        else:
+            root = self._analysis_repo or Path.cwd().resolve()
+        full = _config.load_analyze_config_for_local_repo(root)
         overrides: dict[str, Any] = {}
         for key in ("metric_normalization", "score_aggregation"):
-            value = snapshot.get(key)
+            value = full.get(key)
             if isinstance(value, dict):
                 overrides[key] = deepcopy(value)
         return overrides
@@ -580,7 +612,7 @@ class DashboardServer:
                 mgr = _get_cache_manager(repo)
                 live_rows = mgr.get_all_rows()
                 if live_rows:
-                    self.publish_latest_block_metrics(live_rows)
+                    self.publish_latest_block_metrics(live_rows, analysis_repo=repo)
                     has_rows = True
             except Exception:
                 logger.debug(
@@ -590,7 +622,7 @@ class DashboardServer:
         if cache_file_exists and not has_rows:
             loaded_rows = _cache.load_block_results(repo)
             if loaded_rows:
-                self.publish_latest_block_metrics(loaded_rows)
+                self.publish_latest_block_metrics(loaded_rows, analysis_repo=repo)
                 has_rows = True
         return has_rows
 
@@ -647,7 +679,7 @@ class DashboardServer:
                 score_metrics=score_metrics,
                 verbose=False,
                 progress_callback=progress_cb,
-                config_overrides=self._analysis_config_overrides(),
+                config_overrides=self._analysis_config_overrides(target=target),
             )
             with self._cache_jobs_lock:
                 job = self._cache_jobs.get(job_id)
@@ -665,8 +697,14 @@ class DashboardServer:
                 else []
             )
             if isinstance(block_results, list) and block_results:
+                _ar: Path | None = None
+                if not is_git_url(target):
+                    _tp = Path(target).expanduser().resolve()
+                    if _tp.is_dir():
+                        _ar = _tp
                 self.publish_latest_block_metrics(
-                    [r for r in block_results if isinstance(r, dict)]
+                    [r for r in block_results if isinstance(r, dict)],
+                    analysis_repo=_ar,
                 )
         except Exception as e:
             with self._cache_jobs_lock:
@@ -832,16 +870,16 @@ class DashboardServer:
             for row in blob:
                 if str(row.get("path", "")) == raw_path:
                     stat = _stats_mod.statistic_from_complete_dict(row)
-                    snap = dash_self._merged_snapshot()
-                    pm = snap.get("proposed_models")
+                    cfg = dash_self._full_analyze_config_for_scoring()
+                    pm = cfg.get("proposed_models")
                     rec: str | None = None
                     if isinstance(pm, dict):
                         cand = pm.get(stat.score_band)
                         if isinstance(cand, str):
                             rec = cand
                     fw_map = _score_mod.final_weight_multipliers_for_burdens(
-                        snap,
-                        similarity_available=bool(snap.get("similarity_enabled", True)),
+                        cfg,
+                        similarity_available=bool(cfg.get("similarity_enabled", True)),
                     )
                     if fw_map is not None and stat.score_subscores:
                         expl = _explain_mod.build_score_explanation(
@@ -851,13 +889,18 @@ class DashboardServer:
                             stat.score_subscores, final_weights=fw_map
                         )
                         narrative = _explain_mod.explain_score(
-                            stat, recommended_action=rec, final_weights=fw_map
+                            stat,
+                            recommended_action=rec,
+                            final_weights=fw_map,
+                            contribution_detail="score_only",
                         )
                     else:
                         expl = list(stat.score_explanation)
                         driver = stat.score_driver
                         narrative = _explain_mod.explain_score(
-                            stat, recommended_action=rec
+                            stat,
+                            recommended_action=rec,
+                            contribution_detail="score_only",
                         )
                     return {
                         "path": raw_path,

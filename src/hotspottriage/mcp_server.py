@@ -251,7 +251,7 @@ def run_cached_block_analysis_dict(
     results_full = _analyze_repository(
         target, cfg, apply_limit=False, progress_callback=progress_callback
     )
-    _publish_block_metrics_to_dashboard(results_full, cfg)
+    _publish_block_metrics_to_dashboard(target, results_full, cfg)
     results = stats.sort_and_limit(
         results_full, by=cfg["sort"], limit=cfg["limit"]
     )
@@ -361,8 +361,9 @@ def analyze(
         ignore_dir: Comma-separated directory prefixes to skip
         similarity: DeepCSIM similarity per block (default: true)
         compact: When true (default), each row includes ``function``, ``score``,
-            ``risk_band``, ``proposed_model``, ``score_driver``, ``score_explanation``,
-            and ``score_narrative`` (plain-language rationale).
+            ``risk_band``, ``proposed_model``, ``score_driver``, and ``rationale``
+            (short natural-language summary for agents). Use ``compact=false`` for
+            full metrics, ``score_explanation``, and multi-line ``score_narrative``.
 
     Returns:
         JSON object with ``results`` and ``cache`` keys, or ``{"error": ...}``
@@ -578,21 +579,13 @@ def _build_analyze_config(
     ignore_dir: str | None = None,
     config_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build analysis config from MCP tool arguments."""
+    """Build analysis config: local repos use ``load_config`` + dashboard patch
+    (same as CLI analyze), then MCP tool arguments."""
     cfg = deepcopy(_config.DEFAULTS)
     if not discovery.is_git_url(target):
         local_target = Path(target).expanduser()
         if local_target.is_dir():
-            cfg = _config.load_config(
-                local_target.resolve(),
-                use_global=False,
-                use_project=True,
-            )
-            dashboard_patch = local_target.resolve() / ".hotspottriage" / "dashboard_config_patch.yml"
-            if dashboard_patch.is_file():
-                patch_data = _config._read_yaml(dashboard_patch)
-                if patch_data:
-                    cfg = _config._deep_merge(cfg, patch_data)
+            cfg = _config.load_analyze_config_for_local_repo(local_target.resolve())
 
     if filter:
         cfg["filter"] = [f.strip() for f in filter.split(",")]
@@ -720,7 +713,7 @@ def _initialize_repository(
 def _mcp_compact_score_rows(
     rows: list[stats.Statistic], *, granularity: str, merged_config: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """One dict per row: function symbol, score, risk band, proposed model."""
+    """One dict per row: symbol, score, band, model, driver, and a short agent rationale."""
     out: list[dict[str, Any]] = []
     for r in rows:
         p = r.path
@@ -729,11 +722,6 @@ def _mcp_compact_score_rows(
         else:
             fn = p
         score_band = str(r.score_band)
-        narrative = _explain.explain_score(
-            r,
-            recommended_action=_proposed_model_for_band(score_band, merged_config),
-            final_weights=r.score_final_weights,
-        )
         out.append(
             {
                 "function": fn,
@@ -741,8 +729,9 @@ def _mcp_compact_score_rows(
                 "risk_band": score_band,
                 "proposed_model": _proposed_model_for_band(score_band, merged_config),
                 "score_driver": r.score_driver,
-                "score_explanation": list(r.score_explanation),
-                "score_narrative": narrative,
+                "rationale": _explain.compact_agent_rationale(
+                    r, final_weights=r.score_final_weights
+                ),
             }
         )
     return out
@@ -757,6 +746,7 @@ def _proposed_model_for_band(score_band: str, merged_config: dict[str, Any]) -> 
 
 
 def _publish_block_metrics_to_dashboard(
+    target: str,
     rows: list[stats.Statistic],
     cfg: dict[str, Any],
 ) -> None:
@@ -766,7 +756,15 @@ def _publish_block_metrics_to_dashboard(
     dash = _dashboard_server_instance
     if dash is None:
         return
-    dash.publish_latest_block_metrics([r.as_dict() for r in rows])
+    analysis_repo: Path | None = None
+    if not discovery.is_git_url(target):
+        p = Path(target).expanduser().resolve()
+        if p.is_dir():
+            analysis_repo = p
+    dash.publish_latest_block_metrics(
+        [r.as_dict() for r in rows],
+        analysis_repo=analysis_repo,
+    )
 
 
 def _block_metric_row_repo_file(path: str) -> str:
@@ -816,7 +814,7 @@ def _publish_manager_rows_to_dashboard(
                         merged[str(row["path"])] = row
             out = list(merged.values())
             if out:
-                dash.publish_latest_block_metrics(out)
+                dash.publish_latest_block_metrics(out, analysis_repo=repo)
     except Exception:
         logger.debug("Publishing block metrics to dashboard skipped", exc_info=True)
 

@@ -38,6 +38,76 @@ def test_deep_merge_recurses_into_nested_dicts():
     assert out == {"nested": {"a": 1, "b": 20, "c": 30}}
 
 
+# --- merge_dashboard_config_patch -------------------------------------------
+
+
+def test_merge_dashboard_config_patch_noop_without_file(tmp_path: Path):
+    repo = tmp_path / "r"
+    repo.mkdir()
+    base = {"format": "json", "filter": ["x"]}
+    out = _config.merge_dashboard_config_patch(repo, base)
+    assert out == base
+    assert out is not base
+
+
+def test_merge_dashboard_config_patch_merges_score_aggregation(tmp_path: Path):
+    from copy import deepcopy
+
+    repo = tmp_path / "r"
+    repo.mkdir()
+    cfg_dir = repo / ".hotspottriage"
+    cfg_dir.mkdir()
+    (cfg_dir / "dashboard_config_patch.yml").write_text(
+        """
+score_aggregation:
+  final_weights:
+    complexity_burden: 0.50
+    churn_burden: 0.20
+    maintainability_burden: 0.15
+    smell_burden: 0.10
+    similarity_burden: 0.05
+""".strip()
+        + "\n"
+    )
+    merged = _config.merge_dashboard_config_patch(repo, deepcopy(_config.DEFAULTS))
+    _config.validate(merged)
+    assert merged["score_aggregation"]["final_weights"]["complexity_burden"] == 0.5
+
+
+def test_merge_dashboard_config_patch_rejects_unknown_top_level(tmp_path: Path):
+    from copy import deepcopy
+
+    repo = tmp_path / "r2"
+    repo.mkdir()
+    cfg_dir = repo / ".hotspottriage"
+    cfg_dir.mkdir()
+    (cfg_dir / "dashboard_config_patch.yml").write_text("not_a_real_key: true\n")
+    with pytest.raises(AssertionError):
+        _config.merge_dashboard_config_patch(repo, deepcopy(_config.DEFAULTS))
+
+
+def test_load_analyze_config_for_local_repo_merges_project_and_patch(tmp_path: Path):
+    cfg_dir = tmp_path / ".hotspottriage"
+    cfg_dir.mkdir()
+    (cfg_dir / "project.yml").write_text("smell_weight: 0.5\n")
+    (cfg_dir / "dashboard_config_patch.yml").write_text(
+        """
+score_aggregation:
+  final_weights:
+    complexity_burden: 0.11
+    churn_burden: 0.22
+    maintainability_burden: 0.22
+    smell_burden: 0.22
+    similarity_burden: 0.23
+""".strip()
+        + "\n"
+    )
+    merged = _config.load_analyze_config_for_local_repo(tmp_path)
+    _config.validate(merged)
+    assert merged["smell_weight"] == 0.5
+    assert merged["score_aggregation"]["final_weights"]["complexity_burden"] == 0.11
+
+
 # --- load_config ------------------------------------------------------------
 
 

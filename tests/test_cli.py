@@ -116,6 +116,26 @@ def test_cli_blocks_shorthand_runs_block_granularity(tmp_path: Path):
     assert any(p.startswith("mod.py::") for p in paths)
 
 
+def test_cli_block_json_score_explanation_items_never_include_raw(tmp_path: Path):
+    """Contract: CLI block JSON matches MCP full rows—no raw in score_explanation."""
+    repo = build_block_repo(tmp_path / "block_r_rawcheck")
+    r = _run(
+        [str(repo), "--blocks", "--no-similarity", "-f", "json", "-l", "8"]
+    )
+    assert r.returncode == 0, r.stderr
+    rows = json.loads(r.stdout)
+    assert rows
+    for row in rows:
+        expl = row.get("score_explanation")
+        if expl is None:
+            continue
+        if isinstance(expl, str):
+            expl = json.loads(expl)
+        for item in expl:
+            assert isinstance(item, dict)
+            assert "raw" not in item
+
+
 def test_cli_blocks_conflicts_with_granularity_file(tmp_path: Path):
     repo = build_repo(tmp_path / "r")
     r = _run([str(repo), "--blocks", "--granularity", "file", "-f", "json"])
@@ -189,6 +209,62 @@ def test_cli_project_config_changes_default_format(tmp_path: Path):
     assert r.returncode == 0, r.stderr
     rows = json.loads(r.stdout)
     assert rows
+
+
+def test_cli_dashboard_config_patch_matches_mcp_stack(tmp_path: Path):
+    """Without ``--no-config``, CLI merges ``dashboard_config_patch.yml`` like
+    MCP local ``analyze`` (after project YAML, before CLI flags)."""
+    repo = build_block_repo(tmp_path / "patch_r")
+    cfg_dir = repo / ".hotspottriage"
+    cfg_dir.mkdir(exist_ok=True)
+    (cfg_dir / "dashboard_config_patch.yml").write_text(
+        """
+score_aggregation:
+  final_weights:
+    complexity_burden: 0.50
+    churn_burden: 0.20
+    maintainability_burden: 0.15
+    smell_burden: 0.10
+    similarity_burden: 0.05
+""".strip()
+        + "\n"
+    )
+    r_default = _run(
+        [str(repo), "--blocks", "--no-similarity", "-f", "json", "-l", "1"]
+    )
+    r_patched = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "hotspottriage",
+            str(repo),
+            "--blocks",
+            "--no-similarity",
+            "-f",
+            "json",
+            "-l",
+            "1",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert r_default.returncode == 0, r_default.stderr
+    assert r_patched.returncode == 0, r_patched.stderr
+    row_d = json.loads(r_default.stdout)[0]
+    row_p = json.loads(r_patched.stdout)[0]
+    assert row_d["path"] == row_p["path"]
+    expl_d = row_d["score_explanation"]
+    expl_p = row_p["score_explanation"]
+    if isinstance(expl_d, str):
+        expl_d = json.loads(expl_d)
+    if isinstance(expl_p, str):
+        expl_p = json.loads(expl_p)
+    fw_d = next(x["final_weight"] for x in expl_d if x["driver"] == "complexity")
+    fw_p = next(x["final_weight"] for x in expl_p if x["driver"] == "complexity")
+    # DEFAULTS with similarity off: 0.30 / (0.30 + 0.25 + 0.20 + 0.15) ≈ 0.3333
+    assert abs(fw_d - (0.30 / 0.90)) < 1e-4
+    # Patched 0.50 among the same four non-similarity burdens: 0.50 / 0.95
+    assert abs(fw_p - (0.50 / 0.95)) < 1e-4
 
 
 def test_cli_explicit_config_file(tmp_path: Path):

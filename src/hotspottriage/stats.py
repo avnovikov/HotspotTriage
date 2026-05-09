@@ -548,9 +548,9 @@ def statistic_from_raw_block_row(
             score_band=str(row.get("score_band", "n/a")),
             score_subscores=dict(row.get("score_subscores") or {}),
             score_driver=str(row.get("score_driver", "")),
-            score_explanation=[
-                dict(x) for x in (row.get("score_explanation") or []) if isinstance(x, dict)
-            ],
+            score_explanation=_explain.sanitize_score_explanation_entries(
+                row.get("score_explanation") or []
+            ),
         )
     metrics = {
         "normalized_sloc": float(row.get("normalized_sloc", 0.0)),
@@ -605,7 +605,7 @@ def statistic_from_complete_dict(row: dict[str, Any]) -> Statistic:
         subs = {}
     expl_raw = row.get("score_explanation")
     expl: list[dict[str, Any]] = (
-        [dict(x) for x in expl_raw if isinstance(x, dict)]
+        _explain.sanitize_score_explanation_entries(expl_raw)
         if isinstance(expl_raw, list)
         else []
     )
