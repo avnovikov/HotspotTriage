@@ -76,7 +76,7 @@ HotspotTriage does not process personal data as its primary function. However, f
 **Outputs and surfaces (risk register)**
 
 - **CLI:** Table, JSON, and CSV output print paths to stdout/stderr for the session. HotspotTriage does not persist that stream or send it to telemetry; any retention is solely from the user’s shell, scripts, or CI log capture.
-- **Dashboard HTTP API** (e.g. stats, heatmap, cache context): JSON or SSE payloads may include paths. The dashboard binds to ``127.0.0.1`` only, so this process does not expose those responses on a routable interface.
+- **Dashboard HTTP API** (e.g. stats, heatmap, cache context): JSON or SSE payloads may include paths. The dashboard binds to ``127.0.0.1`` only, so this process does not expose those responses on a routable interface. For cache context and config snapshots, the API adds ``*_display`` string fields with the same username redaction as logs; the UI binds visible repo fields to those while retaining canonical paths for requests.
 - **MCP:** Tool responses may include paths for the requesting client’s immediate use. Persisting or forwarding those payloads is the **consuming system’s** responsibility.
 - **On-disk cache:** Block cache pickle rows use **username redaction** on string leaves before write: the detected local username becomes ``<first>****<last>`` (single-character names: ``<char>****``), so the full username substring is not stored in cache files.
 - **Application logs:** The MCP-attached dashboard log buffer and ``hotspottriage.path_utils.sanitize_log_value`` apply the same username redaction to formatted lines and sanitised path fragments.
