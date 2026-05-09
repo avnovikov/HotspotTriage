@@ -18,7 +18,7 @@ function mirrorCacheInputs() {
 
 async function saveCacheContext({ overwrite = true, statusText = null } = {}) {
   const payload = {
-    target: $("cacheTargetInput").value.trim(),
+    target: repoTargetCanonicalForApi(),
     include: $("cacheIncludeInput").value.trim(),
     exclude: $("cacheExcludeInput").value.trim(),
   };
@@ -70,7 +70,11 @@ function applyCacheContext(ctx, overwrite) {
     const el = $(id);
     if (!el) return;
     if ((overwrite || !el.value.trim()) && ctx.last_target) {
-      el.value = String(ctx.last_target);
+      setRepoTargetInputFromServer(
+        el,
+        String(ctx.last_target),
+        String(ctx.last_target_display || ctx.last_target || ""),
+      );
     }
   });
   const inc =
@@ -180,7 +184,7 @@ async function generateCache() {
   bar.classList.remove("done", "err");
   bar.style.width = "8%";
   await normalizeTargetForAction();
-  const target = $("cacheTargetInput").value.trim();
+  const target = repoTargetCanonicalForApi();
   if (!target) {
     box.textContent = "Target path is required.";
     updateCacheContext("invalid target");
@@ -229,7 +233,7 @@ async function checkCacheStatus() {
   bar.classList.remove("done", "err");
   bar.style.width = "25%";
   await normalizeTargetForAction();
-  const target = $("cacheTargetInput").value.trim();
+  const target = repoTargetCanonicalForApi();
   if (!target) {
     box.textContent = "Target path is required.";
     updateCacheContext("invalid target");
@@ -259,27 +263,34 @@ async function checkCacheStatus() {
       return;
     }
     if (data.target) {
-      $("cacheTargetInput").value = String(data.target);
+      setRepoTargetInputFromServer(
+        $("cacheTargetInput"),
+        String(data.target),
+        String(data.target_display || data.target || ""),
+      );
       mirrorCacheInputs();
     }
     if (data.stale || data.usable === false) {
       const msg = data.message || "Cache is stale or incompatible; regenerate cache.";
-      box.textContent = `${msg} size=${data.size_bytes ?? 0} bytes, dir=${data.cache_dir}`;
-      updateCacheContext(`stale (${data.cache_dir})`);
+      const dirDisp = data.cache_dir_display || data.cache_dir;
+      box.textContent = `${msg} size=${data.size_bytes ?? 0} bytes, dir=${dirDisp}`;
+      updateCacheContext(`stale (${dirDisp})`);
       bar.classList.remove("done");
       bar.classList.add("err");
       bar.style.width = "100%";
       return;
     }
     if (!data.exists) {
-      box.textContent = `No cache yet at ${data.cache_dir}`;
-      updateCacheContext(`missing (${data.cache_dir})`);
+      const dirDisp = data.cache_dir_display || data.cache_dir;
+      box.textContent = `No cache yet at ${dirDisp}`;
+      updateCacheContext(`missing (${dirDisp})`);
       bar.classList.remove("done");
       bar.classList.add("err");
       bar.style.width = "100%";
       return;
     }
-    box.textContent = `Cache exists: entries=${data.entries}, size=${data.size_bytes} bytes, dir=${data.cache_dir}`;
+    const dirDisp = data.cache_dir_display || data.cache_dir;
+    box.textContent = `Cache exists: entries=${data.entries}, size=${data.size_bytes} bytes, dir=${dirDisp}`;
     updateCacheContext(`ready (entries=${data.entries}, size=${data.size_bytes})`);
     bar.classList.remove("err");
     bar.classList.add("done");
@@ -380,6 +391,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     const el = $(id);
     if (el) {
       el.addEventListener("input", () => {
+        if (id === "cacheTargetInput") {
+          el.dataset.htCanonicalTarget = el.value.trim();
+        }
         mirrorCacheInputs();
         updateCacheContext("pending");
       });

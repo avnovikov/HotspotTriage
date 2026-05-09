@@ -1,6 +1,7 @@
 """Tests for hotspottriage.dashboard.server."""
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 import socket
@@ -12,6 +13,7 @@ from hotspottriage import config as _project_config
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.server import DashboardServer, _find_free_port, _slim_cache_job_result
 from hotspottriage.dashboard.stats import StatsCollector
+from hotspottriage.username_privacy import redact_usernames_in_text
 
 
 def _server(
@@ -309,11 +311,15 @@ def test_cache_context_persists_locally(tmp_path):
     assert set_resp.status_code == 200
     data = set_resp.json()
     assert data["last_target"] == str((Path.cwd() / "../LexVox").resolve())
+    assert data["last_target_display"] == redact_usernames_in_text(data["last_target"])
     assert data["last_include"] == "src/**"
     assert data["last_exclude"] == "**/tests/**"
     assert data["last_filter"] == "src/**,!**/tests/**"
     assert data["last_score_metrics"] == _default_score_metrics_csv()
     assert data["recent_targets"][0] == str((Path.cwd() / "../LexVox").resolve())
+    assert data["recent_targets_display"][0] == data["last_target_display"]
+    raw = json.loads(srv._state_file.read_text(encoding="utf-8"))
+    assert "last_target_display" not in raw
     get_resp = client.get("/api/cache/context")
     assert get_resp.status_code == 200
     assert get_resp.json()["last_include"] == "src/**"
@@ -336,6 +342,25 @@ def test_cache_context_legacy_filter_field_still_works(tmp_path):
     assert data["last_include"] == "src/**"
     assert data["last_exclude"] == "**/tests/**"
     assert data["last_score_metrics"] == _default_score_metrics_csv()
+
+
+def test_config_response_includes_path_display(monkeypatch):
+    monkeypatch.setenv("USER", "pathuserx")
+    from hotspottriage.username_privacy import username_redaction_tokens
+
+    username_redaction_tokens.cache_clear()
+    snap = _project_config.to_dashboard_snapshot(
+        dict(_project_config.DEFAULTS),
+        project_path="/home/pathuserx/myproject",
+    )
+    srv = _server(config_snapshot=snap)
+    client = TestClient(srv.app)
+    cfg = client.get("/api/config").json()
+    assert cfg["project"]["path"] == "/home/pathuserx/myproject"
+    assert "pathuserx" not in cfg["project"]["path_display"]
+    assert cfg["project"]["path_display"] == redact_usernames_in_text(
+        "/home/pathuserx/myproject"
+    )
 
 
 def test_cache_context_empty_include_uses_default_filter_semantics(tmp_path):

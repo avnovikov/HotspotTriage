@@ -1200,8 +1200,9 @@ Build Parameters: include=<default **/*.py>, exclude=<none>
     function renderOverviewSummary(cfg) {
       const el = $("overviewSummaryPanel");
       const project = cfg.project || {};
+      const pathVis = project.path_display || project.path;
       const lines = [
-        ["Project path", project.path ?? "n/a"],
+        ["Project path", pathVis ?? "n/a"],
         ["Granularity", cfg.granularity ?? "n/a"],
       ];
       el.innerHTML = lines
@@ -1255,11 +1256,11 @@ Build Parameters: include=<default **/*.py>, exclude=<none>
       const project = cfg.project || {};
       const dashboard = cfg.dashboard || {};
       const lines = [
-        ["Project Path", project.path],
+        ["Project Path", project.path_display || project.path],
         ["Granularity", cfg.granularity],
         ["Decay Half-life", cfg.decay_half_life],
         ["Similarity Enabled", cfg.similarity_enabled],
-        ["Dashboard default_target", dashboard.default_target],
+        ["Dashboard default_target", dashboard.default_target_display || dashboard.default_target],
         ["Version", cfg.version],
       ];
       meta.innerHTML = lines
@@ -1466,6 +1467,43 @@ Build Parameters: include=<default **/*.py>, exclude=<none>
 
     function $(id) { return document.getElementById(id); }
 
+    function setRepoTargetInputFromServer(el, full, display) {
+      if (!el) return;
+      const f = String(full || "").trim();
+      const visual = String(display || "").trim() || f;
+      el.value = visual;
+      el.dataset.htCanonicalTarget = f;
+    }
+
+    function repoTargetCanonicalForApi() {
+      const el = $("cacheTargetInput");
+      if (!el) return "";
+      const c = String(el.dataset.htCanonicalTarget || "").trim();
+      if (c) return c;
+      return String(el.value || "").trim();
+    }
+
+    function directoryCanonicalFromConfig(cfg) {
+      if (!cfg || typeof cfg !== "object") return "";
+      const dash = cfg.dashboard || {};
+      const dt = String(dash.default_target || "").trim();
+      if (dt) return dt;
+      const proj = cfg.project || {};
+      return String(proj.path || "").trim();
+    }
+
+    function directoryFromConfig(cfg) {
+      if (!cfg || typeof cfg !== "object") return "";
+      const dash = cfg.dashboard || {};
+      const dtd = String(dash.default_target_display || "").trim();
+      const dt = String(dash.default_target || "").trim();
+      if (dt) return dtd || dt;
+      const proj = cfg.project || {};
+      const pd = String(proj.path_display || "").trim();
+      const p = String(proj.path || "").trim();
+      return pd || p;
+    }
+
     function updateCacheContext(statusText) {
       const target = $("cacheTargetInput").value.trim() || "n/a";
       const incRaw = $("cacheIncludeInput").value.trim();
@@ -1527,8 +1565,11 @@ Build Parameters: include=${incDisp}, exclude=${excDisp}`;
         if (!res.ok) throw new Error("config request failed");
         const cfg = await res.json();
         const dashboard = cfg.dashboard || {};
-        if (dashboard.default_target && !$("cacheTargetInput").value.trim()) {
-          $("cacheTargetInput").value = String(dashboard.default_target);
+        const targetEl = $("cacheTargetInput");
+        if (targetEl && dashboard.default_target && !targetEl.value.trim()) {
+          const full = directoryCanonicalFromConfig(cfg);
+          const disp = directoryFromConfig(cfg);
+          setRepoTargetInputFromServer(targetEl, full, disp);
         }
         updateCacheContext("unknown");
         syncHeatmapRepoDisplay();
@@ -1575,7 +1616,11 @@ Build Parameters: include=${incDisp}, exclude=${excDisp}`;
         const el = $(id);
         if (!el) return;
         if ((overwrite || !el.value.trim()) && ctx.last_target) {
-          el.value = String(ctx.last_target);
+          setRepoTargetInputFromServer(
+            el,
+            String(ctx.last_target),
+            String(ctx.last_target_display || ctx.last_target || ""),
+          );
         }
       });
       const inc =
@@ -1605,7 +1650,7 @@ Build Parameters: include=${incDisp}, exclude=${excDisp}`;
 
     async function saveCacheContext({ overwrite = true, statusText = null } = {}) {
       const payload = {
-        target: $("cacheTargetInput").value.trim(),
+        target: repoTargetCanonicalForApi(),
         include: $("cacheIncludeInput").value.trim(),
         exclude: $("cacheExcludeInput").value.trim(),
       };
@@ -1736,7 +1781,7 @@ Build Parameters: include=${incDisp}, exclude=${excDisp}`;
       bar.classList.remove("done", "err");
       bar.style.width = "8%";
       await normalizeTargetForAction();
-      const target = $("cacheTargetInput").value.trim();
+      const target = repoTargetCanonicalForApi();
       if (!target) {
         box.textContent = "Target path is required.";
         updateCacheContext("invalid target");
@@ -1785,7 +1830,7 @@ Build Parameters: include=${incDisp}, exclude=${excDisp}`;
       bar.classList.remove("done", "err");
       bar.style.width = "25%";
       await normalizeTargetForAction();
-      const target = $("cacheTargetInput").value.trim();
+      const target = repoTargetCanonicalForApi();
       if (!target) {
         box.textContent = "Target path is required.";
         updateCacheContext("invalid target");
@@ -1815,27 +1860,34 @@ Build Parameters: include=${incDisp}, exclude=${excDisp}`;
           return;
         }
         if (data.target) {
-          $("cacheTargetInput").value = String(data.target);
+          setRepoTargetInputFromServer(
+            $("cacheTargetInput"),
+            String(data.target),
+            String(data.target_display || data.target || ""),
+          );
           mirrorCacheInputs();
         }
         if (data.stale || data.usable === false) {
           const msg = data.message || "Cache is stale or incompatible; regenerate cache.";
-          box.textContent = `${msg} size=${data.size_bytes ?? 0} bytes, dir=${data.cache_dir}`;
-          updateCacheContext(`stale (${data.cache_dir})`);
+          const dirDisp = data.cache_dir_display || data.cache_dir;
+          box.textContent = `${msg} size=${data.size_bytes ?? 0} bytes, dir=${dirDisp}`;
+          updateCacheContext(`stale (${dirDisp})`);
           bar.classList.remove("done");
           bar.classList.add("err");
           bar.style.width = "100%";
           return;
         }
         if (!data.exists) {
-          box.textContent = `No cache yet at ${data.cache_dir}`;
-          updateCacheContext(`missing (${data.cache_dir})`);
+          const dirDisp = data.cache_dir_display || data.cache_dir;
+          box.textContent = `No cache yet at ${dirDisp}`;
+          updateCacheContext(`missing (${dirDisp})`);
           bar.classList.remove("done");
           bar.classList.add("err");
           bar.style.width = "100%";
           return;
         }
-        box.textContent = `Cache exists: entries=${data.entries}, size=${data.size_bytes} bytes, dir=${data.cache_dir}`;
+        const dirDisp = data.cache_dir_display || data.cache_dir;
+        box.textContent = `Cache exists: entries=${data.entries}, size=${data.size_bytes} bytes, dir=${dirDisp}`;
         updateCacheContext(`ready (entries=${data.entries}, size=${data.size_bytes})`);
         bar.classList.remove("err");
         bar.classList.add("done");
@@ -1936,7 +1988,11 @@ Build Parameters: include=${incDisp}, exclude=${excDisp}`;
         }
       });
       ["cacheIncludeInput", "cacheExcludeInput", "cacheTargetInput"].forEach((id) => {
-        $(id).addEventListener("input", () => {
+        const el = $(id);
+        el.addEventListener("input", () => {
+          if (id === "cacheTargetInput") {
+            el.dataset.htCanonicalTarget = el.value.trim();
+          }
           mirrorCacheInputs();
           updateCacheContext("pending");
         });

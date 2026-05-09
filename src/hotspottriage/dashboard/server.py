@@ -33,6 +33,7 @@ from hotspottriage.dashboard.boundary import (
     DashboardConfigPatchBody,
 )
 from hotspottriage.path_utils import normalize_user_target_string
+from hotspottriage.username_privacy import redact_usernames_in_text
 from hotspottriage.dashboard.cache_filter_fields import (
     compose_filter_from_fields,
     split_filter_for_fields,
@@ -381,6 +382,35 @@ class DashboardServer:
     def _load_local_state(self) -> dict[str, Any]:
         with self._state_lock:
             return self._load_local_state_unlocked()
+
+    def _enrich_cache_context_for_response(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Add UI-only redacted path fields; ``last_target`` on disk stays canonical."""
+        out = dict(state)
+        lt = str(out.get("last_target", "") or "").strip()
+        out["last_target_display"] = redact_usernames_in_text(lt) if lt else ""
+        rec = out.get("recent_targets")
+        if isinstance(rec, list):
+            out["recent_targets_display"] = [
+                redact_usernames_in_text(str(x)) for x in rec if str(x).strip()
+            ]
+        else:
+            out["recent_targets_display"] = []
+        return out
+
+    def _enrich_config_snapshot_for_ui(self, snap: dict[str, Any]) -> dict[str, Any]:
+        """Add ``*_display`` strings for dashboard UI; canonical paths unchanged."""
+        out = deepcopy(snap)
+        proj = out.get("project")
+        if isinstance(proj, dict):
+            p = str(proj.get("path") or "").strip()
+            if p:
+                proj["path_display"] = redact_usernames_in_text(p)
+        dash = out.get("dashboard")
+        if isinstance(dash, dict):
+            dt = str(dash.get("default_target") or "").strip()
+            if dt:
+                dash["default_target_display"] = redact_usernames_in_text(dt)
+        return out
 
     def _ensure_snapshot_defaults(self) -> None:
         snap = self._base_snapshot
@@ -732,7 +762,7 @@ class DashboardServer:
 
         @app.get("/api/config")
         def get_config() -> dict[str, Any]:
-            return dash_self._merged_snapshot()
+            return dash_self._enrich_config_snapshot_for_ui(dash_self._merged_snapshot())
 
         @app.post("/api/config/patch")
         def patch_config(payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -814,7 +844,7 @@ class DashboardServer:
 
         @app.get("/api/cache/context")
         def get_cache_context() -> dict[str, Any]:
-            return self._load_local_state()
+            return dash_self._enrich_cache_context_for_response(dash_self._load_local_state())
 
         @app.post("/api/cache/context")
         def set_cache_context(payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -831,7 +861,8 @@ class DashboardServer:
                 "last_exclude": exc,
                 "last_score_metrics": self._score_metrics_csv_for_cache_jobs(),
             }
-            return self._save_local_state(updates)
+            merged = self._save_local_state(updates)
+            return dash_self._enrich_cache_context_for_response(merged)
 
         @app.post("/api/cache/status")
         def cache_status(payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -866,9 +897,13 @@ class DashboardServer:
                 repo, cache_file_exists=exists
             )
             stale = exists and not usable
+            target_s = str(repo)
+            cache_dir_s = str(cache_dir)
             return {
-                "target": str(repo),
-                "cache_dir": str(cache_dir),
+                "target": target_s,
+                "target_display": redact_usernames_in_text(target_s),
+                "cache_dir": cache_dir_s,
+                "cache_dir_display": redact_usernames_in_text(cache_dir_s),
                 "exists": exists,
                 "usable": usable,
                 "stale": stale,
