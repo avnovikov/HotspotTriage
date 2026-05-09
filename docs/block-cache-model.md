@@ -38,7 +38,7 @@ Each entry is a **full block row as a dict** (via `Statistic.as_dict()`), plus f
 | `_blob_sha` | Git blob SHA of the file at **HEAD** when the row was computed |
 | `_start` / `_end` | Line range of the block in the file |
 
-Other metrics on the dict are **not** trusted for skipping work: **only churn** is short-circuited via the cache; the pipeline still recomputes complexity, smells, scoring, and (if enabled) similarity for the current run.
+When a file’s HEAD blob and block spans match a complete cached snapshot, `build_block_stats` can **reuse full cached rows** for that file and skip Radon/smell/churn recompute; otherwise it runs the stale path. Similarity (DeepCSIM) is still computed across the **merged** block set for the run when enabled.
 
 ## When the cache is written
 
@@ -99,7 +99,7 @@ CLI block mode (`--blocks` / `granularity: block`) uses the same `build_block_st
 |--------|----------------|
 | `cache.py` | Load/save `blocks.pkl`, simple `metadata.json` |
 | `block_churn.py` | `file_blob_shas`, `compute_many` cache index, `git log -L` workers |
-| `stats.py` | `build_block_stats`: orchestration, merge preserved rows, persist |
+| `stats/` (`orchestration.py`, `cache_ops.py`, `pipeline.py`, …) | `build_block_stats`: partition cache vs stale, merge preserved rows, persist |
 | `timestamps.py` | Richer metadata / staleness helpers used elsewhere (e.g. cache generator) |
 
 ---

@@ -39,7 +39,7 @@ def _block_stat(**kwargs) -> Statistic:
     cfg = copy.deepcopy(DEFAULTS)
     fw = final_weight_multipliers_for_burdens(cfg, similarity_available=True)
     base = dict(
-        path="src/stats.py::build_block_stats",
+        path="src/hotspottriage/stats/orchestration.py::build_block_stats",
         sloc=40,
         normalized_sloc=0.5,
         cyclomatic=18,
@@ -136,7 +136,7 @@ def test_explain_score_includes_header_and_recommended_action():
     s = _block_stat()
     text = explain_score(s, recommended_action="Assign senior reviewer")
     assert "HIGH RISK" in text
-    assert "src/stats.py::build_block_stats" in text
+    assert "src/hotspottriage/stats/orchestration.py::build_block_stats" in text
     assert "Primary driver:" in text
     assert "score contribution" in text
     assert "n_churn=" in text or "n_cyclomatic=" in text

@@ -62,8 +62,8 @@ For duplication pressure in block mode, we use **DeepCSIM** (`deepcsim`) to comp
 
 Finally, score composition is fully internal:
 
-- file mode: product score in `hotspottriage.stats._score`
-- block mode: normalized weighted aggregation in `hotspottriage.score.compute_score`, applied from `hotspottriage.stats`
+- file mode: product score in `hotspottriage.stats._score` (implementation: `stats/core.py`)
+- block mode: normalized weighted aggregation in `hotspottriage.score.compute_score`, applied from `hotspottriage.stats` (`stats/scoring.py` + `stats/pipeline.py`)
 
 So in plain terms: **Radon gives structure, Git gives volatility, Pylint/heuristics give quality smells, DeepCSIM gives similarity pressure, and HotspotTriage merges all of it into the final score.**
 
