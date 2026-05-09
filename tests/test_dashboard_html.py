@@ -10,6 +10,10 @@ def test_dashboard_html_contains_required_panels():
     assert "healthBadge" in DASHBOARD_HTML
     assert "cacheContextPanel" in DASHBOARD_HTML
     assert "Build Parameters:" in DASHBOARD_HTML
+    assert "cacheIncludeInput" in DASHBOARD_HTML
+    assert "cacheExcludeInput" in DASHBOARD_HTML
+    assert "cacheSaveCtxBtn" in DASHBOARD_HTML
+    assert "Save cache settings" in DASHBOARD_HTML
     assert "configSaveBtn" in DASHBOARD_HTML
     assert "configRefreshDataBtn" in DASHBOARD_HTML
     assert "Save config" in DASHBOARD_HTML
@@ -22,9 +26,8 @@ def test_dashboard_html_contains_required_panels():
     assert "norm-metric-card" in DASHBOARD_HTML
     assert "weight-sum-badge" in DASHBOARD_HTML
     assert "heatmapUpdateBtn" in DASHBOARD_HTML
-    assert "heatmapTargetInput" in DASHBOARD_HTML
-    assert "heatmapFilterInput" in DASHBOARD_HTML
-    assert "heatmapScoreInput" in DASHBOARD_HTML
+    assert "heatmapRepoRootDisplay" in DASHBOARD_HTML
+    assert "syncHeatmapRepoDisplay" in DASHBOARD_HTML
     assert "heatmapLimitInput" in DASHBOARD_HTML
 
 
@@ -48,6 +51,8 @@ def test_dashboard_html_hash_routing_and_heatmap():
     assert "#view-config .norm-svg-wrap" in DASHBOARD_HTML
     assert "normChartTabWidth" in DASHBOARD_HTML
     assert "Necessary when configuration changes." in DASHBOARD_HTML
+    assert "Edit normalisation parameters in" in DASHBOARD_HTML
+    assert "gitignore syntax" in DASHBOARD_HTML
     assert "HotspotTriage Scores" in DASHBOARD_HTML
     assert 'src="/dashboard/scores"' in DASHBOARD_HTML
     assert ".heatmap-file-col .heatmap-file-label" in DASHBOARD_HTML
