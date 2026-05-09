@@ -1,0 +1,12 @@
+# CODEOWNERS — all changes require review from a designated owner
+# SOC 2 CC6.3: Establishes ownership and accountability
+
+# Default owner for all files
+* @avnovikov
+
+# Security-sensitive paths require explicit owner review
+.github/workflows/   @avnovikov
+.github/CODEOWNERS   @avnovikov
+SECURITY.md          @avnovikov
+pyproject.toml       @avnovikov
+uv.lock              @avnovikov
