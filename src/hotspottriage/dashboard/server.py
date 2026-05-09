@@ -5,6 +5,7 @@ import asyncio
 from copy import deepcopy
 from dataclasses import dataclass
 import json
+import logging
 import socket
 import subprocess
 import sys
@@ -17,20 +18,29 @@ from typing import Any, AsyncGenerator, Callable
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
 from hotspottriage import cache as _cache
 from hotspottriage import config as _config
 from hotspottriage import normalize as _normalize
 from hotspottriage import score as _score_mod
 from hotspottriage import stats as _stats_mod
+from hotspottriage.discovery import is_git_url
+from hotspottriage.dashboard.boundary import (
+    DashboardCacheRequestBody,
+    DashboardConfigPatchBody,
+)
+from hotspottriage.path_utils import normalize_user_target_string
 from hotspottriage.dashboard.cache_filter_fields import (
     compose_filter_from_fields,
     split_filter_for_fields,
 )
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.stats import StatsCollector
+
+logger = logging.getLogger(__name__)
 
 BASE_PORT = 9123
 
@@ -66,18 +76,29 @@ def _parse_cache_filter_payload(body: dict[str, Any] | None) -> tuple[str | None
 
     New clients send ``include`` / ``exclude``; legacy bodies send a single
     ``filter`` string (comma-separated, ``!`` negates).
+
+    Validated bodies may always include ``include`` / ``exclude`` keys (possibly
+    empty); the legacy ``filter`` field is used only when both are blank.
     """
     body = body if isinstance(body, dict) else {}
-    if "include" in body or "exclude" in body:
-        inc = str(body.get("include") or "").strip()
-        exc = str(body.get("exclude") or "").strip()
+    inc = str(body.get("include") or "").strip()
+    exc = str(body.get("exclude") or "").strip()
+    filt_legacy = str(body.get("filter") or "").strip()
+    if inc or exc:
         filt = compose_filter_from_fields(inc, exc)
         return filt, inc, exc
-    filt_legacy = str(body.get("filter") or "").strip()
     if not filt_legacy:
         return None, "", ""
     inc_l, exc_l = split_filter_for_fields(filt_legacy)
     return filt_legacy, inc_l, exc_l
+
+
+def _validated_cache_request(payload: dict[str, Any] | None) -> dict[str, Any]:
+    data = payload if isinstance(payload, dict) else {}
+    try:
+        return DashboardCacheRequestBody.model_validate(data).model_dump()
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=e.errors()) from e
 
 
 def _merge_config_overlay(
@@ -139,15 +160,7 @@ def _slim_cache_job_result(result: dict[str, Any]) -> dict[str, Any]:
 
 def _normalize_cache_target(raw_target: str) -> str:
     """Normalize cache target paths so ``./`` inputs persist as absolute paths."""
-    target = str(raw_target).strip()
-    if not target:
-        return ""
-    if "://" in target or target.startswith("git@"):
-        return target
-    try:
-        return str(Path(target).expanduser().resolve())
-    except OSError:
-        return target
+    return normalize_user_target_string(str(raw_target))
 
 
 _HEATMAP_SCORE_COLUMNS: tuple[str, ...] = (
@@ -316,8 +329,9 @@ class DashboardServer:
         self._ensure_snapshot_defaults()
         self._stats = stats
         self._log_handler = log_handler
-        self._host = host
-        self._port = _find_free_port(host, base_port)
+        bind_host = str(host).strip() if host is not None else ""
+        self._host = bind_host or "127.0.0.1"
+        self._port = _find_free_port(self._host, base_port)
         self._open_on_start = bool(open_on_start)
         self._started_at = time.monotonic()
         self._cache_jobs: dict[str, CacheJob] = {}
@@ -538,7 +552,10 @@ class DashboardServer:
                     self.publish_latest_block_metrics(live_rows)
                     has_rows = True
             except Exception:
-                pass
+                logger.debug(
+                    "Hydrating block metrics from MCP cache skipped",
+                    exc_info=True,
+                )
         if cache_file_exists and not has_rows:
             loaded_rows = _cache.load_block_results(repo)
             if loaded_rows:
@@ -719,14 +736,13 @@ class DashboardServer:
 
         @app.post("/api/config/patch")
         def patch_config(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-            body = payload if isinstance(payload, dict) else {}
-            allowed = {"metric_normalization", "score_aggregation", "proposed_models"}
-            extra = set(body.keys()) - allowed
-            if extra:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"unsupported patch key(s): {sorted(extra)}",
+            try:
+                body_model = DashboardConfigPatchBody.model_validate(
+                    payload if isinstance(payload, dict) else {}
                 )
+            except ValidationError as e:
+                raise HTTPException(status_code=422, detail=e.errors()) from e
+            body = {k: v for k, v in body_model.model_dump(exclude_none=True).items()}
             if not body:
                 raise HTTPException(
                     status_code=400,
@@ -802,10 +818,14 @@ class DashboardServer:
 
         @app.post("/api/cache/context")
         def set_cache_context(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-            body = payload or {}
+            body = _validated_cache_request(payload if isinstance(payload, dict) else None)
             filt, inc, exc = _parse_cache_filter_payload(body)
+            try:
+                norm_target = _normalize_cache_target(body.get("target", ""))
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
             updates = {
-                "last_target": _normalize_cache_target(body.get("target", "")),
+                "last_target": norm_target,
                 "last_filter": "" if filt is None else filt,
                 "last_include": inc,
                 "last_exclude": exc,
@@ -815,10 +835,18 @@ class DashboardServer:
 
         @app.post("/api/cache/status")
         def cache_status(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-            body = payload or {}
-            target = _normalize_cache_target(body.get("target", ""))
+            body = _validated_cache_request(payload if isinstance(payload, dict) else None)
+            try:
+                target = _normalize_cache_target(body.get("target", ""))
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
             if not target:
                 raise HTTPException(status_code=400, detail="target is required")
+            if is_git_url(target):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Dashboard cache inspection requires a local repository checkout path.",
+                )
             filt, inc, exc = _parse_cache_filter_payload(body)
             filt_arg = None if filt is None else filt
             dash_self._persist_cache_analysis_prefs(
@@ -827,7 +855,7 @@ class DashboardServer:
                 include=inc,
                 exclude=exc,
             )
-            repo = Path(target).resolve()
+            repo = Path(target)
             cache_dir = _cache.cache_path_for(repo)
             cache_file = cache_dir / _cache._CACHE_FILE
             metadata = _cache.get_metadata(repo)
@@ -856,8 +884,11 @@ class DashboardServer:
 
         @app.post("/api/cache/generate")
         def generate_cache(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-            body = payload or {}
-            target = _normalize_cache_target(body.get("target", ""))
+            body = _validated_cache_request(payload if isinstance(payload, dict) else None)
+            try:
+                target = _normalize_cache_target(body.get("target", ""))
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
             if not target:
                 raise HTTPException(status_code=400, detail="target is required")
             filt, inc, exc = _parse_cache_filter_payload(body)

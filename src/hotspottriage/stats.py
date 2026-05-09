@@ -12,6 +12,7 @@ size, so a small, frequently-rewritten file outranks a big, rarely-touched one.
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from math import prod
@@ -25,6 +26,8 @@ from hotspottriage import blocks as _blocks
 from hotspottriage import cache as _cache
 from hotspottriage import complexity as _complexity
 from hotspottriage import score as _risk_score
+
+logger = logging.getLogger(__name__)
 
 # Every metric that may appear in the output and contribute to the score.
 # The default recipe lives in `config.DEFAULTS["score_metrics"]`; this module
@@ -777,7 +780,7 @@ def build_block_stats(
     try:
         _persist_block_cache(out, row_cache_meta, files_list, repo, cache_manager, prev_rows_list)
     except Exception:
-        pass
+        logger.debug("Persisting block cache after analysis skipped", exc_info=True)
 
     return out
 
