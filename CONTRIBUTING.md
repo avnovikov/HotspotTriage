@@ -104,7 +104,7 @@ Until then, run linting and security checks manually before opening a PR (see Se
 ## 4. Testing
 
 > *NIST SSDF PW.7.2 — test the software to identify vulnerabilities*
-> *ISO 27001:2022: A.8.29 (Security testing in development and acceptance)*
+> *ISO 27001:2022: A.8.29 (Security testing in development and acceptance), A.8.33 (Protection of test information)*
 
 - **New features must include corresponding tests** in `tests/`.
 - **Bug fixes must include a regression test** that reproduces the bug before the fix.
@@ -114,6 +114,10 @@ Until then, run linting and security checks manually before opening a PR (see Se
   ```
 - Tests run automatically in CI against **Python 3.11, 3.12, and 3.13** via `tests.yml` (issue #106, completed).
 - Test coverage of valid, invalid, oversized, and boundary inputs is expected for any code touching input validation or scoring logic.
+
+### 4.1 Test Data Policy (ISO 27001:2022 A.8.33)
+
+All test fixtures in `tests/` use **synthetic Python source code samples** — no real user data, no personal data, and no production repository code. No secrets, credentials, or sensitive information are present in the test directory; this is enforced by Gitleaks secret scanning on every PR. If real code samples are ever proposed as test fixtures in a future contribution, they must be reviewed for sensitive content by the maintainer before the PR is merged.
 
 ---
 
