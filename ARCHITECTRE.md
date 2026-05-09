@@ -39,9 +39,9 @@ accidentally-committed ignored trees.
 
 `complexity.compute_all(path)` handles full-file metrics.
 `complexity.compute_for_source(snippet)` handles block snippets (no MI;
-MI is copied from the parent file in `stats.build_block_stats` (see `stats/pipeline.py`).
+MI is copied from the parent file in `stats.build_block_stats`).
 
-### 1.4 Aggregation (`stats/` package)
+### 1.4 Aggregation (`stats.py`)
 
 **File rows** (`build_stats`): one `Statistic` per file. `score` is the product
 of `score_metrics` values (the "product recipe").
@@ -78,7 +78,7 @@ similarity_score, similarity_band, match_count,
 score, score_band, score_subscores
 ```
 
-Defined in `statistic_row.py` (frozen dataclass; kept separate from `stats/` to avoid import cycles).
+Defined in `stats.py:46–70`.
 
 ---
 
@@ -86,7 +86,7 @@ Defined in `statistic_row.py` (frozen dataclass; kept separate from `stats/` to 
 
 ### 3.1 Product Recipe (File + Block Fallback)
 
-`stats._score` (implemented in `stats/core.py`): multiply each metric value. Used for file-level
+`stats._score(stat, metrics)`: multiply each metric value. Used for file-level
 scoring and as the block fallback when `score_aggregation.enabled` is false.
 
 ### 3.2 Aggregated Risk Score (`score.py`, Block Only)
@@ -101,7 +101,7 @@ scoring and as the block fallback when `score_aggregation.enabled` is false.
 4. **Band assignment** from `band_edges` / `band_names`.
 
 `smell_burden` has a separate finalization path in
-`stats._finalize_smell_burden` (`stats/core.py`): within-run max normalization of counts × severity.
+`stats._finalize_smell_burden`: within-run max normalization of counts × severity.
 
 ---
 
@@ -169,7 +169,7 @@ that path so dashboard explanations use the same weights as MCP/CLI.
 | **Path**       | `<repo>/.hotspottriage/cache/blocks.pkl` |
 | **Content**    | `list[dict]` — one dict per function/method with **all** metrics, score, and cache metadata (`_blob_sha`, `_start`, `_end`) |
 | **Invalidation** | Each row stores the file's blob SHA at the time of computation. On the next run, if the current blob SHA matches → churn is reused. If not → `git log -L` recomputes it. |
-| **Write**      | `build_block_stats` (`stats/orchestration.py`) saves after assembling all rows |
+| **Write**      | `build_block_stats` in `stats.py` saves after assembling all rows |
 | **Load (churn reuse)** | `build_block_stats` loads previous rows, passes to `block_churn.compute_many` which checks `_blob_sha` match |
 | **Load (dashboard)** | `cache.load_block_results(repo)` deserializes the list for instant heatmap hydration |
 | **Metadata**   | `metadata.json` alongside pickle: `generated_at`, `entry_count`, `version` |
