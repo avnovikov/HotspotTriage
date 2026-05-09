@@ -7,6 +7,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from hotspottriage.dashboard.scores_doc import scores_doc_html
+
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
@@ -36,5 +38,4 @@ def dashboard_scores(request: Request) -> HTMLResponse:
 @router.get("/dashboard/scores/raw", response_class=HTMLResponse)
 def dashboard_scores_raw() -> HTMLResponse:
     """Raw SCORES.md HTML for embedding in an iframe."""
-    from hotspottriage.dashboard.server import _scores_doc_html
-    return HTMLResponse(_scores_doc_html())
+    return HTMLResponse(scores_doc_html())
