@@ -54,6 +54,8 @@ def test_block_narrative_endpoint():
     assert data["score_driver"]
     assert isinstance(data["score_explanation"], list)
     assert "Primary driver:" in data["score_narrative"]
+    assert "score contribution" in data["score_narrative"]
+    assert any("score_contribution" in x for x in data["score_explanation"])
 
 
 def test_block_narrative_400_without_path():
@@ -477,9 +479,9 @@ def test_stats_heatmap_sorts_and_limits():
     assert data["rows"][1]["path"] == "c::z"
 
 
-def test_stats_heatmap_column_maxima_excludes_meta_aggregate_row():
+def test_stats_heatmap_column_maxima_excludes_meta_aggregate_row(tmp_path):
     """Meta rows (path ``__...``) must not dominate heatmap tint maxima."""
-    srv = _server()
+    srv = _server(config_patch_path=tmp_path / "no_dashboard_patch.yml")
     srv.publish_latest_block_metrics(
         [
             {"path": "__aggregate_similarity__::repo", "score": 0.99, "complexity_burden": 0.95},

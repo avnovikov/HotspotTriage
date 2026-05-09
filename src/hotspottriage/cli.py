@@ -346,7 +346,9 @@ def main(argv: list[str] | None = None) -> int:
                         continue
                     rec = pm.get(s.score_band)
                     rec_s = rec if isinstance(rec, str) else None
-                    narrative = explain.explain_score(s, recommended_action=rec_s)
+                    narrative = explain.explain_score(
+                        s, recommended_action=rec_s, final_weights=s.score_final_weights
+                    )
                     if narrative:
                         print()
                         print(narrative)

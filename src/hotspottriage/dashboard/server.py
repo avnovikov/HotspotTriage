@@ -839,12 +839,31 @@ class DashboardServer:
                         cand = pm.get(stat.score_band)
                         if isinstance(cand, str):
                             rec = cand
-                    narrative = _explain_mod.explain_score(stat, recommended_action=rec)
+                    fw_map = _score_mod.final_weight_multipliers_for_burdens(
+                        snap,
+                        similarity_available=bool(snap.get("similarity_enabled", True)),
+                    )
+                    if fw_map is not None and stat.score_subscores:
+                        expl = _explain_mod.build_score_explanation(
+                            stat, final_weights=fw_map
+                        )
+                        driver = _explain_mod.score_driver_from_subscores(
+                            stat.score_subscores, final_weights=fw_map
+                        )
+                        narrative = _explain_mod.explain_score(
+                            stat, recommended_action=rec, final_weights=fw_map
+                        )
+                    else:
+                        expl = list(stat.score_explanation)
+                        driver = stat.score_driver
+                        narrative = _explain_mod.explain_score(
+                            stat, recommended_action=rec
+                        )
                     return {
                         "path": raw_path,
                         "score_narrative": narrative,
-                        "score_explanation": list(stat.score_explanation),
-                        "score_driver": stat.score_driver,
+                        "score_explanation": expl,
+                        "score_driver": driver,
                     }
             raise HTTPException(
                 status_code=404,

@@ -39,6 +39,7 @@ _DERIVED_BLOCK_CACHE_KEYS = frozenset(
         "score_subscores",
         "score_driver",
         "score_explanation",
+        "score_final_weights",
     }
 )
 
@@ -477,14 +478,18 @@ def _apply_risk_scores(
         }
         enriched = _risk_score.compute_score(rec, cfg, similarity_available=similarity_enabled)
         sub = dict(enriched["score_subscores"])
+        fw_map = _risk_score.final_weight_multipliers_for_burdens(
+            cfg, similarity_available=similarity_enabled
+        )
         tmp = replace(
             st,
             score=float(enriched["score"]),
             score_band=str(enriched["score_band"]),
             score_subscores=sub,
+            score_final_weights=fw_map,
         )
-        explanation = _explain.build_score_explanation(tmp)
-        driver = _explain.score_driver_from_subscores(sub)
+        explanation = _explain.build_score_explanation(tmp, final_weights=fw_map)
+        driver = _explain.score_driver_from_subscores(sub, final_weights=fw_map)
         out[idx] = replace(
             tmp,
             score_driver=driver,
@@ -599,6 +604,10 @@ def statistic_from_complete_dict(row: dict[str, Any]) -> Statistic:
         if isinstance(expl_raw, list)
         else []
     )
+    sfw_raw = row.get("score_final_weights")
+    sfw: dict[str, float] | None = None
+    if isinstance(sfw_raw, dict) and sfw_raw:
+        sfw = {str(k): float(v) for k, v in sfw_raw.items()}
     st = Statistic(
         path=str(row.get("path", "")),
         sloc=int(row.get("sloc", 0)),
@@ -622,12 +631,13 @@ def statistic_from_complete_dict(row: dict[str, Any]) -> Statistic:
         score_subscores=subs,
         score_driver=str(row.get("score_driver", "")),
         score_explanation=expl,
+        score_final_weights=sfw,
     )
     if subs and not expl:
         st = replace(
             st,
-            score_explanation=_explain.build_score_explanation(st),
-            score_driver=_explain.score_driver_from_subscores(subs),
+            score_explanation=_explain.build_score_explanation(st, final_weights=sfw),
+            score_driver=_explain.score_driver_from_subscores(subs, final_weights=sfw),
         )
     return st
 

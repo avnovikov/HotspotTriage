@@ -225,6 +225,29 @@ def compute_score(
     return out
 
 
+def final_weight_multipliers_for_burdens(
+    merged_config: dict[str, Any], *, similarity_available: bool
+) -> dict[str, float] | None:
+    """Return normalized ``final_weights`` per burden key used in :func:`compute_score`.
+
+    When block score aggregation is disabled, returns ``None``. Otherwise returns
+    the same map passed internally to combine burdens into ``score`` (including
+    re-normalization when similarity is unavailable).
+
+    Multiplying each burden in ``score_subscores`` by these values yields the
+    burden's **contribution** to the composite score (the five contributions sum
+    to ``score``).
+    """
+    if not score_aggregation_enabled(merged_config):
+        return None
+    agg = effective_score_aggregation(merged_config)
+    fw_raw = agg.get("final_weights") or {}
+    if not isinstance(fw_raw, dict):
+        raise ValueError("score_aggregation.final_weights must be a dict")
+    fw = {str(k): float(v) for k, v in fw_raw.items() if isinstance(v, (int, float))}
+    return _effective_final_weights(fw, similarity_available=similarity_available)
+
+
 def validate_score_aggregation(config: dict[str, Any]) -> None:
     """Validate ``score_aggregation``; no-op if disabled or missing."""
     agg = config.get("score_aggregation")

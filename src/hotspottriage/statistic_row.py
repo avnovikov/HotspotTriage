@@ -34,9 +34,8 @@ class Statistic:
     score_subscores: dict[str, float] = field(default_factory=dict)
     score_driver: str = ""
     score_explanation: list[dict[str, Any]] = field(default_factory=list)
-
-    def as_dict(self) -> dict:
-        return asdict(self)
+    # Normalized ``final_weights`` map used with ``score_subscores`` (block runs).
+    score_final_weights: dict[str, float] | None = None
 
     def as_dict(self) -> dict:
         return asdict(self)

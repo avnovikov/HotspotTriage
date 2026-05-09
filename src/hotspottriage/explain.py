@@ -3,6 +3,10 @@
 Used by CLI, MCP ``analyze``, and the dashboard so wording stays consistent.
 Template copy lives here only — surfaces call :func:`explain_score` /
 :func:`build_score_explanation` instead of embedding duplicate prose in JS.
+
+When ``final_weights`` (or :attr:`Statistic.score_final_weights`) is present,
+ordering and ``score_driver`` follow **score contributions**
+(``final_weight × burden``), matching :func:`hotspottriage.score.compute_score`.
 """
 from __future__ import annotations
 
@@ -18,37 +22,91 @@ BURDEN_TO_DRIVER: dict[str, str] = {
     "similarity_burden": "similarity",
 }
 
+# Tie-break when contributions or burdens are equal (aligns with score.py keys).
+_BURDEN_TIE_ORDER = (
+    "complexity_burden",
+    "churn_burden",
+    "maintainability_burden",
+    "smell_burden",
+    "similarity_burden",
+)
+_BURDEN_TIE_INDEX = {k: i for i, k in enumerate(_BURDEN_TIE_ORDER)}
 
-def score_driver_from_subscores(subscores: dict[str, float]) -> str:
-    """Short driver label for the largest burden key (e.g. ``\"complexity\"``)."""
+
+def _resolve_final_weights(
+    stat: Statistic,
+    final_weights: dict[str, float] | None,
+) -> dict[str, float] | None:
+    if final_weights is not None:
+        return final_weights
+    return stat.score_final_weights
+
+
+def score_driver_from_subscores(
+    subscores: dict[str, float],
+    *,
+    final_weights: dict[str, float] | None = None,
+) -> str:
+    """Short driver label: largest burden, or largest score contribution when weighted."""
     if not subscores:
         return ""
-    best_key = max(subscores.items(), key=lambda kv: kv[1])[0]
+    if final_weights:
+        def contribution(k: str) -> float:
+            return float(subscores[k]) * float(final_weights.get(str(k), 0.0))
+
+        best_key = max(
+            subscores.keys(),
+            key=lambda k: (contribution(str(k)), -_BURDEN_TIE_INDEX.get(str(k), 99)),
+        )
+    else:
+        best_key = max(
+            subscores.items(),
+            key=lambda kv: (float(kv[1]), -_BURDEN_TIE_INDEX.get(str(kv[0]), 99)),
+        )[0]
     return BURDEN_TO_DRIVER.get(str(best_key), str(best_key).removesuffix("_burden"))
 
 
-def build_score_explanation(stat: Statistic) -> list[dict[str, Any]]:
+def build_score_explanation(
+    stat: Statistic,
+    *,
+    final_weights: dict[str, float] | None = None,
+) -> list[dict[str, Any]]:
     """Ranked burden breakdown with raw metrics for tooltips and JSON.
 
-    Each item is ``{\"driver\", \"burden\", \"raw\"}`` where *driver* is a short
-    stable key (``complexity``, ``churn``, …).
+    Each item includes ``driver``, ``burden``, ``raw``. When ``final_weights``
+    is set (or ``stat.score_final_weights``), items are sorted by descending
+    ``score_contribution`` (= ``final_weight × burden``) and include
+    ``final_weight`` and ``score_contribution`` fields.
     """
     subs = stat.score_subscores
     if not subs:
         return []
-    ordered = sorted(subs.items(), key=lambda kv: float(kv[1]), reverse=True)
-    out: list[dict[str, Any]] = []
-    for key, burden in ordered:
+    fw = _resolve_final_weights(stat, final_weights)
+    rows: list[tuple[str, float, float | None, float]] = []
+    for key, burden in subs.items():
         bkey = str(key)
+        burden_f = float(burden)
+        if fw and bkey in fw:
+            w = float(fw[bkey])
+            rows.append((bkey, burden_f, w, w * burden_f))
+        else:
+            rows.append((bkey, burden_f, None, burden_f))
+    rows.sort(
+        key=lambda t: (-t[3], _BURDEN_TIE_INDEX.get(t[0], 99)),
+    )
+    out: list[dict[str, Any]] = []
+    for bkey, burden_f, w, contribution in rows:
         driver = BURDEN_TO_DRIVER.get(bkey, bkey.removesuffix("_burden"))
         raw = _raw_snippet_for_burden(bkey, stat)
-        out.append(
-            {
-                "driver": driver,
-                "burden": round(float(burden), 4),
-                "raw": raw,
-            }
-        )
+        item: dict[str, Any] = {
+            "driver": driver,
+            "burden": round(burden_f, 4),
+            "raw": raw,
+        }
+        if w is not None:
+            item["final_weight"] = round(w, 4)
+            item["score_contribution"] = round(contribution, 4)
+        out.append(item)
     return out
 
 
@@ -134,9 +192,11 @@ def explain_score(
     stat: Statistic,
     *,
     recommended_action: str | None = None,
+    final_weights: dict[str, float] | None = None,
 ) -> str:
     """Multi-line narrative for CLI, MCP rows, and dashboard detail API."""
-    expl = build_score_explanation(stat)
+    fw = _resolve_final_weights(stat, final_weights)
+    expl = build_score_explanation(stat, final_weights=fw)
     if not expl:
         return ""
     band_raw = str(stat.score_band).strip()
@@ -153,10 +213,19 @@ def explain_score(
         label_d = _driver_label(driver)
         burden = float(item["burden"])
         phrase = _format_raw_phrase(driver, item.get("raw") or {})
-        if phrase:
-            lines.append(f"{label:<18} {label_d} ({burden:.2f}) — {phrase}")
+        if "score_contribution" in item and "final_weight" in item:
+            c = float(item["score_contribution"])
+            w = float(item["final_weight"])
+            core = (
+                f"{label:<18} {label_d} (score contribution {c:.2f} = "
+                f"final_weight {w:.2f} × burden {burden:.2f})"
+            )
         else:
-            lines.append(f"{label:<18} {label_d} ({burden:.2f})")
+            core = f"{label:<18} {label_d} ({burden:.2f})"
+        if phrase:
+            lines.append(f"{core} — {phrase}")
+        else:
+            lines.append(core)
     rec: str | None = recommended_action
     if not rec and band_l in ("high", "critical"):
         rec = "Human review"

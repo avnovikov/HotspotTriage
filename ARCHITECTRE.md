@@ -304,7 +304,12 @@ All shared mutable state protected by dedicated `threading.Lock` instances.
    `path::symbol` into `file` + `method`, sorts by file max score
    then method score, applies limit.
 
-3. Frontend `refreshHeatmap` renders the green→yellow→orange→red
+3. Score narratives (`explain.py`, CLI/MCP/dashboard ``block_narrative``) sort
+   burdens by **``final_weight × burden``** (contribution to composite ``score``)
+   when aggregation is enabled; heatmap cells still show raw burdens and
+   composite ``score``.
+
+4. Frontend `refreshHeatmap` renders the green→yellow→orange→red
    color-coded table.
 
 ### 7.4 Path Normalization

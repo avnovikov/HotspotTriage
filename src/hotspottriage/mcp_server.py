@@ -732,6 +732,7 @@ def _mcp_compact_score_rows(
         narrative = _explain.explain_score(
             r,
             recommended_action=_proposed_model_for_band(score_band, merged_config),
+            final_weights=r.score_final_weights,
         )
         out.append(
             {
