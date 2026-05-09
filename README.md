@@ -184,5 +184,7 @@ Tips:
 | [docs/block-cache-model.md](docs/block-cache-model.md) | Block cache format and semantics |
 | [docs/agent-hotspottriage-score-check.md](docs/agent-hotspottriage-score-check.md) | MCP score check before editing hotspots (agent workflow) |
 | [CONTRIBUTING.md](CONTRIBUTING.md#13-ssh-commit-and-tag-signing-required) | SSH-signed commits and tags setup (one-time workstation config) |
+| [SUPPORT.md](SUPPORT.md) | Support policy, supported versions, EOL process (UK PSTI / EU CRA) |
+| [SECURITY.md](SECURITY.md) | Security policy, VDP, regulatory cross-reference mapping |
 
 Developing this repo: **`./scripts/install_hotspottriage.sh --venv`** (or **`uv sync`**); run **`uv lock`** after dependency changes in `pyproject.toml`. Run **`pytest`** (or `uv run pytest`) before merging; architecture notes live in [ARCHITECTRE.md](ARCHITECTRE.md) above.
