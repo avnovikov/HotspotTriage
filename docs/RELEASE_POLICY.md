@@ -2,7 +2,7 @@
 
 > **Document owner:** Repository maintainer (`@avnovikov`)
 > **Review cadence:** At each release milestone, or upon any significant change to the release toolchain
-> **Applicable frameworks:** NIST SP 800-218 (SSDF), NIST SP 800-53 Rev 5, ISO/IEC 27001:2022, COBIT 2019
+> **Applicable frameworks:** NIST SP 800-218 (SSDF), NIST SP 800-53 Rev 5, ISO/IEC 27001:2022, COBIT 2019, EU CRA (Art. 13)
 > **Status:** Active
 > **Relates to:** [Issue #105](https://github.com/avnovikov/HotspotTriage/issues/105)
 
@@ -20,7 +20,7 @@ It satisfies the following NIST Secure Software Development Framework (SSDF) SP 
 | **PS.3.1** | Archive each release and protect it from tampering |
 | **PW.8.2** | Ensure that all security findings are addressed prior to public release |
 
-These requirements align with ISO/IEC 27001:2022 Annex A controls and COBIT 2019 governance objectives as noted throughout.
+These requirements align with ISO/IEC 27001:2022 Annex A controls, COBIT 2019 governance objectives, and EU Cyber Resilience Act (CRA) Article 13 as noted throughout.
 
 ---
 
@@ -165,22 +165,42 @@ Release tags (`v*`) must be protected:
 - No deletion of release tags
 - Enforced via GitHub repository **tag protection rules** (Settings → Rules → Tag protection)
 
-### 4.4 SBOM Generation Policy
+### 4.4 SBOM Generation and Publication Policy
 
-> *NIST SSDF PS.2.1 — document the provenance of all third-party components included in each software release*
-> *ISO 27001:2022 reference: A.5.19 (Information security in supplier relationships), A.5.20 (Addressing security within supplier agreements)*
+> *EU CRA reference: Article 13(1) — publicly accessible SBOM*
+> *EU CRA reference: Article 13(3) — covers all components including dependencies*
+> *NIST SSDF reference: PS.2.1 — document the provenance of all third-party components*
+> *ISO 27001:2022 reference: A.5.19 (Information security in supplier relationships)*
 > *COBIT 2019 reference: APO10 (Vendor Management), BAI03 (Solution Identification and Build)*
 > *NIST SP 800-53 reference: SR-3 (Supply Chain Controls and Processes), SR-4 (Provenance)*
 
-A **Software Bill of Materials (SBOM)** in CycloneDX JSON format must be generated and published as part of every release. The SBOM documents the complete provenance of all runtime and development components included in the release, satisfying NIST SSDF PS.2.1 and supporting downstream supply chain transparency.
+A **Software Bill of Materials (SBOM)** in CycloneDX JSON format must be generated and published as part of every release. The SBOM documents the complete provenance of all runtime and development components included in the release.
 
 #### Requirements
 
-- **Format:** CycloneDX JSON (`sbom.cdx.json`) — machine-readable, widely supported by enterprise security tooling
-- **Scope:** All components in the active Python environment at release time (runtime + dev dependencies)
-- **Timing:** Generated after `uv sync` and `uv build` complete, before the release tag is pushed
-- **Publication:** Attached to the GitHub Release entry alongside the wheel and sdist artefacts
-- **Tooling:** `cyclonedx-bom` via `cyclonedx-py` (see [Issue #107](https://github.com/avnovikov/HotspotTriage/issues/107) for CI automation)
+| Requirement | Value |
+|-------------|-------|
+| Format | CycloneDX JSON |
+| Asset filename | `sbom.cdx.json` (fixed name — do not rename) |
+| Scope | All direct **and** transitive dependencies as resolved in `uv.lock` |
+| Timing | Generated after `uv sync` and `uv build`, before the release tag is pushed |
+| Publication | Attached to the GitHub Release entry alongside wheel and sdist artefacts |
+| Accessibility | **Publicly accessible without authentication** — do not restrict release asset visibility |
+| Retention | Retained for the **lifetime of the release** — release assets must not be deleted |
+
+#### EU CRA Public Accessibility Statement
+
+In compliance with **EU Cyber Resilience Act Article 13**, the SBOM for every release of
+HotspotTriage is:
+
+- Attached as a named asset (`sbom.cdx.json`) to the corresponding GitHub Release
+- Publicly accessible without authentication at:
+  ```
+  https://github.com/avnovikov/HotspotTriage/releases/tag/vX.Y.Z
+  ```
+  (Download `sbom.cdx.json` from the Assets section of the release page)
+- Covers all direct and transitive dependencies as resolved in `uv.lock` at release time
+- Retained permanently — no release assets may be deleted after publication
 
 #### Generation command
 
