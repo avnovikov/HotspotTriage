@@ -200,21 +200,95 @@ Vulnerabilities are classified using CVSS v3.1 base scores. The following SLA ti
 5. **Disclosure** — Following remediation, a public advisory is published via GitHub Security Advisories.
 6. **Escalation** — If the SLA cannot be met (e.g., upstream dependency has no fix available), a mitigating control or workaround is documented and communicated.
 
-### 6.3 Automated Vulnerability Detection
+### 6.3 Monitoring Activities — ISO 27001:2022 A.8.16
 
-The following automated controls support ongoing vulnerability detection:
+> *ISO 27001:2022 reference: A.8.16 (Monitoring activities)*
+> *NIST SP 800-53 reference: SI-4 (System Monitoring), SI-2 (Flaw Remediation)*
+> *COBIT 2019 reference: DSS05.07 (Monitor the Infrastructure for Security-Related Events)*
 
-| Control | Type | Tooling |
-|---------|------|---------|
-| Dependency vulnerability scanning | Detective | GitHub Dependabot, OSV scanner |
-| Static code analysis (SAST) | Detective | GitHub CodeQL |
-| Secret scanning | Detective | GitHub Secret Scanning |
+Security monitoring operates at two levels: **pre-merge** (CI pipeline) and **post-release** (continuous and scheduled).
 
-> *These controls collectively address NIST RV.2.2, ISO 27001:2022 A.8.8, and COBIT DSS05.07.*
+#### Pre-merge controls (CI pipeline — every PR)
+
+| Control | Tooling | Trigger |
+|---------|---------|----------|
+| Dependency vulnerability scan | Trivy (fs, CRITICAL/HIGH) | Every PR and push to `main` |
+| Static code analysis (SAST) | GitHub CodeQL | Every PR and push to `main` |
+| Secret scanning | Gitleaks | Every PR and push to `main` |
+| Security gate | CI pass/fail block | Every PR — merge blocked on failure |
+
+#### Post-release controls (continuous and scheduled)
+
+| Control | Tooling | Cadence | Purpose |
+|---------|---------|---------|----------|
+| Dependency CVE monitoring | GitHub Dependabot | Continuous | Detects CVEs published against pinned dependencies post-release; alerts routed to maintainer via GitHub notifications |
+| Scheduled filesystem scan | Trivy (fs, CRITICAL/HIGH) via `security.yml` cron | Weekly (Monday 02:00 UTC) | Catches newly published CVEs between releases |
+| `uv.lock` CVE review | Manual `pip-audit` run | At every release milestone | Ensures no unaddressed CVEs exist in the locked dependency graph before tagging |
+
+#### Post-release response SLA
+
+When a CVE alert is received post-release (via Dependabot or Trivy scheduled scan), the response SLA from §6.1 applies:
+
+| Severity | Triage deadline | Hotfix release deadline |
+|----------|----------------|-------------------------|
+| Critical (CVSS 9.0–10.0) | Within 24 hours of alert | Within 24 hours of confirmation |
+| High (CVSS 7.0–8.9) | Within 48 hours of alert | Within 7 calendar days |
+| Medium (CVSS 4.0–6.9) | Within 7 days of alert | Next scheduled release |
+| Low (CVSS 0.1–3.9) | Backlog triage | Next scheduled release |
+
+If an upstream dependency has no available fix within the SLA window, a documented mitigating control or workaround must be published as a GitHub Security Advisory. The hotfix process is defined in `docs/RELEASE_POLICY.md` §6.
 
 ---
 
-## 7. Document Control
+## 7. Configuration Baseline — ISO 27001:2022 A.8.9
+
+> *ISO 27001:2022 reference: A.8.9 (Configuration management)*
+> *NIST SP 800-53 reference: CM-2 (Baseline Configuration), CM-3 (Configuration Change Control), CM-6 (Configuration Settings)*
+> *COBIT 2019 reference: BAI10 (Manage Configuration)*
+
+This section defines the authorised configuration baseline for HotspotTriage. Any deviation from this baseline must be introduced via a PR with at least one maintainer approval and reflected in an update to this document.
+
+### 7.1 Runtime Environment
+
+| Component | Authorised value | Enforcement |
+|-----------|-----------------|-------------|
+| Python version | 3.11, 3.12, or 3.13 | `requires-python = ">=3.11,<3.14"` in `pyproject.toml`; CI matrix in `tests.yml` |
+| Package manager | `uv` (latest stable) | `uv.lock` present in repository root; all installs via `uv sync` |
+| Dependency pinning | Hash-verified via `uv.lock` | `uv sync` enforces hash verification; direct `pip install` without lockfile is not permitted for production installs |
+| Build backend | `hatchling` (PyPA-endorsed) | `[build-system] requires = ["hatchling"]` in `pyproject.toml`; produces wheel and sdist via `uv build` |
+
+> **Note on Hatchling:** Hatchling is the build backend component of the [Hatch](https://hatch.pypa.io) project, maintained by the Python Packaging Authority (PyPA). It is invoked by `uv build` to produce the wheel (`.whl`) and source distribution (`.tar.gz`) release artefacts. It is a well-maintained, PyPA-endorsed standard with no network access at build time.
+
+### 7.2 Code Quality Baseline
+
+| Control | Requirement | Verification command |
+|---------|-------------|---------------------|
+| Linting | `pylint` score ≥ 9.0 across `src/hotspottriage/` | `uv run pylint src/hotspottriage --fail-under=9.0` |
+| No Error/Fatal findings | Zero `pylint` E or F category findings | Included in above command output |
+| Programmatic enforcement | `[tool.pylint.main] fail-under = 9.0` to be added to `pyproject.toml` | Tracked as a separate code-change PR |
+
+### 7.3 Security Configuration Baseline
+
+| Control | Requirement | Enforcement |
+|---------|-------------|-------------|
+| No hardcoded secrets | No secrets, credentials, or tokens in any file | Gitleaks on every PR (blocks merge) |
+| Dashboard binding | `127.0.0.1` only | Implemented in [#84](https://github.com/avnovikov/HotspotTriage/issues/84); CodeQL verified |
+| MCP transport | stdio only — no network socket | Architectural requirement; see §3.1 |
+| Branch protection | Signed commits required on `main`; PRs require ≥1 approval | GitHub branch protection rules |
+| Tag protection | Release tags (`v*`) protected — no force-push, no deletion | GitHub tag protection rules |
+
+### 7.4 Change Control
+
+Any change to the authorised configuration baseline defined in this section must:
+
+1. Be proposed via a feature or docs PR referencing the relevant issue
+2. Receive at least one maintainer approval before merge
+3. Be reflected in an update to this section in the same PR
+4. Be noted in `CHANGELOG.md` under `[Unreleased]`
+
+---
+
+## 8. Document Control
 
 | Attribute | Value |
 |-----------|-------|
@@ -222,4 +296,4 @@ The following automated controls support ongoing vulnerability detection:
 | Last reviewed | 2026-05-09 |
 | Next review | At next release milestone |
 | Approved by | @avnovikov |
-| Related documents | `SECURITY.md`, `CONTRIBUTING.md` (issue #108), `RELEASE_POLICY.md` (issue #105) |
+| Related documents | `SECURITY.md`, `CONTRIBUTING.md`, `docs/RELEASE_POLICY.md` |
