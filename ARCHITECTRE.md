@@ -426,15 +426,19 @@ All registered as `[project.scripts]` in `pyproject.toml`.
 
 ---
 
-## 12. Dashboard UI (`dashboard/html.py`)
+## 12. Dashboard UI (Jinja templates + static JS)
 
-Single-file HTML/CSS/JS served at `/dashboard/`. Three views via hash routing:
+The dashboard is **multi-page** FastAPI + **Jinja2** (`dashboard/templates/`) with shared **static JS** under `dashboard/static/js/`. Routes (see `dashboard/routes/pages.py`):
 
-| Route       | Content |
-|-------------|---------|
-| `#overview` | Project path, granularity; labeled cache fields (repository root, include/exclude patterns); **Save cache settings**; check/generate cache; log viewer |
-| `#heatmap`  | Read-only **repository root** (copied from Overview); limit control; **Update Heatmap**; color-coded matrix |
-| `#config`   | Normalization breakpoint editors; weight sliders; save/refresh config |
+| Path | Template | Role |
+|------|----------|------|
+| `/dashboard/` | `overview.html` | Cache actions, logs, stats |
+| `/dashboard/heatmap` | `heatmap.html` | Heatmap matrix, presentation filter |
+| `/dashboard/config` | `config.html` | Normalisation editors, score weights/bands |
+| `/dashboard/scores` | `scores.html` | Embedded scores documentation |
 
-The Heatmap tab shows the same repo path as Overview via `syncHeatmapRepoDisplay()` (not editable there).
-Cache context is persisted when the user clicks **Save cache settings** or when **Check Cache** / **Generate Cache** runs (best-effort save before the action).
+`base.html` holds shared chrome (nav, theme, styles). Behaviour lives in `shared.js`, `overview.js`, `heatmap.js`, `config.js` — not in a Python string monolith.
+
+The Heatmap page shows the same repo path as Overview via `syncHeatmapRepoDisplay()` (read-only there). Cache context is persisted when the user saves cache settings or when **Check Cache** / **Generate Cache** runs (best-effort save before the action).
+
+The legacy single-file `dashboard/html.py` (`DASHBOARD_HTML`) has been **removed**; do not reintroduce duplicate HTML/JS in Python.
