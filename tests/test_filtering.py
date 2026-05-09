@@ -9,8 +9,23 @@ from hotspottriage.filtering import (
     make_filter,
     make_tracked_path_predicate,
     normalize_directory_prefix,
+    normalize_filter_pattern,
 )
 from tests.fixtures.build_repo import build_repo
+
+
+def test_normalize_filter_pattern_strips_dot_slash_and_backslashes():
+    assert normalize_filter_pattern("./tests/**") == "tests/**"
+    assert normalize_filter_pattern("././pkg/foo.py") == "pkg/foo.py"
+    assert normalize_filter_pattern(".\\src\\x.py") == "src/x.py"
+    assert normalize_filter_pattern("!./vendor/**") == "!vendor/**"
+    assert normalize_filter_pattern("!././x.py") == "!x.py"
+
+
+def test_make_filter_accepts_dot_slash_patterns():
+    keep = make_filter(["./tests/**", "**/*.py"])
+    assert keep("tests/a.py")
+    assert not keep("pkg/tests/a.py")
 
 
 def test_no_patterns_keeps_everything():

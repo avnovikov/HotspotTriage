@@ -185,6 +185,33 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       padding: 0.35rem 0.5rem;
       min-width: 140px;
     }
+    input::placeholder {
+      color: var(--muted);
+      opacity: 0.72;
+    }
+    .field {
+      display: grid;
+      gap: 0.2rem;
+    }
+    .field-label {
+      font-size: 0.78rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .cache-form .wide-input {
+      min-width: min(100%, 520px);
+      width: 100%;
+      max-width: 100%;
+    }
+    .readonly-repo-display {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.35rem 0.5rem;
+      min-height: 2rem;
+      word-break: break-word;
+      color: var(--muted);
+      background: rgba(127, 127, 127, 0.06);
+    }
     .status-box {
       margin-top: 0.5rem;
       border: 1px solid var(--border);
@@ -431,17 +458,31 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </section>
         <section class="wide">
           <h2>Cache Actions</h2>
+          <div class="cache-form stack" style="margin-bottom: 0.5rem;">
+            <label class="field" for="cacheTargetInput">
+              <span class="field-label">Repository root</span>
+              <input id="cacheTargetInput" class="wide-input" type="text" placeholder="/absolute/path/to/repo or ../OtherProject" />
+            </label>
+            <label class="field" for="cacheIncludeInput">
+              <span class="field-label">Include pattern(s)</span>
+              <input id="cacheIncludeInput" class="wide-input" type="text" placeholder="**/*.py" />
+            </label>
+            <label class="field" for="cacheExcludeInput">
+              <span class="field-label">Exclude pattern(s)</span>
+              <input id="cacheExcludeInput" class="wide-input" type="text" placeholder="comma-separated globs (leading ! optional)" />
+            </label>
+            <p class="muted" style="font-size:0.72rem; margin:0.35rem 0 0;">Use gitignore syntax: comma-separated patterns, combined with AND; prefix with <code>!</code> to exclude. Leading <code>./</code> is stripped automatically.</p>
+          </div>
           <div class="toolbar" style="flex-wrap: wrap;">
-            <input id="cacheTargetInput" type="text" placeholder="../LexVox" />
-            <input id="cacheFilterInput" type="text" placeholder="filter (optional)" />
-            <input id="cacheScoreInput" type="text" placeholder="score metrics" value="churn_per_sloc,cyclomatic" />
+            <button id="cacheSaveCtxBtn" type="button">Save cache settings</button>
+            <span id="cacheSaveCtxStatus" class="muted" style="font-size:0.78rem;"></span>
             <button id="checkCacheBtn" type="button">Check Cache</button>
             <button id="generateCacheBtn" type="button">Generate Cache</button>
           </div>
           <div id="cacheContextPanel" class="mono" style="margin-top: 0.45rem;">
 Path: n/a
 Cache Status: unknown
-Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
+Build Parameters: include=<default **/*.py>, exclude=<none>
           </div>
           <div id="cacheStatus" class="status-box muted">Idle</div>
           <div class="progress-wrap"><div id="cacheProgress" class="progress-bar"></div></div>
@@ -467,10 +508,13 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
           <label>Limit
             <input id="heatmapLimitInput" type="number" min="1" max="500" value="500" style="width:5rem;min-width:0;" />
           </label>
-          <label>Presentation filter
-            <input id="heatmapViewFilterInput" type="text" placeholder="path or function (optional)" />
-          </label>
           <span id="heatmapStatus" class="muted" style="font-size:0.78rem;"></span>
+        </div>
+        <div class="field" style="margin-bottom:0.55rem;">
+          <span class="field-label">Repository root</span>
+          <div id="heatmapRepoRootDisplay" class="mono readonly-repo-display" role="status" aria-live="polite">—</div>
+          <span class="muted" style="font-size:0.72rem;">Edit path and patterns on <a href="#overview">Overview</a>.</span>
+          <span class="muted" style="font-size:0.72rem; display:block; margin-top:0.28rem;">Edit normalisation parameters in <a href="#config">Config</a>.</span>
         </div>
         <div id="heatmapPanel" class="muted">No heatmap rows yet.</div>
       </section>
@@ -515,9 +559,6 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
       pauseScroll: false,
       healthFailures: 0,
       activeCacheJobId: null,
-      heatmapRows: [],
-      heatmapColumns: [],
-      heatmapColumnMaxima: {},
       editorMN: null,
       editorSA: null,
       editorPM: null,
@@ -1162,7 +1203,6 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
       const lines = [
         ["Project path", project.path ?? "n/a"],
         ["Granularity", cfg.granularity ?? "n/a"],
-        ["Score metrics", cfg.score_metrics ?? []],
       ];
       el.innerHTML = lines
         .map(([k, v]) => `<div><strong>${k}</strong>: ${pretty(v)}</div>`)
@@ -1217,7 +1257,6 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
       const lines = [
         ["Project Path", project.path],
         ["Granularity", cfg.granularity],
-        ["Score Metrics", cfg.score_metrics || []],
         ["Decay Half-life", cfg.decay_half_life],
         ["Similarity Enabled", cfg.similarity_enabled],
         ["Dashboard default_target", dashboard.default_target],
@@ -1242,7 +1281,10 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
         if (sec) sec.classList.toggle("active", r === route);
         if (tab) tab.classList.toggle("active", r === route);
       });
-      if (route === "heatmap") refreshHeatmap();
+      if (route === "heatmap") {
+        syncHeatmapRepoDisplay();
+        refreshHeatmap();
+      }
       if (route === "config") {
         requestAnimationFrame(() => redrawAllNormMetrics());
       }
@@ -1332,64 +1374,15 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
     }
 
     function initHeatmapControls() {
-      mirrorCacheInputs("cache");
+      syncHeatmapRepoDisplay();
       $("heatmapUpdateBtn").addEventListener("click", updateHeatmapData);
-      $("heatmapViewFilterInput").addEventListener("input", renderHeatmapPanel);
     }
 
-    function applyHeatmapPresentationFilter(rows) {
-      const query = $("heatmapViewFilterInput").value.trim().toLowerCase();
-      if (!query) return rows;
-      return rows.filter((row) => {
-        const pathValue = String(row.file || "").toLowerCase();
-        const functionValue = String(row.method || "").toLowerCase();
-        return pathValue.includes(query) || functionValue.includes(query);
-      });
-    }
-
-    function renderHeatmapPanel() {
-      const panel = $("heatmapPanel");
-      const status = $("heatmapStatus");
-      const rows = applyHeatmapPresentationFilter(state.heatmapRows);
-      status.textContent = `${rows.length} row(s)`;
-      if (!rows.length) {
-        panel.className = "muted";
-        panel.textContent = state.heatmapRows.length
-          ? "No heatmap rows match the current filter."
-          : "No heatmap rows yet.";
-        return;
-      }
-      const cols = state.heatmapColumns;
-      const maxima = state.heatmapColumnMaxima;
-      const head = `<tr><th class="heatmap-file-col">file</th><th class="heatmap-method-col">method</th>${cols
-        .map((c) => {
-          const plain = String(c || "")
-            .replace(/_/g, " ")
-            .split(" ")
-            .filter(Boolean)
-            .join(" ");
-          return `<th class="heatmap-metric-th" title="${escapeAttr(plain)}">${heatmapColumnHeaderHtml(c)}</th>`;
-        })
-        .join("")}<th>band</th></tr>`;
-      const body = rows
-        .map((r) => {
-          const cells = cols
-            .map((c) => {
-              const v = Number(r[c]) || 0;
-              const pct = Math.min(1, Math.max(0, v / (maxima[c] || 1)));
-              return `<td class="heatmap-metric-cell" style="background:${heatColor(pct)};">${v.toFixed(3)}</td>`;
-            })
-            .join("");
-          return `<tr>
-  <td class="heatmap-file-col" title="${escapeAttr(r.file || "")}"><span class="heatmap-file-label">${escapeHtml(truncateLeftLabelToWidth(r.file || ""))}</span></td>
-  <td class="heatmap-method-col" title="${escapeAttr(r.method || "")}"><span class="heatmap-method">${escapeHtml(r.method || "")}</span></td>
-  ${cells}
-  <td>${escapeHtml(r.score_band || "")}</td>
-</tr>`;
-        })
-        .join("");
-      panel.className = "";
-      panel.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    function syncHeatmapRepoDisplay() {
+      const el = $("heatmapRepoRootDisplay");
+      if (!el) return;
+      const v = ($("cacheTargetInput").value || "").trim();
+      el.textContent = v || "—";
     }
 
     async function refreshHeatmap() {
@@ -1409,14 +1402,11 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
             typeof d === "string" ? d : Array.isArray(d) ? JSON.stringify(d) : "request failed";
           return;
         }
-        const rows = Array.isArray(data.rows) ? data.rows : [];
+        const rows = data.rows || [];
+        status.textContent = `${rows.length} row(s)`;
         if (!rows.length) {
-          state.heatmapRows = [];
-          state.heatmapColumns = [];
-          state.heatmapColumnMaxima = {};
           panel.className = "muted";
           panel.textContent = "No heatmap rows yet.";
-          status.textContent = "0 row(s)";
           return;
         }
         const cols = Array.isArray(data.columns) ? data.columns : [];
@@ -1435,17 +1425,42 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
           const src = eligible.length ? eligible : rows;
           maxima[c] = Math.max(...src.map((r) => Number(r[c]) || 0), 1e-9);
         });
-        state.heatmapRows = rows;
-        state.heatmapColumns = cols;
-        state.heatmapColumnMaxima = maxima;
-        renderHeatmapPanel();
+        const head = `<tr><th class="heatmap-file-col">file</th><th class="heatmap-method-col">method</th>${cols
+          .map((c) => {
+            const plain = String(c || "")
+              .replace(/_/g, " ")
+              .split(" ")
+              .filter(Boolean)
+              .join(" ");
+            return `<th class="heatmap-metric-th" title="${escapeAttr(plain)}">${heatmapColumnHeaderHtml(c)}</th>`;
+          })
+          .join("")}<th>band</th></tr>`;
+        const body = rows
+          .map((r) => {
+            const cells = cols
+              .map((c) => {
+                const v = Number(r[c]) || 0;
+                const pct = Math.min(1, Math.max(0, v / (maxima[c] || 1)));
+                return `<td class="heatmap-metric-cell" style="background:${heatColor(pct)};">${v.toFixed(3)}</td>`;
+              })
+              .join("");
+            return `<tr>
+  <td class="heatmap-file-col" title="${escapeAttr(r.file || "")}"><span class="heatmap-file-label">${escapeHtml(truncateLeftLabelToWidth(r.file || ""))}</span></td>
+  <td class="heatmap-method-col" title="${escapeAttr(r.method || "")}"><span class="heatmap-method">${escapeHtml(r.method || "")}</span></td>
+  ${cells}
+  <td>${escapeHtml(r.score_band || "")}</td>
+</tr>`;
+          })
+          .join("");
+        panel.className = "";
+        panel.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
       } catch (e) {
         status.textContent = String(e);
       }
     }
 
     async function updateHeatmapData() {
-      await generateCache("cache");
+      await generateCache();
       await refreshHeatmap();
     }
 
@@ -1453,16 +1468,18 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
 
     function updateCacheContext(statusText) {
       const target = $("cacheTargetInput").value.trim() || "n/a";
-      const filter = $("cacheFilterInput").value.trim() || "<none>";
-      const score = $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic";
+      const incRaw = $("cacheIncludeInput").value.trim();
+      const excRaw = $("cacheExcludeInput").value.trim();
+      const incDisp = incRaw ? incRaw : "<default **/*.py>";
+      const excDisp = excRaw ? excRaw : "<none>";
       $("cacheContextPanel").textContent =
 `Path: ${target}
 Cache Status: ${statusText}
-Build Parameters: filter=${filter}, score_metrics=${score}`;
+Build Parameters: include=${incDisp}, exclude=${excDisp}`;
     }
 
-    function mirrorCacheInputs(fromPrefix) {
-      if (fromPrefix !== "cache") return;
+    function mirrorCacheInputs() {
+      syncHeatmapRepoDisplay();
     }
 
     function pretty(v) {
@@ -1514,6 +1531,7 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
           $("cacheTargetInput").value = String(dashboard.default_target);
         }
         updateCacheContext("unknown");
+        syncHeatmapRepoDisplay();
         state.editorMN = clone(cfg.metric_normalization || {});
         state.editorSA = clone(cfg.score_aggregation || {});
         state.editorPM = clone(cfg.proposed_models || {});
@@ -1551,8 +1569,8 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
     function applyCacheContext(ctx, overwrite) {
       if (!ctx || typeof ctx !== "object") return;
       const targetIds = ["cacheTargetInput"];
-      const filterIds = ["cacheFilterInput"];
-      const scoreIds = ["cacheScoreInput"];
+      const includeIds = ["cacheIncludeInput"];
+      const excludeIds = ["cacheExcludeInput"];
       targetIds.forEach((id) => {
         const el = $(id);
         if (!el) return;
@@ -1560,27 +1578,36 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
           el.value = String(ctx.last_target);
         }
       });
-      filterIds.forEach((id) => {
+      const inc =
+        ctx.last_include !== undefined && ctx.last_include !== null
+          ? String(ctx.last_include)
+          : "";
+      const exc =
+        ctx.last_exclude !== undefined && ctx.last_exclude !== null
+          ? String(ctx.last_exclude)
+          : "";
+      includeIds.forEach((id) => {
         const el = $(id);
         if (!el) return;
-        if ((overwrite || !el.value.trim()) && ctx.last_filter) {
-          el.value = String(ctx.last_filter);
+        if (overwrite || !el.value.trim()) {
+          el.value = inc;
         }
       });
-      scoreIds.forEach((id) => {
+      excludeIds.forEach((id) => {
         const el = $(id);
         if (!el) return;
-        if ((overwrite || !el.value.trim()) && ctx.last_score_metrics) {
-          el.value = String(ctx.last_score_metrics);
+        if (overwrite || !el.value.trim()) {
+          el.value = exc;
         }
       });
+      syncHeatmapRepoDisplay();
     }
 
-    async function saveCacheContext({ overwrite = true, statusText = null, sourcePrefix = "cache" } = {}) {
+    async function saveCacheContext({ overwrite = true, statusText = null } = {}) {
       const payload = {
         target: $("cacheTargetInput").value.trim(),
-        filter: $("cacheFilterInput").value.trim(),
-        score_metrics: $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic",
+        include: $("cacheIncludeInput").value.trim(),
+        exclude: $("cacheExcludeInput").value.trim(),
       };
       try {
         const res = await fetch("/api/cache/context", {
@@ -1600,12 +1627,11 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
       return null;
     }
 
-    async function normalizeTargetForAction(sourcePrefix = "cache") {
+    async function normalizeTargetForAction() {
       // Keep button actions responsive: best-effort normalization with short timeout.
       const normalizePromise = saveCacheContext({
         overwrite: true,
         statusText: "normalizing target",
-        sourcePrefix,
       });
       const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), 700));
       await Promise.race([normalizePromise, timeoutPromise]);
@@ -1703,16 +1729,14 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
       await refreshStats();
     }
 
-    async function generateCache(sourcePrefix = "cache") {
+    async function generateCache() {
       const box = $("cacheStatus");
       const bar = $("cacheProgress");
       box.textContent = "Starting cache generation…";
       bar.classList.remove("done", "err");
       bar.style.width = "8%";
-      await normalizeTargetForAction(sourcePrefix);
+      await normalizeTargetForAction();
       const target = $("cacheTargetInput").value.trim();
-      const filter = $("cacheFilterInput").value.trim();
-      const score = $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic";
       if (!target) {
         box.textContent = "Target path is required.";
         updateCacheContext("invalid target");
@@ -1727,8 +1751,8 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             target,
-            filter: filter || null,
-            score_metrics: score
+            include: $("cacheIncludeInput").value.trim(),
+            exclude: $("cacheExcludeInput").value.trim(),
           }),
         });
         const started = await startRes.json();
@@ -1754,13 +1778,13 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
       }
     }
 
-    async function checkCacheStatus(sourcePrefix = "cache") {
+    async function checkCacheStatus() {
       const box = $("cacheStatus");
       const bar = $("cacheProgress");
       box.textContent = "Checking cache…";
       bar.classList.remove("done", "err");
       bar.style.width = "25%";
-      await normalizeTargetForAction(sourcePrefix);
+      await normalizeTargetForAction();
       const target = $("cacheTargetInput").value.trim();
       if (!target) {
         box.textContent = "Target path is required.";
@@ -1776,8 +1800,8 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             target,
-            filter: $("cacheFilterInput").value.trim() || null,
-            score_metrics: $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic"
+            include: $("cacheIncludeInput").value.trim(),
+            exclude: $("cacheExcludeInput").value.trim(),
           }),
         });
         const data = await res.json();
@@ -1792,6 +1816,7 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
         }
         if (data.target) {
           $("cacheTargetInput").value = String(data.target);
+          mirrorCacheInputs();
         }
         if (data.stale || data.usable === false) {
           const msg = data.message || "Cache is stale or incompatible; regenerate cache.";
@@ -1892,21 +1917,28 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
         setTheme(!document.body.classList.contains("dark"));
       });
       $("clearStatsBtn").addEventListener("click", clearStats);
-      $("checkCacheBtn").addEventListener("click", checkCacheStatus);
-      $("generateCacheBtn").addEventListener("click", generateCache);
-      ["cacheTargetInput", "cacheFilterInput", "cacheScoreInput"].forEach((id) => {
+      $("checkCacheBtn").addEventListener("click", () => checkCacheStatus());
+      $("generateCacheBtn").addEventListener("click", () => generateCache());
+      $("cacheSaveCtxBtn").addEventListener("click", async () => {
+        const st = $("cacheSaveCtxStatus");
+        st.textContent = "";
+        const ctx = await saveCacheContext({
+          overwrite: true,
+          statusText: "saved",
+        });
+        if (ctx) {
+          st.textContent = "Saved.";
+          setTimeout(() => {
+            st.textContent = "";
+          }, 2600);
+        } else {
+          st.textContent = "Save failed.";
+        }
+      });
+      ["cacheIncludeInput", "cacheExcludeInput", "cacheTargetInput"].forEach((id) => {
         $(id).addEventListener("input", () => {
-          mirrorCacheInputs("cache");
+          mirrorCacheInputs();
           updateCacheContext("pending");
-          saveCacheContext({ overwrite: false, statusText: "pending", sourcePrefix: "cache" });
-        });
-        $(id).addEventListener("blur", () => {
-          saveCacheContext({ overwrite: true, statusText: "resolved", sourcePrefix: "cache" });
-        });
-        $(id).addEventListener("keydown", (ev) => {
-          if (ev.key === "Enter") {
-            saveCacheContext({ overwrite: true, statusText: "resolved", sourcePrefix: "cache" });
-          }
         });
       });
       $("clearLogsBtn").addEventListener("click", clearLogs);
@@ -1941,7 +1973,7 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
       await loadConfig();
       await loadCacheContext();
       if ($("cacheTargetInput").value.trim()) {
-        void checkCacheStatus("cache");
+        void checkCacheStatus();
       }
       await refreshStats();
       await refreshHealth();

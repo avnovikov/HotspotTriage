@@ -25,6 +25,10 @@ from hotspottriage import config as _config
 from hotspottriage import normalize as _normalize
 from hotspottriage import score as _score_mod
 from hotspottriage import stats as _stats_mod
+from hotspottriage.dashboard.cache_filter_fields import (
+    compose_filter_from_fields,
+    split_filter_for_fields,
+)
 from hotspottriage.dashboard.html import DASHBOARD_HTML
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.stats import StatsCollector
@@ -56,6 +60,25 @@ _DISTRIBUTION_METRICS: frozenset[str] = frozenset(
 _HEATMAP_MAX_LIMIT = 500
 
 _DEFAULT_SCORE_METRICS = "churn_per_sloc,cyclomatic"
+
+
+def _parse_cache_filter_payload(body: dict[str, Any] | None) -> tuple[str | None, str, str]:
+    """Return ``(filter_for_pipeline, include_csv, exclude_csv)`` from a JSON body.
+
+    New clients send ``include`` / ``exclude``; legacy bodies send a single
+    ``filter`` string (comma-separated, ``!`` negates).
+    """
+    body = body if isinstance(body, dict) else {}
+    if "include" in body or "exclude" in body:
+        inc = str(body.get("include") or "").strip()
+        exc = str(body.get("exclude") or "").strip()
+        filt = compose_filter_from_fields(inc, exc)
+        return filt, inc, exc
+    filt_legacy = str(body.get("filter") or "").strip()
+    if not filt_legacy:
+        return None, "", ""
+    inc_l, exc_l = split_filter_for_fields(filt_legacy)
+    return filt_legacy, inc_l, exc_l
 
 
 def _merge_config_overlay(
@@ -341,20 +364,31 @@ class DashboardServer:
         return {
             "last_target": "",
             "last_filter": "",
+            "last_include": "",
+            "last_exclude": "",
             "last_score_metrics": _DEFAULT_SCORE_METRICS,
             "recent_targets": [],
         }
 
     def _load_local_state_unlocked(self) -> dict[str, Any]:
+        empty = self._empty_local_state()
         if not self._state_file.exists():
-            return self._empty_local_state()
+            return empty
         try:
             data = json.loads(self._state_file.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
-                return self._empty_local_state()
-            return data
+                return empty
+            merged = {**empty, **data}
+            lf = str(merged.get("last_filter", "")).strip()
+            li = str(merged.get("last_include", "")).strip()
+            le = str(merged.get("last_exclude", "")).strip()
+            if lf and not li and not le:
+                merged["last_include"], merged["last_exclude"] = split_filter_for_fields(lf)
+            elif (li or le) and not lf:
+                merged["last_filter"] = compose_filter_from_fields(li, le) or ""
+            return merged
         except Exception:
-            return self._empty_local_state()
+            return empty
 
     def _load_local_state(self) -> dict[str, Any]:
         with self._state_lock:
@@ -448,6 +482,18 @@ class DashboardServer:
                     out[key] = deepcopy(sub)
         return out
 
+    def _score_metrics_csv_for_cache_jobs(self) -> str:
+        """Comma-separated product metrics for cache/status/generate (from config snapshot, not the UI)."""
+        snap = self._merged_snapshot()
+        raw = snap.get("score_metrics")
+        if isinstance(raw, list) and raw:
+            parts = [str(x).strip() for x in raw if str(x).strip()]
+            if parts:
+                return ",".join(parts)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+        return _DEFAULT_SCORE_METRICS
+
     def _analysis_config_overrides(self) -> dict[str, Any]:
         """Return saved dashboard scoring config used when regenerating heatmap rows."""
         snapshot = self._merged_snapshot()
@@ -482,18 +528,22 @@ class DashboardServer:
             self._state_file.write_text(json.dumps(merged, indent=2), encoding="utf-8")
             return merged
 
-    def _persist_last_analysis_inputs(
+    def _persist_cache_analysis_prefs(
         self,
         *,
         target: str,
         filt: str | None,
-        score_metrics: str,
+        include: str,
+        exclude: str,
     ) -> None:
-        score = str(score_metrics).strip() or _DEFAULT_SCORE_METRICS
+        score = self._score_metrics_csv_for_cache_jobs()
+        filt_str = "" if filt is None else str(filt).strip()
         self._save_local_state(
             {
                 "last_target": target,
-                "last_filter": "" if filt is None else str(filt),
+                "last_filter": filt_str,
+                "last_include": str(include).strip(),
+                "last_exclude": str(exclude).strip(),
                 "last_score_metrics": score,
             }
         )
@@ -772,13 +822,13 @@ class DashboardServer:
         @app.post("/api/cache/context")
         def set_cache_context(payload: dict[str, Any] | None = None) -> dict[str, Any]:
             body = payload or {}
+            filt, inc, exc = _parse_cache_filter_payload(body)
             updates = {
                 "last_target": _normalize_cache_target(body.get("target", "")),
-                "last_filter": str(body.get("filter", "")).strip(),
-                "last_score_metrics": str(
-                    body.get("score_metrics", _DEFAULT_SCORE_METRICS)
-                ).strip()
-                or _DEFAULT_SCORE_METRICS,
+                "last_filter": "" if filt is None else filt,
+                "last_include": inc,
+                "last_exclude": exc,
+                "last_score_metrics": self._score_metrics_csv_for_cache_jobs(),
             }
             return self._save_local_state(updates)
 
@@ -788,13 +838,13 @@ class DashboardServer:
             target = _normalize_cache_target(body.get("target", ""))
             if not target:
                 raise HTTPException(status_code=400, detail="target is required")
-            filt = str(body.get("filter", "")).strip()
-            score = (
-                str(body.get("score_metrics", _DEFAULT_SCORE_METRICS)).strip()
-                or _DEFAULT_SCORE_METRICS
-            )
-            dash_self._persist_last_analysis_inputs(
-                target=target, filt=filt, score_metrics=score
+            filt, inc, exc = _parse_cache_filter_payload(body)
+            filt_arg = None if filt is None else filt
+            dash_self._persist_cache_analysis_prefs(
+                target=target,
+                filt=filt_arg,
+                include=inc,
+                exclude=exc,
             )
             repo = Path(target).resolve()
             cache_dir = _cache.cache_path_for(repo)
@@ -829,13 +879,17 @@ class DashboardServer:
             target = _normalize_cache_target(body.get("target", ""))
             if not target:
                 raise HTTPException(status_code=400, detail="target is required")
-            filt = None if body.get("filter") in (None, "") else str(body.get("filter"))
-            score = str(body.get("score_metrics", _DEFAULT_SCORE_METRICS))
-            dash_self._persist_last_analysis_inputs(
-                target=target, filt=filt, score_metrics=score
+            filt, inc, exc = _parse_cache_filter_payload(body)
+            filt_arg = filt
+            score = dash_self._score_metrics_csv_for_cache_jobs()
+            dash_self._persist_cache_analysis_prefs(
+                target=target,
+                filt=filt_arg,
+                include=inc,
+                exclude=exc,
             )
             job_id = dash_self._enqueue_cache_generation_job(
-                target=target, filt=filt, score_metrics=score
+                target=target, filt=filt_arg, score_metrics=score
             )
             return {"job_id": job_id, "status": "running"}
 

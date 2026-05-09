@@ -10,6 +10,10 @@ def test_dashboard_html_contains_required_panels():
     assert "healthBadge" in DASHBOARD_HTML
     assert "cacheContextPanel" in DASHBOARD_HTML
     assert "Build Parameters:" in DASHBOARD_HTML
+    assert "cacheIncludeInput" in DASHBOARD_HTML
+    assert "cacheExcludeInput" in DASHBOARD_HTML
+    assert "cacheSaveCtxBtn" in DASHBOARD_HTML
+    assert "Save cache settings" in DASHBOARD_HTML
     assert "configSaveBtn" in DASHBOARD_HTML
     assert "configRefreshDataBtn" in DASHBOARD_HTML
     assert "Save config" in DASHBOARD_HTML
@@ -22,8 +26,9 @@ def test_dashboard_html_contains_required_panels():
     assert "norm-metric-card" in DASHBOARD_HTML
     assert "weight-sum-badge" in DASHBOARD_HTML
     assert "heatmapUpdateBtn" in DASHBOARD_HTML
+    assert "heatmapRepoRootDisplay" in DASHBOARD_HTML
+    assert "syncHeatmapRepoDisplay" in DASHBOARD_HTML
     assert "heatmapLimitInput" in DASHBOARD_HTML
-    assert "heatmapViewFilterInput" in DASHBOARD_HTML
 
 
 def test_dashboard_html_hash_routing_and_heatmap():
@@ -40,35 +45,20 @@ def test_dashboard_html_hash_routing_and_heatmap():
     assert "overviewSummaryPanel" in DASHBOARD_HTML
     assert "heatmapPanel" in DASHBOARD_HTML
     assert "updateHeatmapData" in DASHBOARD_HTML
-    assert "applyHeatmapPresentationFilter" in DASHBOARD_HTML
-    assert "renderHeatmapPanel" in DASHBOARD_HTML
     assert "initRouting()" in DASHBOARD_HTML
     assert "/api/stats/heatmap" in DASHBOARD_HTML
     assert "heatmapColumnHeaderHtml" in DASHBOARD_HTML
     assert "#view-config .norm-svg-wrap" in DASHBOARD_HTML
     assert "normChartTabWidth" in DASHBOARD_HTML
     assert "Necessary when configuration changes." in DASHBOARD_HTML
+    assert "Edit normalisation parameters in" in DASHBOARD_HTML
+    assert "gitignore syntax" in DASHBOARD_HTML
     assert "HotspotTriage Scores" in DASHBOARD_HTML
     assert 'src="/dashboard/scores"' in DASHBOARD_HTML
     assert ".heatmap-file-col .heatmap-file-label" in DASHBOARD_HTML
     assert "function truncateLeftLabelToWidth(value, maxWidthPx = 168)" in DASHBOARD_HTML
     assert "measureText(candidate).width <= maxWidth" in DASHBOARD_HTML
     assert "truncateLeftLabelToWidth(r.file || \"\")" in DASHBOARD_HTML
-    assert "path or function (optional)" in DASHBOARD_HTML
-    assert "heatmapTargetInput" not in DASHBOARD_HTML
-    assert "heatmapFilterInput" not in DASHBOARD_HTML
-    assert "heatmapScoreInput" not in DASHBOARD_HTML
-    assert 'await generateCache("cache");' in DASHBOARD_HTML
-
-
-def test_dashboard_html_cache_actions_are_single_source_for_cache_context():
-    # Cache actions are the only source of target/filter/score context.
-    assert 'const targetIds = ["cacheTargetInput"];' in DASHBOARD_HTML
-    assert 'const filterIds = ["cacheFilterInput"];' in DASHBOARD_HTML
-    assert 'const scoreIds = ["cacheScoreInput"];' in DASHBOARD_HTML
-    assert 'target: $("cacheTargetInput").value.trim()' in DASHBOARD_HTML
-    assert 'filter: $("cacheFilterInput").value.trim()' in DASHBOARD_HTML
-    assert 'score_metrics: $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic"' in DASHBOARD_HTML
 
 
 def test_dashboard_html_is_self_contained():
