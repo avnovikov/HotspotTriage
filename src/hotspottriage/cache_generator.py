@@ -16,13 +16,11 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from hotspottriage import blocks as _blocks
 from hotspottriage import config as _config
 from hotspottriage import discovery, filtering
-from hotspottriage import mcp_server
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +132,9 @@ def generate_full_cache(
         if progress_callback:
             progress_callback("Initializing block-level cache", 0, 1)
         try:
-            blocks_data = mcp_server.run_cached_block_analysis_dict(
+            from hotspottriage import mcp_server as _mcp_server
+
+            blocks_data = _mcp_server.run_cached_block_analysis_dict(
                 target=target,
                 filter=filter,
                 score_metrics=score_metrics,
@@ -178,7 +178,9 @@ def generate_full_cache(
             print("  📁 Checking cache status...")
         if progress_callback:
             progress_callback("Checking cache status", 0, 1)
-        status_result = mcp_server.cache_status(target=target)
+        from hotspottriage import mcp_server as _mcp_server
+
+        status_result = _mcp_server.cache_status(target=target)
         status_data = json.loads(status_result)
 
         result["cache_status"] = status_data

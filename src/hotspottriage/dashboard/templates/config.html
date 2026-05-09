@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+    <div id="view-config" class="view-section active" data-view="config">
+      <section class="wide">
+        <h2>Configuration Editors</h2>
+        <div class="cfg-toolbar">
+          <button id="configRefreshDataBtn" type="button">Refresh data</button>
+          <button id="configSaveBtn" type="button">Save config</button>
+          <span id="configSaveStatus" class="muted"></span>
+        </div>
+        <div id="configPanel" class="stack">
+          <div class="muted">Loading config…</div>
+        </div>
+        <div id="proposedModelsPanel" class="stack" style="margin-top:0.55rem;"></div>
+        <div id="scoreBandsPanel" class="stack" style="margin-top:0.55rem;"></div>
+        <div id="scoreWeightsPanel" class="stack" style="margin-top:0.55rem;"></div>
+        <div id="configMetaPanel" class="stack muted" style="margin-top:0.55rem;font-size:0.78rem;"></div>
+        <h2 style="margin-top: 0.9rem;">Tool Call Statistics</h2>
+        <div class="toolbar" style="margin-bottom: 0.5rem;">
+          <button id="clearStatsBtn" type="button">Clear Stats</button>
+          <span class="muted">Refreshes every 5s</span>
+        </div>
+        <div id="statsPanel" class="muted">No tool activity yet.</div>
+      </section>
+    </div>
+{% endblock %}
+{% block scripts %}
+<script src="/dashboard/static/js/config.js"></script>
+{% endblock %}

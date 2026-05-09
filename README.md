@@ -179,5 +179,6 @@ Tips:
 | [SCORES.md](SCORES.md) | Metrics, normalization, composite score, risk bands |
 | [docs/block-cache-model.md](docs/block-cache-model.md) | Block cache format and semantics |
 | [docs/agent-hotspottriage-score-check.md](docs/agent-hotspottriage-score-check.md) | MCP score check before editing hotspots (agent workflow) |
+| [docs/git-ssh-signing.md](docs/git-ssh-signing.md) | Optional: SSH-signed commits with Git (verified on GitHub) |
 
 Developing this repo: **`./scripts/install_hotspottriage.sh --venv`** (or **`uv sync`**); run **`uv lock`** after dependency changes in `pyproject.toml`. Run **`pytest`** (or `uv run pytest`) before merging; architecture notes live in [ARCHITECTRE.md](ARCHITECTRE.md) above.
