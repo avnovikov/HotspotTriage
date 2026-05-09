@@ -28,7 +28,7 @@ from hotspottriage import config as _config
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.server import DashboardServer
 from hotspottriage.dashboard.stats import StatsCollector
-from hotspottriage import discovery, filtering, output as _output, stats
+from hotspottriage import discovery, filtering, explain as _explain, output as _output, stats
 from hotspottriage.path_utils import resolve_local_repo_path
 from hotspottriage.username_privacy import UsernameRedactingFormatter
 
@@ -341,9 +341,8 @@ def analyze(
 
     Always runs the cache-backed block pipeline. Returns JSON
     ``{"results": [...], "cache": {...}}``.
-    By default each result row is only ``function``, ``score``, and ``risk_band``.
-    Leaving ``compact`` unset keeps this default compact output; set
-    ``compact`` to false for full metric dicts.
+    By default each result row is compact (function, score, bands, model, and
+    narrative fields); set ``compact`` to false for full metric dicts.
 
     Args:
         target: Path to a local git repo or remote git URL. Empty uses ``--default-target``
@@ -361,7 +360,9 @@ def analyze(
         respect_gitignore: Apply .gitignore rules (default: true)
         ignore_dir: Comma-separated directory prefixes to skip
         similarity: DeepCSIM similarity per block (default: true)
-        compact: When true (default), each row is only ``function``, ``score``, ``risk_band``
+        compact: When true (default), each row includes ``function``, ``score``,
+            ``risk_band``, ``proposed_model``, ``score_driver``, ``score_explanation``,
+            and ``score_narrative`` (plain-language rationale).
 
     Returns:
         JSON object with ``results`` and ``cache`` keys, or ``{"error": ...}``
@@ -728,12 +729,19 @@ def _mcp_compact_score_rows(
         else:
             fn = p
         score_band = str(r.score_band)
+        narrative = _explain.explain_score(
+            r,
+            recommended_action=_proposed_model_for_band(score_band, merged_config),
+        )
         out.append(
             {
                 "function": fn,
                 "score": float(r.score),
                 "risk_band": score_band,
                 "proposed_model": _proposed_model_for_band(score_band, merged_config),
+                "score_driver": r.score_driver,
+                "score_explanation": list(r.score_explanation),
+                "score_narrative": narrative,
             }
         )
     return out

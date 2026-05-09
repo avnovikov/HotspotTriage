@@ -91,7 +91,17 @@ def test_cli_csv_has_all_metric_headers(tmp_path: Path):
         for col in int_cols:
             int(row[col])
         for col in METRIC_COLS:
-            if col in int_cols or col in ("smells", "similarity_band", "score_band", "score_subscores"):
+            if col in int_cols or col in (
+                "smells",
+                "similarity_band",
+                "score_band",
+                "score_subscores",
+                "score_explanation",
+                "score_narrative",
+            ):
+                continue
+            if col == "score_driver":
+                assert isinstance(row[col], str)
                 continue
             float(row[col])
 

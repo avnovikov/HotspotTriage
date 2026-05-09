@@ -20,7 +20,10 @@
           <span class="muted" style="font-size:0.72rem;">Edit path and patterns on <a href="/dashboard/">Overview</a>.</span>
           <span class="muted" style="font-size:0.72rem; display:block; margin-top:0.28rem;">Edit normalisation parameters in <a href="/dashboard/config">Config</a>.</span>
         </div>
-        <div id="heatmapPanel" class="muted">No heatmap rows yet.</div>
+        <div id="heatmapMatrixHost" style="position: relative;">
+          <div id="heatmapPanel" class="muted">No heatmap rows yet.</div>
+          <pre id="heatmapNarrativeTip" class="heatmap-narrative-tip muted" hidden></pre>
+        </div>
       </section>
     </div>
 {% endblock %}

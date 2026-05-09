@@ -368,3 +368,9 @@ Similarity burden only participates when similarity data is available:
 - remaining final weights are proportionally renormalized
 
 This avoids penalizing runs where similarity is intentionally disabled or not computed.
+
+---
+
+## 9) Score narratives
+
+Block rows with risk aggregation add `score_driver`, `score_explanation` (ranked burdens with raw metrics), and a multi-line `score_narrative` from `hotspottriage.explain` so CLI, MCP `analyze`, and the API reuse the same phrasing. The dashboard heatmap loads that narrative on demand via `GET /api/stats/block_narrative?path=…` instead of embedding it in every row payload.

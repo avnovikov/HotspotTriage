@@ -20,7 +20,7 @@ from pathlib import Path
 
 from hotspottriage import churn as _churn
 from hotspottriage import config as _config
-from hotspottriage import discovery, filtering, output, progress_report, stats
+from hotspottriage import discovery, filtering, explain, output, progress_report, stats
 from hotspottriage import score_metrics as _score_metrics
 
 
@@ -335,6 +335,21 @@ def main(argv: list[str] | None = None) -> int:
                 results, by=cfg["sort"], limit=cfg["limit"]
             )
             print(output.render(results, cfg["format"], cfg))
+            if cfg["granularity"] == "block":
+                pm_raw = cfg.get("proposed_models")
+                pm = pm_raw if isinstance(pm_raw, dict) else {}
+                for s in results:
+                    if not s.score_subscores:
+                        continue
+                    band = str(s.score_band).lower()
+                    if band not in ("high", "critical"):
+                        continue
+                    rec = pm.get(s.score_band)
+                    rec_s = rec if isinstance(rec, str) else None
+                    narrative = explain.explain_score(s, recommended_action=rec_s)
+                    if narrative:
+                        print()
+                        print(narrative)
         return 0
     except (NotADirectoryError, RuntimeError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)

@@ -142,6 +142,9 @@ def test_block_stats_sets_normalized_sloc_zscore(tmp_path: Path):
         assert 0.0 <= s.score <= 1.0
         assert s.score_band in ("low", "medium", "high", "critical")
         assert "complexity_burden" in s.score_subscores
+        assert isinstance(s.score_explanation, list)
+        if s.score_subscores:
+            assert s.score_driver
 
 
 def test_build_block_stats_preserves_unrelated_cache_rows_on_scoped_run(tmp_path: Path):
@@ -185,7 +188,13 @@ def test_build_block_stats_persists_raw_cache_rows(tmp_path: Path):
     )
     rows = _cache.load_block_results(repo) or []
     assert rows
-    derived_keys = {"score", "score_band", "score_subscores"}
+    derived_keys = {
+        "score",
+        "score_band",
+        "score_subscores",
+        "score_driver",
+        "score_explanation",
+    }
     for row in rows:
         assert not derived_keys.intersection(row)
         assert not any(str(key).startswith("norm_") for key in row)

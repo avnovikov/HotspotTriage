@@ -25,6 +25,7 @@ from hotspottriage import block_similarity as _block_similarity
 from hotspottriage import blocks as _blocks
 from hotspottriage import cache as _cache
 from hotspottriage import complexity as _complexity
+from hotspottriage import explain as _explain
 from hotspottriage import score as _risk_score
 from hotspottriage.score_metrics import SCORE_METRICS, SORT_KEYS
 from hotspottriage.statistic_row import Statistic
@@ -36,6 +37,8 @@ _DERIVED_BLOCK_CACHE_KEYS = frozenset(
         "score",
         "score_band",
         "score_subscores",
+        "score_driver",
+        "score_explanation",
     }
 )
 
@@ -473,11 +476,19 @@ def _apply_risk_scores(
             "match_count": float(st.match_count),
         }
         enriched = _risk_score.compute_score(rec, cfg, similarity_available=similarity_enabled)
-        out[idx] = replace(
+        sub = dict(enriched["score_subscores"])
+        tmp = replace(
             st,
             score=float(enriched["score"]),
             score_band=str(enriched["score_band"]),
-            score_subscores=dict(enriched["score_subscores"]),
+            score_subscores=sub,
+        )
+        explanation = _explain.build_score_explanation(tmp)
+        driver = _explain.score_driver_from_subscores(sub)
+        out[idx] = replace(
+            tmp,
+            score_driver=driver,
+            score_explanation=explanation,
         )
 
 
@@ -526,6 +537,10 @@ def statistic_from_raw_block_row(
             score=float(row.get("score", 0.0)),
             score_band=str(row.get("score_band", "n/a")),
             score_subscores=dict(row.get("score_subscores") or {}),
+            score_driver=str(row.get("score_driver", "")),
+            score_explanation=[
+                dict(x) for x in (row.get("score_explanation") or []) if isinstance(x, dict)
+            ],
         )
     metrics = {
         "normalized_sloc": float(row.get("normalized_sloc", 0.0)),
@@ -560,11 +575,61 @@ def statistic_from_raw_block_row(
         similarity_band=str(row.get("similarity_band", "n/a")),
         match_count=int(row.get("match_count", 0)),
         score=_score(metrics, score_metrics, smell_weight=smell_weight),
+        score_driver="",
+        score_explanation=[],
     )
     cfg = merged_config if merged_config is not None else {}
     scored = [stat]
     _apply_risk_scores(scored, cfg, similarity_enabled)
     return scored[0]
+
+
+def statistic_from_complete_dict(row: dict[str, Any]) -> Statistic:
+    """Rebuild a scored :class:`Statistic` from :meth:`Statistic.as_dict` output."""
+    smells_raw = row.get("smells")
+    smells: dict[str, Any] = dict(smells_raw) if isinstance(smells_raw, dict) else {}
+    subs_raw = row.get("score_subscores")
+    if isinstance(subs_raw, dict):
+        subs = {str(k): float(v) for k, v in subs_raw.items()}
+    else:
+        subs = {}
+    expl_raw = row.get("score_explanation")
+    expl: list[dict[str, Any]] = (
+        [dict(x) for x in expl_raw if isinstance(x, dict)]
+        if isinstance(expl_raw, list)
+        else []
+    )
+    st = Statistic(
+        path=str(row.get("path", "")),
+        sloc=int(row.get("sloc", 0)),
+        normalized_sloc=float(row.get("normalized_sloc", 0.0)),
+        cyclomatic=int(row.get("cyclomatic", 0)),
+        halstead=int(row.get("halstead", 0)),
+        maintainability=int(row.get("maintainability", 0)),
+        churn=int(row.get("churn", 0)),
+        churn_per_sloc=float(row.get("churn_per_sloc", 0.0)),
+        decayed_churn=float(row.get("decayed_churn", 0.0)),
+        decayed_churn_per_sloc=float(row.get("decayed_churn_per_sloc", 0.0)),
+        smell_count=int(row.get("smell_count", 0)),
+        smell_severity=float(row.get("smell_severity", 0.0)),
+        smell_burden=float(row.get("smell_burden", 0.0)),
+        smells={str(k): int(v) for k, v in smells.items()},
+        similarity_score=float(row.get("similarity_score", 0.0)),
+        similarity_band=str(row.get("similarity_band", "n/a")),
+        match_count=int(row.get("match_count", 0)),
+        score=float(row.get("score", 0.0)),
+        score_band=str(row.get("score_band", "n/a")),
+        score_subscores=subs,
+        score_driver=str(row.get("score_driver", "")),
+        score_explanation=expl,
+    )
+    if subs and not expl:
+        st = replace(
+            st,
+            score_explanation=_explain.build_score_explanation(st),
+            score_driver=_explain.score_driver_from_subscores(subs),
+        )
+    return st
 
 
 def derive_block_statistics(

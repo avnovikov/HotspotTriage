@@ -42,6 +42,26 @@ def _default_score_metrics_csv() -> str:
     return ",".join(str(m) for m in metrics)
 
 
+def test_block_narrative_endpoint():
+    srv = _server()
+    srv.publish_latest_block_metrics([_high_raw_block_row()])
+    client = TestClient(srv.app)
+    r = client.get("/api/stats/block_narrative", params={"path": "x.py::f"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["path"] == "x.py::f"
+    assert "score_narrative" in data
+    assert data["score_driver"]
+    assert isinstance(data["score_explanation"], list)
+    assert "Primary driver:" in data["score_narrative"]
+
+
+def test_block_narrative_400_without_path():
+    srv = _server()
+    client = TestClient(srv.app)
+    assert client.get("/api/stats/block_narrative").status_code == 400
+
+
 def _high_raw_block_row(path: str = "x.py::f") -> dict:
     return {
         "path": path,

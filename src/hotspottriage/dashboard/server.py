@@ -24,6 +24,7 @@ from pydantic import ValidationError
 
 from hotspottriage import cache as _cache
 from hotspottriage import config as _config
+from hotspottriage import explain as _explain_mod
 from hotspottriage import normalize as _normalize
 from hotspottriage import score as _score_mod
 from hotspottriage import stats as _stats_mod
@@ -816,6 +817,39 @@ class DashboardServer:
                 "rows": rows,
                 "column_maxima": column_maxima,
             }
+
+        @app.get("/api/stats/block_narrative")
+        def block_narrative(path: str = "") -> dict[str, Any]:
+            """Lazy score narrative for one block path (heatmap row ``path``)."""
+            raw_path = str(path).strip()
+            if not raw_path:
+                raise HTTPException(
+                    status_code=400,
+                    detail="path query parameter is required",
+                )
+            with dash_self._block_metrics_lock:
+                blob = list(dash_self._block_metrics_rows)
+            for row in blob:
+                if str(row.get("path", "")) == raw_path:
+                    stat = _stats_mod.statistic_from_complete_dict(row)
+                    snap = dash_self._merged_snapshot()
+                    pm = snap.get("proposed_models")
+                    rec: str | None = None
+                    if isinstance(pm, dict):
+                        cand = pm.get(stat.score_band)
+                        if isinstance(cand, str):
+                            rec = cand
+                    narrative = _explain_mod.explain_score(stat, recommended_action=rec)
+                    return {
+                        "path": raw_path,
+                        "score_narrative": narrative,
+                        "score_explanation": list(stat.score_explanation),
+                        "score_driver": stat.score_driver,
+                    }
+            raise HTTPException(
+                status_code=404,
+                detail="path not found in loaded block metrics",
+            )
 
         @app.get("/api/stats/distribution")
         def stats_distribution(metric: str = "") -> dict[str, Any]:

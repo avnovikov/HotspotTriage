@@ -158,6 +158,8 @@ def test_heatmap_page_renders(client):
     assert "heatmapLimitInput" in body
     assert "heatmapRepoRootDisplay" in body
     assert "heatmapPanel" in body
+    assert "heatmapMatrixHost" in body
+    assert "heatmapNarrativeTip" in body
     assert "heatmapViewFilterInput" in body
     assert "shared.js" in body
     assert "heatmap.js" in body
@@ -208,6 +210,8 @@ def test_static_js_heatmap_accessible(client):
     assert "applyHeatmapPresentationFilter" in r.text
     assert "renderHeatmapPanel" in r.text
     assert "refreshHeatmap" in r.text
+    assert "/api/stats/block_narrative" in r.text
+    assert "bindHeatmapNarrativeTips" in r.text
 
 
 def test_static_js_config_accessible(client):

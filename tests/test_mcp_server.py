@@ -127,10 +127,20 @@ def test_analyze_basic(test_repo):
     assert "score" in first
     assert "score_band" in first
     assert "score_subscores" in first
+    assert "score_driver" in first
+    assert "score_explanation" in first
+    assert "score_narrative" in first
     assert "norm_cyclomatic" in first
     assert "norm_similarity_score" in first
 
 
+def test_analyze_compact_includes_narrative_fields(test_repo):
+    result = mcp_server.analyze(str(test_repo), compact=True)
+    data = json.loads(result)
+    row = data["results"][0]
+    assert "score_narrative" in row
+    assert "score_driver" in row
+    assert isinstance(row.get("score_explanation"), list)
 def test_analyze_with_limit(test_repo):
     """Test analyze with limit (non-aggregate rows only; limit excludes similarity summary)."""
     result = mcp_server.analyze(str(test_repo), limit=1, similarity=False)
@@ -324,11 +334,22 @@ def test_analyze_compact_default_returns_function_score_risk_band_and_model(monk
     rows = data["results"]
     assert isinstance(rows, list) and len(rows) >= 1
     first = rows[0]
-    assert set(first.keys()) == {"function", "score", "risk_band", "proposed_model"}
+    assert set(first.keys()) == {
+        "function",
+        "score",
+        "risk_band",
+        "proposed_model",
+        "score_driver",
+        "score_explanation",
+        "score_narrative",
+    }
     assert isinstance(first["function"], str)
     assert isinstance(first["score"], float)
     assert isinstance(first["risk_band"], str)
     assert isinstance(first["proposed_model"], str)
+    assert isinstance(first["score_driver"], str)
+    assert isinstance(first["score_explanation"], list)
+    assert isinstance(first["score_narrative"], str)
 
 
 def test_analyze_compact_uses_configured_proposed_models(monkeypatch, test_repo):
