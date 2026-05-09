@@ -39,9 +39,19 @@ HotspotTriage analyses local repository paths provided by the developer. The fol
 
 ### 2.2 Integrity
 
-- Triage scores and analysis outputs must accurately reflect the state of the analysed codebase. Computation logic must not be alterable at runtime by external input.
-- All inputs to analysis functions are validated at trust boundaries prior to processing (see Section 4).
-- Dependency integrity is enforced via hash verification in `uv.lock` (see Section 5).
+Triage scores and analysis outputs must accurately reflect the state of the analysed codebase, given the normalisation parameters in effect at the time of analysis.
+
+**User-configurable parameters:** Normalisation weights and scoring parameters are intentionally configurable by the authenticated local user at runtime (e.g., via the dashboard UI, per [Issue #56](https://github.com/avnovikov/HotspotTriage/issues/56)). This is a designed capability, not a control gap. The integrity requirement applies to the **computation logic itself** — given a fixed set of inputs and parameters, the output must be deterministic, reproducible, and free from unauthorised manipulation.
+
+The following integrity controls apply:
+
+- **Computation integrity:** Core analysis and scoring logic must not be alterable at runtime by any mechanism other than the documented user-configurable parameters.
+- **Parameter integrity:** User-supplied normalisation parameters are validated at input boundaries (type, range, and format checks) before being applied to scoring computations. Invalid or out-of-range values are rejected with safe error messages (see Section 4).
+- **Audit transparency:** Changes to normalisation parameters are reflected immediately in analysis output. Users are expected to understand that different parameter configurations will produce different triage rankings — this is expected and documented behaviour, not an integrity violation.
+- **Input integrity:** All inputs to analysis functions are validated at trust boundaries prior to processing (see Section 4).
+- **Dependency integrity:** Dependency integrity is enforced via hash verification in `uv.lock` (see Section 5).
+
+> *This integrity model is consistent with ISO 27001:2022 A.8.26 (application security requirements) and NIST SP 800-53 SI-10 (Information Input Validation), acknowledging that user-driven parameterisation is an authorised and documented feature of the system.*
 
 ### 2.3 Availability
 
