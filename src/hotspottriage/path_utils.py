@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from hotspottriage.discovery import is_git_url
+from hotspottriage.username_privacy import redact_usernames_in_text
 
 # Generous cap for paths and filter strings at HTTP/MCP boundaries.
 MAX_TARGET_PATH_STR_LEN = 4096
@@ -29,7 +30,9 @@ def resolve_local_repo_path(raw: str) -> Path:
     """
     t = assert_bounded_path_string(raw, label="target path")
     if is_git_url(t):
-        raise ValueError("A local filesystem path is required; remote git URLs are not supported here.")
+        raise ValueError(
+            "A local filesystem path is required; remote git URLs are not supported here."
+        )
     p = Path(t).expanduser()
     try:
         return p.resolve()
@@ -40,6 +43,7 @@ def resolve_local_repo_path(raw: str) -> Path:
 def sanitize_log_value(value: str, *, max_len: int = 512) -> str:
     """Make a value safe for structured log formatters (mitigate log injection)."""
     s = str(value).replace("\r", "\\r").replace("\n", "\\n")
+    s = redact_usernames_in_text(s)
     if len(s) > max_len:
         return s[: max_len - 1] + "…"
     return s

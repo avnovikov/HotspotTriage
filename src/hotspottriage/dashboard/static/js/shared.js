@@ -41,6 +41,24 @@ function clone(o) {
 
 function $(id) { return document.getElementById(id); }
 
+/** Set repo target input: visible (possibly redacted) value + canonical path for API calls. */
+function setRepoTargetInputFromServer(el, full, display) {
+  if (!el) return;
+  const f = String(full || "").trim();
+  const visual = String(display || "").trim() || f;
+  el.value = visual;
+  el.dataset.htCanonicalTarget = f;
+}
+
+/** Canonical repo path for cache API bodies (full path); falls back to visible input. */
+function repoTargetCanonicalForApi() {
+  const el = $("cacheTargetInput");
+  if (!el) return "";
+  const c = String(el.dataset.htCanonicalTarget || "").trim();
+  if (c) return c;
+  return String(el.value || "").trim();
+}
+
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, "&amp;")
@@ -113,8 +131,9 @@ function renderOverviewSummary(cfg) {
   const el = $("overviewSummaryPanel");
   if (!el) return;
   const project = cfg.project || {};
+  const pathVis = project.path_display || project.path;
   const lines = [
-    ["Project path", project.path ?? "n/a"],
+    ["Project path", pathVis ?? "n/a"],
     ["Granularity", cfg.granularity ?? "n/a"],
   ];
   el.innerHTML = lines
@@ -122,14 +141,27 @@ function renderOverviewSummary(cfg) {
     .join("");
 }
 
-/** Repo directory from merged HotspotTriage config (``/api/config``): YAML + server snapshot. */
-function directoryFromConfig(cfg) {
+/** Canonical repo path from ``/api/config`` (full path; for API bodies). */
+function directoryCanonicalFromConfig(cfg) {
   if (!cfg || typeof cfg !== "object") return "";
   const dash = cfg.dashboard || {};
   const dt = String(dash.default_target || "").trim();
   if (dt) return dt;
   const proj = cfg.project || {};
   return String(proj.path || "").trim();
+}
+
+/** Repo path for UI labels (redacted when server sends ``*_display``). */
+function directoryFromConfig(cfg) {
+  if (!cfg || typeof cfg !== "object") return "";
+  const dash = cfg.dashboard || {};
+  const dtd = String(dash.default_target_display || "").trim();
+  const dt = String(dash.default_target || "").trim();
+  if (dt) return dtd || dt;
+  const proj = cfg.project || {};
+  const pd = String(proj.path_display || "").trim();
+  const p = String(proj.path || "").trim();
+  return pd || p;
 }
 
 /** Mirror Overview's repo path into the Heatmap read-only display (multi-page safe). */
@@ -155,7 +187,9 @@ async function syncHeatmapRepoDisplay() {
       const res = await fetch("/api/cache/context");
       if (res.ok) {
         const ctx = await res.json();
-        if (ctx.last_target) v = String(ctx.last_target).trim();
+        const disp = String(ctx.last_target_display || "").trim();
+        const full = String(ctx.last_target || "").trim();
+        if (full || disp) v = disp || full;
       }
     } catch (_) {
       /* best-effort */
@@ -171,9 +205,10 @@ async function loadConfigFull() {
     if (!res.ok) throw new Error("config request failed");
     const cfg = await res.json();
     const targetEl = $("cacheTargetInput");
-    const dir = directoryFromConfig(cfg);
-    if (targetEl && dir) {
-      targetEl.value = dir;
+    const full = directoryCanonicalFromConfig(cfg);
+    const disp = directoryFromConfig(cfg);
+    if (targetEl && (full || disp)) {
+      setRepoTargetInputFromServer(targetEl, full, disp);
     }
     if (typeof updateCacheContext === "function") updateCacheContext("unknown");
     await syncHeatmapRepoDisplay();

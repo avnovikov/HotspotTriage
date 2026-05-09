@@ -653,11 +653,14 @@ function renderConfigMeta(cfg) {
   const project = cfg.project || {};
   const dashboard = cfg.dashboard || {};
   const lines = [
-    ["Project Path", project.path],
+    ["Project Path", project.path_display || project.path],
     ["Granularity", cfg.granularity],
     ["Decay Half-life", cfg.decay_half_life],
     ["Similarity Enabled", cfg.similarity_enabled],
-    ["Dashboard default_target", dashboard.default_target],
+    [
+      "Dashboard default_target",
+      dashboard.default_target_display || dashboard.default_target,
+    ],
     ["Version", cfg.version],
   ];
   meta.innerHTML = lines

@@ -4,7 +4,7 @@
 > **Review cadence:** At each release milestone, or upon any significant architectural change
 > **Applicable frameworks:** NIST SP 800-218 (SSDF), NIST SP 800-53 Rev 5, ISO/IEC 27001:2022, COBIT 2019
 > **Status:** Active
-> **Relates to:** [Issue #104](https://github.com/avnovikov/HotspotTriage/issues/104)
+> **Relates to:** [Issue #104](https://github.com/avnovikov/HotspotTriage/issues/104), [Issue #127](https://github.com/avnovikov/HotspotTriage/issues/127)
 
 ---
 
@@ -63,6 +63,26 @@ Continuity is ensured by:
 - No external runtime dependencies (no cloud services, no remote APIs).
 
 > *This proportionate availability treatment is consistent with ISO 27001:2022 A.8.6 (capacity management) and COBIT DSS04 (continuity management), calibrated to the asset classification of a local developer tool.*
+
+### 2.4 Personal data and data minimisation (GDPR alignment)
+
+> *ISO 27001:2022 reference: A.5.34 (Privacy and protection of personally identifiable information)*
+> *GDPR reference: Art. 4(1) (personal data), Art. 5(1)(c) (data minimisation), Art. 6(1)(b) (contract / tool use)*
+
+HotspotTriage does not process personal data as its primary function. However, file system paths supplied as input may constitute personal data under GDPR Article 4(1) when they contain an operating-system username or similar identifier (for example paths under ``/home/<user>/`` or ``/Users/<user>/``).
+
+**Personal data scope (documentation)** — Same scope as [Issue #127](https://github.com/avnovikov/HotspotTriage/issues/127): paths are not the product’s purpose, but may embed identifiers.
+
+**Outputs and surfaces (risk register)**
+
+- **CLI:** Table, JSON, and CSV output print paths to stdout/stderr for the session. HotspotTriage does not persist that stream or send it to telemetry; any retention is solely from the user’s shell, scripts, or CI log capture.
+- **Dashboard HTTP API** (e.g. stats, heatmap, cache context): JSON or SSE payloads may include paths. The dashboard binds to ``127.0.0.1`` only, so this process does not expose those responses on a routable interface. For cache context and config snapshots, the API adds ``*_display`` string fields with the same username redaction as logs; the UI binds visible repo fields to those while retaining canonical paths for requests.
+- **MCP:** Tool responses may include paths for the requesting client’s immediate use. Persisting or forwarding those payloads is the **consuming system’s** responsibility.
+- **On-disk cache:** Block cache pickle rows use **username redaction** on string leaves before write: the detected local username becomes ``<first>****<last>`` (single-character names: ``<char>****``), so the full username substring is not stored in cache files.
+- **Application logs:** The MCP-attached dashboard log buffer and ``hotspottriage.path_utils.sanitize_log_value`` apply the same username redaction to formatted lines and sanitised path fragments.
+- **External systems:** No analytics, telemetry, or crash reporting sends file paths outside the machine from HotspotTriage itself.
+
+**Lawful basis (documentation only, not legal advice).** Processing is described here as necessary for providing the analysis functionality requested by the local user (**GDPR Article 6(1)(b)** — performance of the “contract” with the end user in the sense used in [Issue #127](https://github.com/avnovikov/HotspotTriage/issues/127)).
 
 ---
 
