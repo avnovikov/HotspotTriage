@@ -19,6 +19,7 @@ import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from hotspottriage import cache as _cache
 from hotspottriage import config as _config
@@ -29,7 +30,6 @@ from hotspottriage.dashboard.cache_filter_fields import (
     compose_filter_from_fields,
     split_filter_for_fields,
 )
-from hotspottriage.dashboard.html import DASHBOARD_HTML
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.stats import StatsCollector
 
@@ -720,6 +720,13 @@ class DashboardServer:
 
     def _build_app(self) -> FastAPI:
         app = FastAPI(title="HotspotTriage Dashboard", docs_url=None, redoc_url=None)
+
+        _static_dir = Path(__file__).resolve().parent / "static"
+        app.mount("/dashboard/static", StaticFiles(directory=str(_static_dir)), name="dashboard-static")
+
+        from hotspottriage.dashboard.routes.pages import router as pages_router
+        app.include_router(pages_router)
+
         stats_ref = self._stats
         log_ref = self._log_handler
         dash_self = self
@@ -943,14 +950,6 @@ class DashboardServer:
                 _sse_json_every(5.0, stats_ref.get_snapshot),
                 media_type="text/event-stream",
             )
-
-        @app.get("/dashboard/")
-        def dashboard() -> HTMLResponse:
-            return HTMLResponse(DASHBOARD_HTML)
-
-        @app.get("/dashboard/scores")
-        def dashboard_scores() -> HTMLResponse:
-            return HTMLResponse(_scores_doc_html())
 
         return app
 
