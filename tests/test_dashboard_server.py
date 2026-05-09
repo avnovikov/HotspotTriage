@@ -255,6 +255,17 @@ def test_cache_status_endpoint(monkeypatch, tmp_path):
     assert data["entries"] == 7
 
 
+def test_cache_status_rejects_remote_git_url():
+    srv = _server()
+    client = TestClient(srv.app)
+    resp = client.post(
+        "/api/cache/status",
+        json={"target": "https://github.com/avnovikov/HotspotTriage.git"},
+    )
+    assert resp.status_code == 400
+    assert "local" in str(resp.json().get("detail", "")).lower()
+
+
 def test_cache_status_hydrates_heatmap_rows_when_cache_exists(monkeypatch, tmp_path):
     srv = _server()
     client = TestClient(srv.app)
@@ -606,7 +617,7 @@ def test_config_patch_rejects_unknown_keys():
     srv = _server()
     client = TestClient(srv.app)
     resp = client.post("/api/config/patch", json={"filter": []})
-    assert resp.status_code == 400
+    assert resp.status_code == 422
 
 
 def test_config_patch_accepts_proposed_models(tmp_path):

@@ -13,8 +13,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from hotspottriage import discovery
-
 
 @dataclass(frozen=True)
 class FileTimestamp:
@@ -58,6 +56,7 @@ def get_file_last_commit_timestamp(repo: Path, file_path: str) -> int:
         if result.returncode == 0 and result.stdout.strip():
             return int(result.stdout.strip())
     except Exception:
+        # Missing git binary, permission errors, or unexpected git output.
         pass
     return 0
 
@@ -84,6 +83,7 @@ def get_file_blob_sha(repo: Path, file_path: str) -> str:
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     except Exception:
+        # Missing git binary, permission errors, or unexpected git output.
         pass
     return ""
 
@@ -144,7 +144,6 @@ def is_cache_stale(
         (is_stale, list of files that have changed since analysis)
     """
     changed_files = []
-    current_time = int(datetime.now().timestamp())
 
     for file_path, cached_ts in metadata.files.items():
         # Get current commit timestamp
@@ -308,8 +307,11 @@ def save_metadata_simple(cache_dir: Path, metadata: dict) -> None:
         cache_dir: Cache directory
         metadata: Metadata dict to save
     """
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    metadata_file = cache_dir / "metadata.json"
+    base = Path(cache_dir).resolve()
+    base.mkdir(parents=True, exist_ok=True)
+    metadata_file = (base / "metadata.json").resolve()
+    if not metadata_file.is_relative_to(base):
+        raise ValueError(f"refusing to write metadata outside cache dir: {metadata_file}")
     metadata_file.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
 
@@ -322,7 +324,10 @@ def load_metadata_simple(cache_dir: Path) -> dict | None:
     Returns:
         Metadata dict, or None if not found
     """
-    metadata_file = cache_dir / "metadata.json"
+    base = Path(cache_dir).resolve()
+    metadata_file = (base / "metadata.json").resolve()
+    if not metadata_file.is_relative_to(base):
+        return None
     if not metadata_file.exists():
         return None
     try:
