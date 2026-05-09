@@ -2,7 +2,7 @@
 
 [![SOC 2 Compliant](https://img.shields.io/badge/SOC2-Compliant-blue?style=flat&logo=github)](https://github.com/avnovikov/HotspotTriage/security) [![NIST SSDF](https://img.shields.io/badge/NIST%20SSDF-SP%20800--218-blue?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![NIST SP 800-53](https://img.shields.io/badge/NIST%20SP%20800--53-Rev%205-blue?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![ISO 27001](https://img.shields.io/badge/ISO%2027001-2022%20Aligned-blue?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![COBIT 2019](https://img.shields.io/badge/COBIT-2019-blue?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![EU CRA](https://img.shields.io/badge/EU%20CRA-Art.%2013%20SBOM-003399?style=flat)](docs/RELEASE_POLICY.md) [![GDPR](https://img.shields.io/badge/GDPR-data%20minimisation-003399?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![OWASP](https://img.shields.io/badge/OWASP-Top%2010-orange?style=flat)](CONTRIBUTING.md) [![CycloneDX SBOM](https://img.shields.io/badge/SBOM-CycloneDX-brightgreen?style=flat)](https://github.com/avnovikov/HotspotTriage/releases) [![SemVer](https://img.shields.io/badge/SemVer-2.0.0-blue?style=flat)](https://semver.org) [![Security Scans](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml) [![Dependabot](https://img.shields.io/badge/Dependabot-enabled-brightgreen?style=flat&logo=dependabot)](https://github.com/avnovikov/HotspotTriage/security/dependabot) [![Tests](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat)](LICENSE) [![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-blue?style=flat&logo=python)](pyproject.toml) [![SSH Signed](https://img.shields.io/badge/Commits-SSH%20Signed-green?style=flat&logo=git)](CONTRIBUTING.md#13-ssh-commit-and-tag-signing-required)
 
-> This codebase is built to support SOC 2 controls and is part of the audited system scope.
+> This codebase is built to be part of the regulated and audited system scope.
 
 Find where Python code gets messy and constantly changing — then stream that signal to supercharge your coding agent.
 
@@ -186,5 +186,7 @@ Tips:
 | [docs/block-cache-model.md](docs/block-cache-model.md) | Block cache format and semantics |
 | [docs/agent-hotspottriage-score-check.md](docs/agent-hotspottriage-score-check.md) | MCP score check before editing hotspots (agent workflow) |
 | [CONTRIBUTING.md](CONTRIBUTING.md#13-ssh-commit-and-tag-signing-required) | SSH-signed commits and tags setup (one-time workstation config) |
+| [SUPPORT.md](SUPPORT.md) | Support policy, supported versions, EOL process (UK PSTI / EU CRA) |
+| [SECURITY.md](SECURITY.md) | Security policy, VDP, regulatory cross-reference mapping |
 
 Developing this repo: **`./scripts/install_hotspottriage.sh --venv`** (or **`uv sync`**); run **`uv lock`** after dependency changes in `pyproject.toml`. Run **`pytest`** (or `uv run pytest`) before merging; architecture notes live in [ARCHITECTRE.md](ARCHITECTRE.md) above.
