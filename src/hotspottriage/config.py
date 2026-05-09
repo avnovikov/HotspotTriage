@@ -29,7 +29,7 @@ import yaml
 from hotspottriage import filtering as _filtering
 from hotspottriage import normalize as _normalize
 from hotspottriage import output as _output
-from hotspottriage import stats as _stats
+from hotspottriage import score_metrics as _score_metrics
 
 GLOBAL_CONFIG_DIR = Path.home() / ".hotspottriage"
 GLOBAL_CONFIG_FILE = GLOBAL_CONFIG_DIR / "config.yml"
@@ -402,11 +402,11 @@ def _validate_score_metrics(config: dict[str, Any]) -> list[Any]:
     score_metrics = config.get("score_metrics") or []
     if not isinstance(score_metrics, list) or not score_metrics:
         raise ValueError("score_metrics must be a non-empty list")
-    bad = [m for m in score_metrics if m not in _stats.SCORE_METRICS]
+    bad = [m for m in score_metrics if m not in _score_metrics.SCORE_METRICS]
     if bad:
         raise ValueError(
             f"unknown score metric(s): {bad} "
-            f"(valid: {list(_stats.SCORE_METRICS)})"
+            f"(valid: {list(_score_metrics.SCORE_METRICS)})"
         )
     return score_metrics
 
@@ -419,9 +419,9 @@ def _validate_format_sort_granularity_log(config: dict[str, Any]) -> None:
         )
 
     sort_key = config.get("sort")
-    if sort_key not in _stats.SORT_KEYS:
+    if sort_key not in _score_metrics.SORT_KEYS:
         raise ValueError(
-            f"unknown sort key: {sort_key!r} (valid: {list(_stats.SORT_KEYS)})"
+            f"unknown sort key: {sort_key!r} (valid: {list(_score_metrics.SORT_KEYS)})"
         )
 
     granularity = config.get("granularity")

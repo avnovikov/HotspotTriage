@@ -21,6 +21,7 @@ from pathlib import Path
 from hotspottriage import churn as _churn
 from hotspottriage import config as _config
 from hotspottriage import discovery, filtering, output, progress_report, stats
+from hotspottriage import score_metrics as _score_metrics
 
 
 def _want_progress(cfg: dict) -> bool:
@@ -65,7 +66,7 @@ def _build_analyze_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "comma-separated metrics whose product becomes the score. "
-            f"Choose from: {', '.join(stats.SCORE_METRICS)}. "
+            f"Choose from: {', '.join(_score_metrics.SCORE_METRICS)}. "
             f"Default: {','.join(_config.DEFAULTS['score_metrics'])}"
         ),
     )
@@ -73,7 +74,7 @@ def _build_analyze_parser() -> argparse.ArgumentParser:
     p.add_argument("-l", "--limit", type=int, default=None)
     p.add_argument("-i", "--since", default=None)
     p.add_argument("-u", "--until", default=None)
-    p.add_argument("--sort", choices=stats.SORT_KEYS, default=None)
+    p.add_argument("--sort", choices=_score_metrics.SORT_KEYS, default=None)
     p.add_argument(
         "-d",
         "--directories",

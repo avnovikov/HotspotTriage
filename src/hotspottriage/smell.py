@@ -27,7 +27,7 @@ from hotspottriage import config as _config
 logger = logging.getLogger(__name__)
 
 # Log once per process when Pylint cannot be run (missing binary / PATH).
-_PYLINT_SKIP_WARNED = False
+_PYLINT_SKIP_WARNED: list[bool] = [False]
 
 PYLINT_CODES: tuple[str, ...] = (
     "R0915",  # too-many-statements
@@ -92,10 +92,9 @@ def _pylint_executable() -> str | None:
 
 
 def _log_pylint_skip_once() -> None:
-    global _PYLINT_SKIP_WARNED
-    if _PYLINT_SKIP_WARNED:
+    if _PYLINT_SKIP_WARNED[0]:
         return
-    _PYLINT_SKIP_WARNED = True
+    _PYLINT_SKIP_WARNED[0] = True
     logger.warning(
         "pylint executable not found; Pylint-backed smells are skipped (radon/comment "
         "heuristics still run). Install pylint or run from the project venv so "

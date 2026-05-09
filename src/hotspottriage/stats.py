@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, replace
 from math import prod
 from pathlib import Path, PurePosixPath
 from statistics import mean, pstdev
@@ -26,54 +26,10 @@ from hotspottriage import blocks as _blocks
 from hotspottriage import cache as _cache
 from hotspottriage import complexity as _complexity
 from hotspottriage import score as _risk_score
+from hotspottriage.score_metrics import SCORE_METRICS, SORT_KEYS
+from hotspottriage.statistic_row import Statistic
 
 logger = logging.getLogger(__name__)
-
-# Every metric that may appear in the output and contribute to the score.
-# The default recipe lives in `config.DEFAULTS["score_metrics"]`; this module
-# only owns the validation set so it stays close to the data definitions.
-SCORE_METRICS: tuple[str, ...] = (
-    *_complexity.METRICS,
-    "churn",
-    "churn_per_sloc",
-    "decayed_churn",
-    "decayed_churn_per_sloc",
-    "smell_count",
-    "smell_severity",
-    "smell_burden",
-    # Block-only (similarity_* columns); only meaningful when ``granularity: block``.
-    "similarity_score",
-)
-
-
-@dataclass(frozen=True)
-class Statistic:
-    path: str
-    sloc: int
-    normalized_sloc: float
-    cyclomatic: int
-    halstead: int
-    maintainability: int
-    churn: int
-    churn_per_sloc: float
-    decayed_churn: float
-    decayed_churn_per_sloc: float
-    smell_count: int
-    smell_severity: float
-    smell_burden: float
-    smells: dict[str, int]
-    similarity_score: float
-    similarity_band: str
-    match_count: int
-    score: float
-    score_band: str = "n/a"
-    score_subscores: dict[str, float] = field(default_factory=dict)
-
-    def as_dict(self) -> dict:
-        return asdict(self)
-
-
-SORT_KEYS: tuple[str, ...] = ("score", "file")
 
 _DERIVED_BLOCK_CACHE_KEYS = frozenset(
     {

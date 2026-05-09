@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from hotspottriage import block_churn
 from tests.fixtures.build_block_repo import build_block_repo
 

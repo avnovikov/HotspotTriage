@@ -18,14 +18,12 @@ from hotspottriage import blocks as _blocks
 _HAS_DEEPCSIM: bool
 try:
     from deepcsim.core.analyzer import CodeAnalyzer
-    from deepcsim.core.metrics import FunctionMetrics
     from deepcsim.core.similarity import SimilarityCalculator
 
     _HAS_DEEPCSIM = True
 except ImportError:  # pragma: no cover
     _HAS_DEEPCSIM = False
     CodeAnalyzer = Any  # type: ignore[misc, assignment]
-    FunctionMetrics = Any  # type: ignore[misc, assignment]
     SimilarityCalculator = Any  # type: ignore[misc, assignment]
 
 
