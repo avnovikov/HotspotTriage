@@ -34,4 +34,6 @@ All pull requests are automatically scanned for:
 - **Dependency vulnerabilities** via Trivy + Dependabot
 - **Secret leakage** via Gitleaks
 
+**Dependabot:** Pull requests for dependency updates run on the schedule in [`.github/dependabot.yml`](.github/dependabot.yml); reviewers triage and merge them when required checks pass, prioritizing security-related changes.
+
 Results are visible in the [Security tab](https://github.com/avnovikov/HotspotTriage/security).
