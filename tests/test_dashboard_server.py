@@ -36,6 +36,11 @@ def _server(
     )
 
 
+def _default_score_metrics_csv() -> str:
+    metrics = _project_config.DEFAULTS.get("score_metrics") or []
+    return ",".join(str(m) for m in metrics)
+
+
 def _high_raw_block_row(path: str = "x.py::f") -> dict:
     return {
         "path": path,
@@ -127,7 +132,7 @@ def test_generate_cache_endpoint(monkeypatch):
     ) -> dict:
         assert target == str((Path.cwd() / "../LexVox").resolve())
         assert filter is None
-        assert score_metrics == "churn_per_sloc,cyclomatic"
+        assert score_metrics == _default_score_metrics_csv()
         assert verbose is False
         assert isinstance(config_overrides, dict)
         assert "score_aggregation" in config_overrides
@@ -152,6 +157,44 @@ def test_generate_cache_endpoint(monkeypatch):
             break
     assert data["status"] == "done"
     assert data["result"]["metadata"]["blocks_cached"] == 10
+
+
+def test_generate_cache_passes_composed_filter_from_include_exclude(monkeypatch):
+    srv = _server()
+    client = TestClient(srv.app)
+    captured: dict[str, str | None] = {}
+
+    def _fake_generate_full_cache(
+        target: str,
+        filter: str | None,
+        score_metrics: str,
+        verbose: bool,
+        progress_callback=None,
+        config_overrides=None,
+    ) -> dict:
+        captured["filter"] = filter
+        return {"metadata": {}, "cache_status": {}, "blocks": {"count": 0}}
+
+    monkeypatch.setattr(
+        "hotspottriage.cache_generator.generate_full_cache",
+        _fake_generate_full_cache,
+    )
+    start = client.post(
+        "/api/cache/generate",
+        json={
+            "target": str(Path.cwd()),
+            "include": "src/**",
+            "exclude": "**/tests/**",
+        },
+    )
+    assert start.status_code == 200
+    job_id = start.json()["job_id"]
+    for _ in range(15):
+        status = client.get(f"/api/cache/jobs/{job_id}")
+        assert status.status_code == 200
+        if status.json()["status"] != "running":
+            break
+    assert captured["filter"] == "src/**,!**/tests/**"
 
 
 def test_slim_cache_job_result_omits_row_payloads():
@@ -249,18 +292,93 @@ def test_cache_context_persists_locally(tmp_path):
         "/api/cache/context",
         json={
             "target": "../LexVox",
-            "filter": "src/**",
-            "score_metrics": "cyclomatic,churn",
+            "include": "src/**",
+            "exclude": "**/tests/**",
         },
     )
     assert set_resp.status_code == 200
+    data = set_resp.json()
+    assert data["last_target"] == str((Path.cwd() / "../LexVox").resolve())
+    assert data["last_include"] == "src/**"
+    assert data["last_exclude"] == "**/tests/**"
+    assert data["last_filter"] == "src/**,!**/tests/**"
+    assert data["last_score_metrics"] == _default_score_metrics_csv()
+    assert data["recent_targets"][0] == str((Path.cwd() / "../LexVox").resolve())
     get_resp = client.get("/api/cache/context")
     assert get_resp.status_code == 200
-    data = get_resp.json()
-    assert data["last_target"] == str((Path.cwd() / "../LexVox").resolve())
-    assert data["last_filter"] == "src/**"
-    assert data["last_score_metrics"] == "cyclomatic,churn"
-    assert data["recent_targets"][0] == str((Path.cwd() / "../LexVox").resolve())
+    assert get_resp.json()["last_include"] == "src/**"
+
+
+def test_cache_context_legacy_filter_field_still_works(tmp_path):
+    srv = _server()
+    srv._state_file = tmp_path / ".hotspottriage" / "dashboard_state.json"
+    client = TestClient(srv.app)
+    set_resp = client.post(
+        "/api/cache/context",
+        json={
+            "target": str(tmp_path),
+            "filter": "src/**,!**/tests/**",
+        },
+    )
+    assert set_resp.status_code == 200
+    data = set_resp.json()
+    assert data["last_filter"] == "src/**,!**/tests/**"
+    assert data["last_include"] == "src/**"
+    assert data["last_exclude"] == "**/tests/**"
+    assert data["last_score_metrics"] == _default_score_metrics_csv()
+
+
+def test_cache_context_empty_include_uses_default_filter_semantics(tmp_path):
+    srv = _server()
+    srv._state_file = tmp_path / ".hotspottriage" / "dashboard_state.json"
+    client = TestClient(srv.app)
+    set_resp = client.post(
+        "/api/cache/context",
+        json={
+            "target": str(tmp_path),
+            "include": "",
+            "exclude": "",
+        },
+    )
+    assert set_resp.status_code == 200
+    assert set_resp.json()["last_filter"] == ""
+
+
+def test_generate_cache_ignores_score_metrics_request_field(monkeypatch, tmp_path):
+    srv = _server()
+    client = TestClient(srv.app)
+    captured: dict[str, str | None] = {}
+
+    def _fake_generate_full_cache(
+        target: str,
+        filter: str | None,
+        score_metrics: str,
+        verbose: bool,
+        progress_callback=None,
+        config_overrides=None,
+    ) -> dict:
+        captured["score_metrics"] = score_metrics
+        return {"metadata": {}, "cache_status": {}, "blocks": {"count": 0}}
+
+    monkeypatch.setattr(
+        "hotspottriage.cache_generator.generate_full_cache",
+        _fake_generate_full_cache,
+    )
+    start = client.post(
+        "/api/cache/generate",
+        json={
+            "target": str(tmp_path),
+            "score_metrics": "cyclomatic",
+        },
+    )
+    assert start.status_code == 200
+    job_id = start.json()["job_id"]
+    for _ in range(15):
+        status = client.get(f"/api/cache/jobs/{job_id}")
+        assert status.status_code == 200
+        if status.json()["status"] != "running":
+            break
+    assert captured["score_metrics"] == _default_score_metrics_csv()
 
 
 def test_generate_cache_job_not_found():

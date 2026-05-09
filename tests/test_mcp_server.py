@@ -526,3 +526,38 @@ async def test_mcp_lifespan_dashboard_failure_is_non_fatal(monkeypatch):
     monkeypatch.setattr(mcp_mod, "DashboardServer", _Boom)
     async with _mcp_lifespan(None):
         assert True
+
+
+def test_analyze_filtered_dashboard_publish_excludes_other_cached_files(
+    monkeypatch, test_repo
+):
+    """Scoped runs keep prior cache rows; dashboard publish must not restore them."""
+    import hotspottriage.mcp_server as mcp_mod
+
+    monkeypatch.setattr(
+        "hotspottriage.smell.compute_smells",
+        lambda *args, **kwargs: [],
+    )
+
+    publishes: list[list] = []
+
+    class _Capturing:
+        def publish_latest_block_metrics(self, rows):
+            publishes.append(list(rows))
+
+    monkeypatch.setattr(mcp_mod, "_dashboard_server_instance", _Capturing())
+
+    analyze(str(test_repo), score_metrics="cyclomatic", compact=False, similarity=False)
+    analyze(
+        str(test_repo),
+        filter="example.py",
+        score_metrics="cyclomatic",
+        compact=False,
+        similarity=False,
+    )
+
+    assert publishes
+    final = publishes[-1]
+    files = {row["path"].split("::", 1)[0] for row in final}
+    assert "example.py" in files
+    assert "helper.py" not in files

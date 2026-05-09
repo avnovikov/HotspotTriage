@@ -5,6 +5,11 @@ pattern. A file is kept iff it satisfies *all* patterns (AND), matching the
 behaviour of the original `code-complexity` tool which calls
 `micromatch.isMatch(file, pattern)` for every pattern and ANDs the results.
 
+Tokens passed to :func:`make_filter` are normalised via
+:func:`normalize_filter_pattern` (backslashes to ``/``, repeated leading
+``./`` stripped) so repo-relative paths like ``tests/a.py`` match patterns such
+as ``./tests/**``.
+
 Directory ignores (`ignore_directories`) drop any tracked path whose
 relative path equals a prefix or starts with ``prefix + '/'``.
 
@@ -23,6 +28,23 @@ from typing import Callable, Iterable, Iterator
 import pathspec
 
 
+def normalize_filter_pattern(pattern: str) -> str:
+    """Normalise one gitignore-style filter token for repo-relative paths.
+
+    Strips leading ``./`` segments (any repetition), converts backslashes to
+    ``/``, and preserves a leading ``!`` negation on the remainder. A lone ``/``
+    anchor (e.g. ``/tests/**``) is preserved.
+    """
+    raw = pattern.strip().replace("\\", "/")
+    if not raw:
+        return ""
+    negated = raw.startswith("!")
+    body = raw[1:].strip() if negated else raw
+    while body.startswith("./"):
+        body = body[2:]
+    return f"!{body}" if negated else body
+
+
 def _compile_one(pattern: str) -> tuple[pathspec.PathSpec, bool]:
     negated = pattern.startswith("!")
     if negated:
@@ -33,7 +55,14 @@ def _compile_one(pattern: str) -> tuple[pathspec.PathSpec, bool]:
 
 def make_filter(patterns: Iterable[str]) -> Callable[[str], bool]:
     """Return a predicate over POSIX-style relative paths."""
-    compiled = [_compile_one(p.strip()) for p in patterns if p and p.strip()]
+    compiled: list[tuple[pathspec.PathSpec, bool]] = []
+    for p in patterns:
+        if not p or not str(p).strip():
+            continue
+        norm = normalize_filter_pattern(p)
+        if not norm:
+            continue
+        compiled.append(_compile_one(norm))
     if not compiled:
         return lambda _: True
 

@@ -126,6 +126,8 @@ argument overrides **only**. It does **not** call `load_config` for the target
 repo. Project YAML files do not affect MCP `analyze`
 unless settings are explicitly passed as tool arguments.
 
+Editor-side MCP client config (e.g. Cursor **`.cursor/mcp.json`**: launcher paths, **`PATH`**, **`--default-target`**, git worktrees) is covered in **§6.1.2**.
+
 ### 4.3 Dashboard Config Overlay
 
 The dashboard server maintains a `dashboard_config_patch.yml` file
@@ -181,7 +183,7 @@ Protected by `_block_metrics_lock`.
 | Aspect   | Detail |
 |----------|--------|
 | **Path** | `<cwd>/.hotspottriage/dashboard_state.json` (relative to process CWD, not analyzed repo) |
-| **Content** | `last_target`, `last_filter`, `last_score_metrics`, `recent_targets` (up to 15) |
+| **Content** | `last_target`, `last_filter` (combined include/exclude patterns), `last_include`, `last_exclude`, `last_score_metrics` (comma-separated recipe derived from the merged dashboard config snapshot—**not** from the UI), `recent_targets` (up to 15) |
 | **Read/Write** | `GET/POST /api/cache/context`, `POST /api/cache/status`, `POST /api/cache/generate` |
 
 ### 5.5 Dashboard Config Patch — `dashboard_config_patch.yml`
@@ -221,6 +223,12 @@ should therefore include only flags meant for **`start-mcp-server`** (not a seco
 `start-mcp-server` token). Clients that fail on shell wrappers should set **`command`**
 to **`.venv/bin/hotspottriage`** and put **`start-mcp-server`** first in **`args`**,
 merging the same system dirs into **`env.PATH`** if **`git`** is still missing.
+
+### 6.1.2 Cursor workspaces and git worktrees
+
+Editor MCP config (e.g. Cursor **`.cursor/mcp.json`**) is resolved relative to the **workspace root** the IDE opened. A **`git worktree`** adds a second checkout path on disk; launcher **`command`**, venv **`env.PATH`**, and **`--default-target`** must reference locations that exist from **that** workspace. Tool argument **`target`** names the **repository to analyze** (often the same path as the open project, not necessarily the HotspotTriage install).
+
+Git allows only **one** linked worktree to hold a given branch; `git checkout main` fails locally when **`main`** is already checked out in another worktree (`git worktree list`). That limitation affects local CLI/git workflows and some **`gh pr merge`** invocations that update **`main`** in the current directory; it does not change MCP semantics. Prefer merging on GitHub or using the worktree that already has the base branch checked out.
 
 ### 6.2 Tool → Pipeline Mapping
 
@@ -424,10 +432,9 @@ Single-file HTML/CSS/JS served at `/dashboard/`. Three views via hash routing:
 
 | Route       | Content |
 |-------------|---------|
-| `#overview` | Project path, granularity, score metrics; cache actions (check/generate); log viewer |
-| `#heatmap`  | Target/filter/score inputs; Update Heatmap button; color-coded matrix table |
+| `#overview` | Project path, granularity; labeled cache fields (repository root, include/exclude patterns); **Save cache settings**; check/generate cache; log viewer |
+| `#heatmap`  | Read-only **repository root** (copied from Overview); limit control; **Update Heatmap**; color-coded matrix |
 | `#config`   | Normalization breakpoint editors; weight sliders; save/refresh config |
 
-Input fields across views are kept in sync via `mirrorCacheInputs`.
-Path resolution triggers immediately on `blur` and `Enter` keypress
-via `saveCacheContext` with `overwrite: true`.
+The Heatmap tab shows the same repo path as Overview via `syncHeatmapRepoDisplay()` (not editable there).
+Cache context is persisted when the user clicks **Save cache settings** or when **Check Cache** / **Generate Cache** runs (best-effort save before the action).
