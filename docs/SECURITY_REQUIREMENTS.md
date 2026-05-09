@@ -71,15 +71,18 @@ Continuity is ensured by:
 
 HotspotTriage does not process personal data as its primary function. However, file system paths supplied as input may constitute personal data under GDPR Article 4(1) when they contain an operating-system username or similar identifier (for example paths under ``/home/<user>/`` or ``/Users/<user>/``).
 
-**Data minimisation controls**
+**Personal data scope (documentation)** — Same scope as [Issue #127](https://github.com/avnovikov/HotspotTriage/issues/127): paths are not the product’s purpose, but may embed identifiers.
 
-- File paths are used only for local analysis. Block results persisted under ``<repo>/.hotspottriage/cache/`` are written with **username redaction** in string fields: the detected local username is replaced by ``<first>****<last>`` (and a single-character username by ``<char>****``) so on-disk cache does not retain the full username substring.
-- The in-process dashboard log buffer applies the same redaction to formatted log lines.
-- The dashboard binds to localhost only; no paths are transmitted over a network by the tool itself.
-- MCP tool responses may still include paths needed for the requesting agent; persistence of those responses is the responsibility of the consuming system.
-- No analytics, telemetry, or crash reporting collects file path data.
+**Outputs and surfaces (risk register)**
 
-**Lawful basis (documentation only, not legal advice).** Processing is described here as necessary for providing the analysis functionality requested by the local user (GDPR Article 6(1)(b) framing used in [Issue #127](https://github.com/avnovikov/HotspotTriage/issues/127)).
+- **CLI:** Table, JSON, and CSV output print paths to stdout/stderr for the session. HotspotTriage does not persist that stream or send it to telemetry; any retention is solely from the user’s shell, scripts, or CI log capture.
+- **Dashboard HTTP API** (e.g. stats, heatmap, cache context): JSON or SSE payloads may include paths. The dashboard binds to ``127.0.0.1`` only, so this process does not expose those responses on a routable interface.
+- **MCP:** Tool responses may include paths for the requesting client’s immediate use. Persisting or forwarding those payloads is the **consuming system’s** responsibility.
+- **On-disk cache:** Block cache pickle rows use **username redaction** on string leaves before write: the detected local username becomes ``<first>****<last>`` (single-character names: ``<char>****``), so the full username substring is not stored in cache files.
+- **Application logs:** The MCP-attached dashboard log buffer and ``hotspottriage.path_utils.sanitize_log_value`` apply the same username redaction to formatted lines and sanitised path fragments.
+- **External systems:** No analytics, telemetry, or crash reporting sends file paths outside the machine from HotspotTriage itself.
+
+**Lawful basis (documentation only, not legal advice).** Processing is described here as necessary for providing the analysis functionality requested by the local user (**GDPR Article 6(1)(b)** — performance of the “contract” with the end user in the sense used in [Issue #127](https://github.com/avnovikov/HotspotTriage/issues/127)).
 
 ---
 
