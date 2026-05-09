@@ -1,5 +1,7 @@
 # HotspotTriage
 
+[![Tests](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml)
+
 Find where Python code gets messy and constantly changing — then stream that signal to supercharge your coding agent.
 
 HotspotTriage analyzes tracked `.py` files in a Git repo, blends AST metrics (Radon) with history (`git log`), per-function churn (in block mode), smells (Pylint heuristics), and block similarity (DeepCSIM) — all wired through MCP for integration with agents.
