@@ -467,12 +467,10 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
           <label>Limit
             <input id="heatmapLimitInput" type="number" min="1" max="500" value="500" style="width:5rem;min-width:0;" />
           </label>
+          <label>Presentation filter
+            <input id="heatmapViewFilterInput" type="text" placeholder="path or function (optional)" />
+          </label>
           <span id="heatmapStatus" class="muted" style="font-size:0.78rem;"></span>
-        </div>
-        <div class="toolbar" style="margin-bottom:0.45rem;flex-wrap:wrap;">
-          <input id="heatmapTargetInput" type="text" placeholder="../LexVox" />
-          <input id="heatmapFilterInput" type="text" placeholder="filter (optional)" />
-          <input id="heatmapScoreInput" type="text" placeholder="score metrics" value="churn_per_sloc,cyclomatic" />
         </div>
         <div id="heatmapPanel" class="muted">No heatmap rows yet.</div>
       </section>
@@ -517,6 +515,9 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
       pauseScroll: false,
       healthFailures: 0,
       activeCacheJobId: null,
+      heatmapRows: [],
+      heatmapColumns: [],
+      heatmapColumnMaxima: {},
       editorMN: null,
       editorSA: null,
       editorPM: null,
@@ -1333,6 +1334,62 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
     function initHeatmapControls() {
       mirrorCacheInputs("cache");
       $("heatmapUpdateBtn").addEventListener("click", updateHeatmapData);
+      $("heatmapViewFilterInput").addEventListener("input", renderHeatmapPanel);
+    }
+
+    function applyHeatmapPresentationFilter(rows) {
+      const query = $("heatmapViewFilterInput").value.trim().toLowerCase();
+      if (!query) return rows;
+      return rows.filter((row) => {
+        const pathValue = String(row.file || "").toLowerCase();
+        const functionValue = String(row.method || "").toLowerCase();
+        return pathValue.includes(query) || functionValue.includes(query);
+      });
+    }
+
+    function renderHeatmapPanel() {
+      const panel = $("heatmapPanel");
+      const status = $("heatmapStatus");
+      const rows = applyHeatmapPresentationFilter(state.heatmapRows);
+      status.textContent = `${rows.length} row(s)`;
+      if (!rows.length) {
+        panel.className = "muted";
+        panel.textContent = state.heatmapRows.length
+          ? "No heatmap rows match the current filter."
+          : "No heatmap rows yet.";
+        return;
+      }
+      const cols = state.heatmapColumns;
+      const maxima = state.heatmapColumnMaxima;
+      const head = `<tr><th class="heatmap-file-col">file</th><th class="heatmap-method-col">method</th>${cols
+        .map((c) => {
+          const plain = String(c || "")
+            .replace(/_/g, " ")
+            .split(" ")
+            .filter(Boolean)
+            .join(" ");
+          return `<th class="heatmap-metric-th" title="${escapeAttr(plain)}">${heatmapColumnHeaderHtml(c)}</th>`;
+        })
+        .join("")}<th>band</th></tr>`;
+      const body = rows
+        .map((r) => {
+          const cells = cols
+            .map((c) => {
+              const v = Number(r[c]) || 0;
+              const pct = Math.min(1, Math.max(0, v / (maxima[c] || 1)));
+              return `<td class="heatmap-metric-cell" style="background:${heatColor(pct)};">${v.toFixed(3)}</td>`;
+            })
+            .join("");
+          return `<tr>
+  <td class="heatmap-file-col" title="${escapeAttr(r.file || "")}"><span class="heatmap-file-label">${escapeHtml(truncateLeftLabelToWidth(r.file || ""))}</span></td>
+  <td class="heatmap-method-col" title="${escapeAttr(r.method || "")}"><span class="heatmap-method">${escapeHtml(r.method || "")}</span></td>
+  ${cells}
+  <td>${escapeHtml(r.score_band || "")}</td>
+</tr>`;
+        })
+        .join("");
+      panel.className = "";
+      panel.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
     }
 
     async function refreshHeatmap() {
@@ -1352,11 +1409,14 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
             typeof d === "string" ? d : Array.isArray(d) ? JSON.stringify(d) : "request failed";
           return;
         }
-        const rows = data.rows || [];
-        status.textContent = `${rows.length} row(s)`;
+        const rows = Array.isArray(data.rows) ? data.rows : [];
         if (!rows.length) {
+          state.heatmapRows = [];
+          state.heatmapColumns = [];
+          state.heatmapColumnMaxima = {};
           panel.className = "muted";
           panel.textContent = "No heatmap rows yet.";
+          status.textContent = "0 row(s)";
           return;
         }
         const cols = Array.isArray(data.columns) ? data.columns : [];
@@ -1375,42 +1435,17 @@ Build Parameters: filter=<none>, score_metrics=churn_per_sloc,cyclomatic
           const src = eligible.length ? eligible : rows;
           maxima[c] = Math.max(...src.map((r) => Number(r[c]) || 0), 1e-9);
         });
-        const head = `<tr><th class="heatmap-file-col">file</th><th class="heatmap-method-col">method</th>${cols
-          .map((c) => {
-            const plain = String(c || "")
-              .replace(/_/g, " ")
-              .split(" ")
-              .filter(Boolean)
-              .join(" ");
-            return `<th class="heatmap-metric-th" title="${escapeAttr(plain)}">${heatmapColumnHeaderHtml(c)}</th>`;
-          })
-          .join("")}<th>band</th></tr>`;
-        const body = rows
-          .map((r) => {
-            const cells = cols
-              .map((c) => {
-                const v = Number(r[c]) || 0;
-                const pct = Math.min(1, Math.max(0, v / (maxima[c] || 1)));
-                return `<td class="heatmap-metric-cell" style="background:${heatColor(pct)};">${v.toFixed(3)}</td>`;
-              })
-              .join("");
-            return `<tr>
-  <td class="heatmap-file-col" title="${escapeAttr(r.file || "")}"><span class="heatmap-file-label">${escapeHtml(truncateLeftLabelToWidth(r.file || ""))}</span></td>
-  <td class="heatmap-method-col" title="${escapeAttr(r.method || "")}"><span class="heatmap-method">${escapeHtml(r.method || "")}</span></td>
-  ${cells}
-  <td>${escapeHtml(r.score_band || "")}</td>
-</tr>`;
-          })
-          .join("");
-        panel.className = "";
-        panel.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+        state.heatmapRows = rows;
+        state.heatmapColumns = cols;
+        state.heatmapColumnMaxima = maxima;
+        renderHeatmapPanel();
       } catch (e) {
         status.textContent = String(e);
       }
     }
 
     async function updateHeatmapData() {
-      await generateCache("heatmap");
+      await generateCache("cache");
       await refreshHeatmap();
     }
 
@@ -1427,16 +1462,7 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
     }
 
     function mirrorCacheInputs(fromPrefix) {
-      const fromHeatmap = fromPrefix === "heatmap";
-      const srcTarget = $(fromHeatmap ? "heatmapTargetInput" : "cacheTargetInput");
-      const srcFilter = $(fromHeatmap ? "heatmapFilterInput" : "cacheFilterInput");
-      const srcScore = $(fromHeatmap ? "heatmapScoreInput" : "cacheScoreInput");
-      const dstTarget = $(fromHeatmap ? "cacheTargetInput" : "heatmapTargetInput");
-      const dstFilter = $(fromHeatmap ? "cacheFilterInput" : "heatmapFilterInput");
-      const dstScore = $(fromHeatmap ? "cacheScoreInput" : "heatmapScoreInput");
-      if (srcTarget && dstTarget) dstTarget.value = srcTarget.value;
-      if (srcFilter && dstFilter) dstFilter.value = srcFilter.value;
-      if (srcScore && dstScore) dstScore.value = srcScore.value;
+      if (fromPrefix !== "cache") return;
     }
 
     function pretty(v) {
@@ -1524,9 +1550,9 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
 
     function applyCacheContext(ctx, overwrite) {
       if (!ctx || typeof ctx !== "object") return;
-      const targetIds = ["cacheTargetInput", "heatmapTargetInput"];
-      const filterIds = ["cacheFilterInput", "heatmapFilterInput"];
-      const scoreIds = ["cacheScoreInput", "heatmapScoreInput"];
+      const targetIds = ["cacheTargetInput"];
+      const filterIds = ["cacheFilterInput"];
+      const scoreIds = ["cacheScoreInput"];
       targetIds.forEach((id) => {
         const el = $(id);
         if (!el) return;
@@ -1551,11 +1577,10 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
     }
 
     async function saveCacheContext({ overwrite = true, statusText = null, sourcePrefix = "cache" } = {}) {
-      const fromHeatmap = sourcePrefix === "heatmap";
       const payload = {
-        target: $(fromHeatmap ? "heatmapTargetInput" : "cacheTargetInput").value.trim(),
-        filter: $(fromHeatmap ? "heatmapFilterInput" : "cacheFilterInput").value.trim(),
-        score_metrics: $(fromHeatmap ? "heatmapScoreInput" : "cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic",
+        target: $("cacheTargetInput").value.trim(),
+        filter: $("cacheFilterInput").value.trim(),
+        score_metrics: $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic",
       };
       try {
         const res = await fetch("/api/cache/context", {
@@ -1679,16 +1704,15 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
     }
 
     async function generateCache(sourcePrefix = "cache") {
-      const fromHeatmap = sourcePrefix === "heatmap";
       const box = $("cacheStatus");
       const bar = $("cacheProgress");
       box.textContent = "Starting cache generation…";
       bar.classList.remove("done", "err");
       bar.style.width = "8%";
       await normalizeTargetForAction(sourcePrefix);
-      const target = $(fromHeatmap ? "heatmapTargetInput" : "cacheTargetInput").value.trim();
-      const filter = $(fromHeatmap ? "heatmapFilterInput" : "cacheFilterInput").value.trim();
-      const score = $(fromHeatmap ? "heatmapScoreInput" : "cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic";
+      const target = $("cacheTargetInput").value.trim();
+      const filter = $("cacheFilterInput").value.trim();
+      const score = $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic";
       if (!target) {
         box.textContent = "Target path is required.";
         updateCacheContext("invalid target");
@@ -1731,14 +1755,13 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
     }
 
     async function checkCacheStatus(sourcePrefix = "cache") {
-      const fromHeatmap = sourcePrefix === "heatmap";
       const box = $("cacheStatus");
       const bar = $("cacheProgress");
       box.textContent = "Checking cache…";
       bar.classList.remove("done", "err");
       bar.style.width = "25%";
       await normalizeTargetForAction(sourcePrefix);
-      const target = $(fromHeatmap ? "heatmapTargetInput" : "cacheTargetInput").value.trim();
+      const target = $("cacheTargetInput").value.trim();
       if (!target) {
         box.textContent = "Target path is required.";
         updateCacheContext("invalid target");
@@ -1753,8 +1776,8 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             target,
-            filter: $(fromHeatmap ? "heatmapFilterInput" : "cacheFilterInput").value.trim() || null,
-            score_metrics: $(fromHeatmap ? "heatmapScoreInput" : "cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic"
+            filter: $("cacheFilterInput").value.trim() || null,
+            score_metrics: $("cacheScoreInput").value.trim() || "churn_per_sloc,cyclomatic"
           }),
         });
         const data = await res.json();
@@ -1883,21 +1906,6 @@ Build Parameters: filter=${filter}, score_metrics=${score}`;
         $(id).addEventListener("keydown", (ev) => {
           if (ev.key === "Enter") {
             saveCacheContext({ overwrite: true, statusText: "resolved", sourcePrefix: "cache" });
-          }
-        });
-      });
-      ["heatmapTargetInput", "heatmapFilterInput", "heatmapScoreInput"].forEach((id) => {
-        $(id).addEventListener("input", () => {
-          mirrorCacheInputs("heatmap");
-          updateCacheContext("pending");
-          saveCacheContext({ overwrite: false, statusText: "pending", sourcePrefix: "heatmap" });
-        });
-        $(id).addEventListener("blur", () => {
-          saveCacheContext({ overwrite: true, statusText: "resolved", sourcePrefix: "heatmap" });
-        });
-        $(id).addEventListener("keydown", (ev) => {
-          if (ev.key === "Enter") {
-            saveCacheContext({ overwrite: true, statusText: "resolved", sourcePrefix: "heatmap" });
           }
         });
       });
