@@ -90,22 +90,39 @@ uvx -p 3.13 --from git+https://github.com/avnovikov/HotspotTriage hotspottriage 
 
 Arguments after `start-mcp-server` are handled by HotspotTriage first (`--open-browser`, `--default-target`, dashboard flags), then any remaining arguments are passed through to the MCP runtime.
 
-Example **Cursor** config (save as `.cursor/mcp.json` in the workspace you opened, or merge it into your editor's MCP settings). The paths below are placeholders. When you use **`scripts/run_hotspottriage_mcp.sh`**, put only dashboard and default-target flags in **`args`** because the script already launches `hotspottriage start-mcp-server`.
+**Use with Cursor**
 
-**PATH / `git`:** Cursor often starts MCP with a minimal `PATH`, which can cause `[Errno 2] No such file or directory: 'git'`. The launcher script prepends `.venv/bin` and common system directories (`/usr/bin`, `/bin`, `/usr/local/bin`, `/opt/homebrew/bin`). Prefer **omitting** the `env` block unless you need it. If you do set `PATH` yourself, Cursor may **not** expand `$PATH`, so provide the full value explicitly with your venv first.
+Below is example of the **Cursor** config (save as `.cursor/mcp.json` in the workspace you opened, or merge it into Cursor's MCP settings). The paths below are placeholders. When you use **`scripts/run_hotspottriage_mcp.sh`**, put only dashboard and default-target flags in **`args`** because the script already launches `hotspottriage start-mcp-server`.
 
 ```json
 {
   "mcpServers": {
     "hotspottriage": {
       "command": "path/to/HotspotTriage/scripts/run_hotspottriage_mcp.sh",
-      "args": ["--open-browser", "--default-target", "/absolute/path/to/your/git/repo"]
+      "args": ["--open-browser", "--default-target", "${workspaceFolder}"]
     }
   }
 }
 ```
 
 In Cursor `mcp.json`, you can often use `${workspaceFolder}` instead of an absolute path.
+
+**PATH / `git`:** Cursor often starts MCP with a minimal `PATH`, which can cause `[Errno 2] No such file or directory: 'git'`. The launcher script prepends `.venv/bin` and common system directories (`/usr/bin`, `/bin`, `/usr/local/bin`, `/opt/homebrew/bin`). Prefer **omitting** the `env` block unless you need it. If you do set `PATH` yourself, Cursor may **not** expand `$PATH`, so provide the full value explicitly with your venv first.
+
+**Use with Claude Code**
+
+**Claude Code** discovers the server through its standard MCP config. From inside the cloned repo (so the launcher and venv resolve correctly):
+```bash
+claude mcp add hotspottriage -- ./scripts/run_hotspottriage_mcp.sh --open-browser --default-target /absolute/path/to/your/git/repo
+```
+Or register it manually by adding the same JSON as above to `~/.claude.json` under `mcpServers` (same shape as Cursor’s MCP config). Then in a Claude Code session:
+
+```text
+/mcp                                    # confirm "hotspottriage" is connected
+> Use hotspottriage analyze on this repo, top 15 by score   # omit target if server used --default-target for this repo
+> Then call generate_cache so the dashboard heatmap is populated
+```
+
 
 Optional explicit `PATH` (only if you need it; replace placeholders with absolute paths on your machine):
 
@@ -139,23 +156,9 @@ Direct **`hotspottriage` binary** configuration (put `start-mcp-server` in **`ar
 ```
 For reliable tooling resolution, use a dedicated virtual environment and keep that `bin` directory first on `PATH`. [`scripts/run_hotspottriage_mcp.sh`](scripts/run_hotspottriage_mcp.sh) is POSIX `sh`, not `bash`. It resolves the HotspotTriage checkout from the script location, prepends `.venv/bin` and common system directories to `PATH`, and then **`exec`s `hotspottriage start-mcp-server`**. If your MCP host cannot run shell scripts, point **`command`** at `.venv/bin/hotspottriage` and move `start-mcp-server` plus the same flags into **`args`**.
 
-**Cursor, workspaces, and git worktrees:** Cursor resolves MCP settings from **the folder you opened**. Each **`git worktree`** is a separate directory, so when you switch worktrees you should update **`.cursor/mcp.json`** so **`command`**, **`env.PATH`**, and **`--default-target`** all point at paths that exist in that checkout. In practice, that usually means the HotspotTriage launcher or venv in the current tree, plus the absolute path of the repo you want to analyze. Stale paths are a common cause of “wrong repo” results or missing **`git`** errors.
-
-Git also allows only **one** linked worktree to check out a branch at a time. If **`main`** is already checked out elsewhere, `git checkout main` in the current worktree will fail; `git worktree list` shows where each branch is bound. That does not affect MCP analysis as long as the tool **`target`** is correct, but it can affect local merge flows. In those cases, merge through GitHub or use the worktree that already has **`main`** checked out.
-
 **Tools exposed over MCP:** `analyze`, `generate_cache`, `cache_status`, `clear_cache`, and `init_config`. Pass `compact=false` to `analyze` when you want full metric rows. If the server was started with **`--default-target`**, tools can omit **`target`** when they should always operate on that repo.
 
-**Use with Claude Code**: discovers the server through its standard MCP config. From inside the cloned repo (so the launcher and venv resolve correctly):
-```bash
-claude mcp add hotspottriage -- ./scripts/run_hotspottriage_mcp.sh --open-browser --default-target /absolute/path/to/your/git/repo
-```
-Or register it manually by adding the same JSON as above to `~/.claude.json` under `mcpServers` (same shape as Cursor’s MCP config). Then in a Claude Code session:
 
-```text
-/mcp                                    # confirm "hotspottriage" is connected
-> Use hotspottriage analyze on this repo, top 15 by score   # omit target if server used --default-target for this repo
-> Then call generate_cache so the dashboard heatmap is populated
-```
 
 Tips:
 
