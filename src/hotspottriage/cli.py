@@ -20,7 +20,7 @@ from pathlib import Path
 
 from hotspottriage import churn as _churn
 from hotspottriage import config as _config
-from hotspottriage import discovery, filtering, output, progress_report, stats
+from hotspottriage import discovery, filtering, explain, output, progress_report, stats
 from hotspottriage import score_metrics as _score_metrics
 
 
@@ -218,14 +218,21 @@ def _run_init(argv: list[str]) -> int:
 
 
 def _resolve_config(args: argparse.Namespace, target_path: Path | None) -> dict:
-    """Build the merged config: files first (unless --no-config), then CLI."""
+    """Build merged config for ``analyze``, aligned with MCP local ``analyze``.
+
+    Uses ``load_config(..., use_global=False)`` plus
+    ``merge_dashboard_config_patch`` so CLI scores match MCP for the same repo
+    (skips ``~/.hotspottriage/config.yml``; still honors project YAML,
+    ``--config``, dashboard patch, then CLI flags).
+    """
     if args.no_config:
         merged = _config.load_config(
             target_path=None, use_global=False, use_project=False
         )
     else:
-        merged = _config.load_config(
-            target_path=target_path,
+        assert target_path is not None, "analyze always resolves a repo path"
+        merged = _config.load_analyze_config_for_local_repo(
+            target_path,
             explicit=args.config,
         )
     merged = _config.apply_cli_overrides(merged, args)
@@ -335,6 +342,23 @@ def main(argv: list[str] | None = None) -> int:
                 results, by=cfg["sort"], limit=cfg["limit"]
             )
             print(output.render(results, cfg["format"], cfg))
+            if cfg["granularity"] == "block":
+                pm_raw = cfg.get("proposed_models")
+                pm = pm_raw if isinstance(pm_raw, dict) else {}
+                for s in results:
+                    if not s.score_subscores:
+                        continue
+                    band = str(s.score_band).lower()
+                    if band not in ("high", "critical"):
+                        continue
+                    rec = pm.get(s.score_band)
+                    rec_s = rec if isinstance(rec, str) else None
+                    narrative = explain.explain_score(
+                        s, recommended_action=rec_s, final_weights=s.score_final_weights
+                    )
+                    if narrative:
+                        print()
+                        print(narrative)
         return 0
     except (NotADirectoryError, RuntimeError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)

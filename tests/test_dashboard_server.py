@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from hotspottriage import config as _project_config
+from hotspottriage import score as _score_mod
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.server import DashboardServer, _find_free_port, _slim_cache_job_result
 from hotspottriage.dashboard.stats import StatsCollector
@@ -40,6 +41,66 @@ def _server(
 def _default_score_metrics_csv() -> str:
     metrics = _project_config.DEFAULTS.get("score_metrics") or []
     return ",".join(str(m) for m in metrics)
+
+
+def test_block_narrative_final_weights_match_load_analyze_config(tmp_path: Path):
+    """Lazy narrative uses the same merged config as ``load_analyze_config_for_local_repo``."""
+    patch_path = tmp_path / ".hotspottriage" / "dashboard_config_patch.yml"
+    patch_path.parent.mkdir(parents=True, exist_ok=True)
+    patch_path.write_text(
+        """
+score_aggregation:
+  final_weights:
+    complexity_burden: 0.10
+    churn_burden: 0.10
+    maintainability_burden: 0.10
+    smell_burden: 0.10
+    similarity_burden: 0.60
+""".strip()
+        + "\n"
+    )
+    srv = _server(config_patch_path=patch_path)
+    srv.publish_latest_block_metrics([_high_raw_block_row()], analysis_repo=tmp_path)
+    client = TestClient(srv.app)
+    r = client.get("/api/stats/block_narrative", params={"path": "x.py::f"})
+    assert r.status_code == 200
+    merged = _project_config.load_analyze_config_for_local_repo(tmp_path)
+    fw = _score_mod.final_weight_multipliers_for_burdens(
+        merged,
+        similarity_available=True,
+    )
+    assert fw is not None
+    expl = r.json()["score_explanation"]
+    by_driver = {x["driver"]: x["final_weight"] for x in expl if "final_weight" in x}
+    assert abs(by_driver["complexity"] - fw["complexity_burden"]) < 1e-5
+    assert abs(by_driver["churn"] - fw["churn_burden"]) < 1e-5
+
+
+def test_block_narrative_endpoint():
+    srv = _server()
+    srv.publish_latest_block_metrics([_high_raw_block_row()])
+    client = TestClient(srv.app)
+    r = client.get("/api/stats/block_narrative", params={"path": "x.py::f"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["path"] == "x.py::f"
+    assert "score_narrative" in data
+    assert data["score_driver"]
+    assert isinstance(data["score_explanation"], list)
+    assert "Primary driver:" in data["score_narrative"]
+    assert "(score " in data["score_narrative"]
+    assert "final_weight" not in data["score_narrative"]
+    assert "n_churn=" in data["score_narrative"] or "n_cyclomatic=" in data["score_narrative"]
+    assert any("score_contribution" in x for x in data["score_explanation"])
+    assert any("normalized" in x for x in data["score_explanation"])
+    for x in data["score_explanation"]:
+        assert "raw" not in x
+
+
+def test_block_narrative_400_without_path():
+    srv = _server()
+    client = TestClient(srv.app)
+    assert client.get("/api/stats/block_narrative").status_code == 400
 
 
 def _high_raw_block_row(path: str = "x.py::f") -> dict:
@@ -457,9 +518,9 @@ def test_stats_heatmap_sorts_and_limits():
     assert data["rows"][1]["path"] == "c::z"
 
 
-def test_stats_heatmap_column_maxima_excludes_meta_aggregate_row():
+def test_stats_heatmap_column_maxima_excludes_meta_aggregate_row(tmp_path):
     """Meta rows (path ``__...``) must not dominate heatmap tint maxima."""
-    srv = _server()
+    srv = _server(config_patch_path=tmp_path / "no_dashboard_patch.yml")
     srv.publish_latest_block_metrics(
         [
             {"path": "__aggregate_similarity__::repo", "score": 0.99, "complexity_burden": 0.95},
@@ -609,16 +670,16 @@ def test_publish_latest_block_metrics_derives_bands_from_saved_config(tmp_path):
         json={"score_aggregation": {"band_edges": [0.2, 0.5, 0.95]}},
     )
     assert resp.status_code == 200
-    srv.publish_latest_block_metrics(raw_rows)
+    srv.publish_latest_block_metrics(raw_rows, analysis_repo=tmp_path)
     high_rows = client.get("/api/stats/heatmap").json()["rows"]
     assert high_rows[0]["score_band"] == "high"
 
     resp = client.post(
         "/api/config/patch",
-        json={"score_aggregation": {"band_edges": [0.2, 0.5, 0.7]}},
+        json={"score_aggregation": {"band_edges": [0.2, 0.5, 0.66]}},
     )
     assert resp.status_code == 200
-    srv.publish_latest_block_metrics(raw_rows)
+    srv.publish_latest_block_metrics(raw_rows, analysis_repo=tmp_path)
     critical_rows = client.get("/api/stats/heatmap").json()["rows"]
     assert critical_rows[0]["score_band"] == "critical"
 

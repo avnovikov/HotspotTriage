@@ -7,6 +7,7 @@ Defined in a tiny module so :mod:`hotspottriage.output` does not import
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,12 @@ class Statistic:
     score: float
     score_band: str = "n/a"
     score_subscores: dict[str, float] = field(default_factory=dict)
+    score_driver: str = ""
+    score_explanation: list[dict[str, Any]] = field(default_factory=list)
+    # Normalized ``final_weights`` map used with ``score_subscores`` (block runs).
+    score_final_weights: dict[str, float] | None = None
+    # Per-burden normalized metric maps (same inputs as ``score.compute_score``).
+    score_norm_inputs: dict[str, dict[str, float]] | None = None
 
     def as_dict(self) -> dict:
         return asdict(self)

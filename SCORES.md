@@ -368,3 +368,9 @@ Similarity burden only participates when similarity data is available:
 - remaining final weights are proportionally renormalized
 
 This avoids penalizing runs where similarity is intentionally disabled or not computed.
+
+---
+
+## 9) Score narratives
+
+Block rows with risk aggregation add `score_driver`, `score_explanation` (ranked burdens with optional **`normalized`** inputs per driver, plus weights when aggregation is on), and a multi-line `score_narrative` from `hotspottriage.explain` so CLI, MCP `analyze` with **`compact=false`**, and the API reuse the same phrasing. Rankings and copy include **`final_weight × burden`** (score contribution) when aggregation is on, so the narrative matches how the composite `score` is built. Detail lines use the same **normalized** metric inputs as `compute_score` (prefixed `n_<metric>=…`), not raw counters, for driver context. The dashboard heatmap loads that narrative on demand via `GET /api/stats/block_narrative?path=…` instead of embedding it in every row payload; heatmap matrix cells remain raw burdens plus composite `score`. MCP **`analyze`** with **`compact=true`** (the default) returns a short **`rationale`** string instead: main driver, a brief cause phrase from the same normalized inputs (e.g. “high normalized SLOC and Halstead volume”), and an optional “Second: …” line—no `score_explanation` or long `score_narrative` in each compact row.

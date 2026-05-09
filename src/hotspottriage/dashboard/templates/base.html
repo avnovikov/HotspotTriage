@@ -334,6 +334,22 @@
     .band-dot.medium { background: var(--warn); }
     .band-dot.high { background: var(--heatmap-high); }
     .band-dot.critical { background: var(--error); }
+    .heatmap-narrative-tip {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      width: min(26rem, 38vw);
+      max-height: 11rem;
+      z-index: 100;
+      white-space: pre-wrap;
+      font-size: 0.78rem;
+      padding: 0.6rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+      overflow: auto;
+    }
     .heatmap-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.55rem; }
     .heatmap-controls label { font-size: 0.78rem; color: var(--muted); display: inline-flex; align-items: center; gap: 0.3rem; }
     .heatmap-controls select { min-width: 140px; }

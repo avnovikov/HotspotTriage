@@ -9,6 +9,7 @@ from hotspottriage.config import DEFAULTS
 from hotspottriage.score import (
     compute_score,
     effective_score_aggregation,
+    final_weight_multipliers_for_burdens,
     score_aggregation_enabled,
     validate_score_aggregation,
 )
@@ -88,6 +89,25 @@ def test_validate_rejects_bad_band_edge_order():
     cfg["score_aggregation"]["band_edges"] = [0.6, 0.3, 0.8]
     with pytest.raises(ValueError, match="strictly increasing"):
         validate_score_aggregation(cfg)
+
+
+def test_final_weight_multipliers_times_burdens_equals_score():
+    cfg = copy.deepcopy(DEFAULTS)
+    rec = _neutral_record()
+    rec["cyclomatic"] = 12
+    rec["halstead"] = 112
+    rec["normalized_sloc"] = 0.6
+    rec["maintainability"] = 100
+    rec["churn"] = 40
+    rec["churn_per_sloc"] = 1.0
+    rec["decayed_churn"] = 40.0
+    rec["decayed_churn_per_sloc"] = 1.0
+    out = compute_score(rec, cfg, similarity_available=True)
+    wm = final_weight_multipliers_for_burdens(cfg, similarity_available=True)
+    assert wm is not None
+    assert abs(sum(wm.values()) - 1.0) < 1e-9
+    contrib = sum(wm[k] * out["score_subscores"][k] for k in wm)
+    assert contrib == pytest.approx(out["score"], abs=1e-9)
 
 
 def test_high_score_maps_to_high_or_critical_band():

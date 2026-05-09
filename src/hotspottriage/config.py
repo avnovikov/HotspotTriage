@@ -1,13 +1,17 @@
 """Layered YAML configuration for HotspotTriage.
 
-Resolution order (last wins):
+Resolution order (last wins) for :func:`load_config`:
 
     code DEFAULTS
-      -> ~/.hotspottriage/config.yml          (global, per user)
+      -> ~/.hotspottriage/config.yml          (global, per user; optional via *use_global*)
       -> <repo>/.hotspottriage/project.yml    (per project, versioned)
       -> <repo>/.hotspottriage/project.local.yml (per machine, gitignored)
       -> --config <PATH>                      (explicit override file)
-      -> CLI flags                            (only when explicitly passed)
+
+CLI ``analyze`` and MCP local ``analyze`` call ``load_config`` with
+``use_global=False``, then merge ``dashboard_config_patch.yml`` via
+:func:`merge_dashboard_config_patch`, then apply MCP tool arguments or CLI
+flags (not part of ``load_config`` itself).
 
 A layer only needs to specify the keys it wants to override; missing keys fall
 through to the next lower layer.
@@ -37,6 +41,7 @@ GLOBAL_CONFIG_FILE = GLOBAL_CONFIG_DIR / "config.yml"
 PROJECT_CONFIG_DIRNAME = ".hotspottriage"
 PROJECT_CONFIG_FILENAME = "project.yml"
 PROJECT_LOCAL_CONFIG_FILENAME = "project.local.yml"
+DASHBOARD_CONFIG_PATCH_FILENAME = "dashboard_config_patch.yml"
 PROJECT_GITIGNORE_FILENAME = ".gitignore"
 
 # Single source of truth for every configurable setting.
@@ -151,6 +156,10 @@ DEFAULTS: dict[str, Any] = {
         "smell_count": {
             "method": "piecewise",
             "breakpoints": [[0, 0.0], [2, 0.3], [5, 0.7], [10, 1.0]],
+        },
+        "smell_severity": {
+            "method": "piecewise",
+            "breakpoints": [[0, 0.0], [0.5, 0.25], [1.0, 0.5], [2.0, 0.8], [5.0, 1.0]],
         },
         "match_count": {
             "method": "piecewise",
@@ -313,6 +322,56 @@ def load_config(
         _reject_unknown_keys(layer, path)
         merged = _deep_merge(merged, layer)
     return merged
+
+
+def merge_dashboard_config_patch(
+    repo: Path, cfg: dict[str, Any]
+) -> dict[str, Any]:
+    """Deep-merge ``<repo>/.hotspottriage/dashboard_config_patch.yml`` into *cfg*.
+
+    Same file and semantics as :func:`mcp_server._build_analyze_config` for a
+    local target: dashboard UI / heatmap tuning for ``metric_normalization``,
+    ``score_aggregation``, and ``proposed_models``. Missing or empty files are
+    a no-op. Returns a new dict; *cfg* is not mutated.
+    """
+    patch_path = (
+        Path(repo).resolve()
+        / PROJECT_CONFIG_DIRNAME
+        / DASHBOARD_CONFIG_PATCH_FILENAME
+    )
+    if not patch_path.is_file():
+        return deepcopy(cfg)
+    layer = _read_yaml(patch_path)
+    if not layer:
+        return deepcopy(cfg)
+    _reject_unknown_keys(layer, patch_path)
+    return _deep_merge(cfg, layer)
+
+
+def load_analyze_config_for_local_repo(
+    repo: Path,
+    *,
+    explicit: Path | None = None,
+) -> dict[str, Any]:
+    """Merged config for scoring and score explanations on a local checkout.
+
+    Single entry point for CLI analyze, MCP local ``analyze``, dashboard
+    heatmap derivation, lazy ``block_narrative``, and cache-generation overrides
+    so ``metric_normalization``, ``score_aggregation``, ``proposed_models``, and
+    related keys stay aligned for the same repository path.
+
+    Layers: ``DEFAULTS`` ← ``project.yml`` / ``project.local.yml`` ← *explicit*
+    ``--config`` file ← ``<repo>/.hotspottriage/dashboard_config_patch.yml``.
+    Skips global ``~/.hotspottriage/config.yml`` (``use_global=False``).
+    """
+    root = Path(repo).expanduser().resolve()
+    merged = load_config(
+        root,
+        explicit=explicit,
+        use_global=False,
+        use_project=True,
+    )
+    return merge_dashboard_config_patch(root, merged)
 
 
 # CLI argument name -> config key. Only flags that map to a config setting

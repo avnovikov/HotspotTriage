@@ -12,6 +12,8 @@ from hotspottriage.stats import (
     build_stats,
     derive_block_statistics,
     sort_and_limit,
+    statistic_from_complete_dict,
+    statistic_from_raw_block_row,
 )
 from tests.fixtures.build_block_repo import build_block_repo
 from tests.fixtures.build_repo import build_repo
@@ -142,6 +144,9 @@ def test_block_stats_sets_normalized_sloc_zscore(tmp_path: Path):
         assert 0.0 <= s.score <= 1.0
         assert s.score_band in ("low", "medium", "high", "critical")
         assert "complexity_burden" in s.score_subscores
+        assert isinstance(s.score_explanation, list)
+        if s.score_subscores:
+            assert s.score_driver
 
 
 def test_build_block_stats_preserves_unrelated_cache_rows_on_scoped_run(tmp_path: Path):
@@ -185,11 +190,91 @@ def test_build_block_stats_persists_raw_cache_rows(tmp_path: Path):
     )
     rows = _cache.load_block_results(repo) or []
     assert rows
-    derived_keys = {"score", "score_band", "score_subscores"}
+    derived_keys = {
+        "score",
+        "score_band",
+        "score_subscores",
+        "score_driver",
+        "score_explanation",
+    }
     for row in rows:
         assert not derived_keys.intersection(row)
         assert not any(str(key).startswith("norm_") for key in row)
         assert {"path", "cyclomatic", "churn", "_blob_sha", "_start", "_end"} <= set(row)
+
+
+def test_statistic_from_complete_dict_strips_legacy_raw_from_score_explanation():
+    row = {
+        "path": "mod.py::fn",
+        "sloc": 10,
+        "normalized_sloc": 0.0,
+        "cyclomatic": 5,
+        "halstead": 10,
+        "maintainability": 80,
+        "churn": 0,
+        "churn_per_sloc": 0.0,
+        "decayed_churn": 0.0,
+        "decayed_churn_per_sloc": 0.0,
+        "smell_count": 0,
+        "smell_severity": 0.0,
+        "smell_burden": 0.0,
+        "smells": {},
+        "similarity_score": 0.0,
+        "similarity_band": "n/a",
+        "match_count": 0,
+        "score": 0.5,
+        "score_band": "medium",
+        "score_subscores": {"complexity_burden": 0.5},
+        "score_driver": "complexity",
+        "score_explanation": [
+            {
+                "driver": "complexity",
+                "burden": 0.5,
+                "raw": {"cyclomatic": 999},
+                "normalized": {"cyclomatic": 0.5},
+            }
+        ],
+    }
+    st = statistic_from_complete_dict(row)
+    assert st.score_explanation
+    assert "raw" not in st.score_explanation[0]
+
+
+def test_statistic_from_raw_block_row_stub_path_sanitizes_score_explanation():
+    row = {
+        "path": "__similarity_summary::all",
+        "sloc": 0,
+        "normalized_sloc": 0.0,
+        "cyclomatic": 0,
+        "halstead": 0,
+        "maintainability": 0,
+        "churn": 0,
+        "churn_per_sloc": 0.0,
+        "decayed_churn": 0.0,
+        "decayed_churn_per_sloc": 0.0,
+        "smell_count": 0,
+        "smell_severity": 0.0,
+        "smell_burden": 0.0,
+        "smells": {},
+        "similarity_score": 0.0,
+        "similarity_band": "n/a",
+        "match_count": 0,
+        "score": 0.0,
+        "score_band": "n/a",
+        "score_subscores": {"complexity_burden": 0.1},
+        "score_driver": "complexity",
+        "score_explanation": [
+            {"driver": "complexity", "burden": 0.1, "raw": {"cyclomatic": 1}},
+        ],
+    }
+    st = statistic_from_raw_block_row(
+        row,
+        ["cyclomatic"],
+        merged_config=DEFAULTS,
+        similarity_enabled=False,
+    )
+    assert st.score_explanation
+    assert "raw" not in st.score_explanation[0]
 
 
 def test_derive_block_statistics_uses_active_normalization_config():

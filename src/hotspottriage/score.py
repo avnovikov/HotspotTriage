@@ -119,6 +119,67 @@ def _record_float(record: dict[str, Any], key: str, default: float = 0.0) -> flo
         return default
 
 
+def normalized_block_inputs(
+    record: dict[str, Any],
+    merged_config: dict[str, Any],
+    *,
+    similarity_available: bool = True,
+) -> dict[str, dict[str, float]]:
+    """Per-burden normalized metric values in ``[0, 1]`` (same inputs as :func:`compute_score`).
+
+    Each inner dict maps the **metric keys** used inside ``compute_score`` to the
+    normalized values that are multiplied by ``*_weights`` to build that burden.
+    Used for narratives and MCP/CLI explanations so driver copy references the
+    same normalized surface as aggregation, not raw counters.
+    """
+    n_cyc = _metric_norm("cyclomatic", _record_float(record, "cyclomatic"), merged_config)
+    n_hal = _metric_norm("halstead", _record_float(record, "halstead"), merged_config)
+    n_nsloc = _metric_norm(
+        "normalized_sloc", _record_float(record, "normalized_sloc"), merged_config
+    )
+    n_mi = _metric_norm("maintainability", _record_float(record, "maintainability"), merged_config)
+    n_ch = _metric_norm("churn", _record_float(record, "churn"), merged_config)
+    n_cps = _metric_norm("churn_per_sloc", _record_float(record, "churn_per_sloc"), merged_config)
+    n_dch = _metric_norm("decayed_churn", _record_float(record, "decayed_churn"), merged_config)
+    n_dcps = _metric_norm(
+        "decayed_churn_per_sloc",
+        _record_float(record, "decayed_churn_per_sloc"),
+        merged_config,
+    )
+    n_smell_cnt = _metric_norm("smell_count", _record_float(record, "smell_count"), merged_config)
+    n_smell_sev = _metric_norm("smell_severity", _record_float(record, "smell_severity"), merged_config)
+    out: dict[str, dict[str, float]] = {
+        "complexity_burden": {
+            "cyclomatic": round(float(n_cyc), 4),
+            "halstead": round(float(n_hal), 4),
+            "normalized_sloc": round(float(n_nsloc), 4),
+        },
+        "maintainability_burden": {"maintainability": round(float(n_mi), 4)},
+        "churn_burden": {
+            "churn": round(float(n_ch), 4),
+            "churn_per_sloc": round(float(n_cps), 4),
+            "decayed_churn": round(float(n_dch), 4),
+            "decayed_churn_per_sloc": round(float(n_dcps), 4),
+        },
+        "smell_burden": {
+            "smell_count": round(float(n_smell_cnt), 4),
+            "smell_severity": round(float(n_smell_sev), 4),
+        },
+    }
+    if similarity_available:
+        n_sim = _metric_norm(
+            "similarity_score", _record_float(record, "similarity_score"), merged_config
+        )
+        n_match = _metric_norm("match_count", _record_float(record, "match_count"), merged_config)
+        out["similarity_burden"] = {
+            "similarity_score": round(float(n_sim), 4),
+            "match_count": round(float(n_match), 4),
+        }
+    else:
+        out["similarity_burden"] = {"similarity_score": 0.0, "match_count": 0.0}
+    return out
+
+
 def compute_score(
     record: dict[str, Any],
     merged_config: dict[str, Any],
@@ -179,8 +240,8 @@ def compute_score(
     )
 
     n_smell_cnt = _metric_norm("smell_count", _record_float(record, "smell_count"), merged_config)
-    smell_sev = _record_float(record, "smell_severity")
-    smell_burden = sw["smell_count"] * n_smell_cnt + sw["smell_severity"] * smell_sev
+    n_smell_sev = _metric_norm("smell_severity", _record_float(record, "smell_severity"), merged_config)
+    smell_burden = sw["smell_count"] * n_smell_cnt + sw["smell_severity"] * n_smell_sev
 
     if similarity_available:
         n_sim = _metric_norm(
@@ -223,6 +284,29 @@ def compute_score(
     out["score_band"] = score_band
     out["score_subscores"] = burdens
     return out
+
+
+def final_weight_multipliers_for_burdens(
+    merged_config: dict[str, Any], *, similarity_available: bool
+) -> dict[str, float] | None:
+    """Return normalized ``final_weights`` per burden key used in :func:`compute_score`.
+
+    When block score aggregation is disabled, returns ``None``. Otherwise returns
+    the same map passed internally to combine burdens into ``score`` (including
+    re-normalization when similarity is unavailable).
+
+    Multiplying each burden in ``score_subscores`` by these values yields the
+    burden's **contribution** to the composite score (the five contributions sum
+    to ``score``).
+    """
+    if not score_aggregation_enabled(merged_config):
+        return None
+    agg = effective_score_aggregation(merged_config)
+    fw_raw = agg.get("final_weights") or {}
+    if not isinstance(fw_raw, dict):
+        raise ValueError("score_aggregation.final_weights must be a dict")
+    fw = {str(k): float(v) for k, v in fw_raw.items() if isinstance(v, (int, float))}
+    return _effective_final_weights(fw, similarity_available=similarity_available)
 
 
 def validate_score_aggregation(config: dict[str, Any]) -> None:

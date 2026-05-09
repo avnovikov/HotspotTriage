@@ -1,5 +1,59 @@
 // Heatmap screen functions
 
+const heatmapNarrativeCache = new Map();
+
+async function showHeatmapNarrativeForPath(path) {
+  const tip = $("heatmapNarrativeTip");
+  if (!tip || !path) return;
+  tip.hidden = false;
+  if (heatmapNarrativeCache.has(path)) {
+    tip.textContent = heatmapNarrativeCache.get(path);
+    return;
+  }
+  tip.textContent = "Loading explanation…";
+  try {
+    const res = await fetch(
+      `/api/stats/block_narrative?path=${encodeURIComponent(path)}`
+    );
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const d = data.detail;
+      tip.textContent =
+        typeof d === "string" ? d : "Could not load explanation.";
+      return;
+    }
+    const text = data.score_narrative || "";
+    heatmapNarrativeCache.set(path, text);
+    tip.textContent = text || "(no narrative available)";
+  } catch (e) {
+    tip.textContent = String(e);
+  }
+}
+
+function bindHeatmapNarrativeTips(panel) {
+  const host = $("heatmapMatrixHost");
+  const tip = $("heatmapNarrativeTip");
+  if (!host || !tip) return;
+  const tbody = panel.querySelector("tbody");
+  if (!tbody) return;
+  tbody.addEventListener(
+    "pointerover",
+    (ev) => {
+      const tr = ev.target.closest?.("tr");
+      if (!tr || tr.parentElement !== tbody) return;
+      const p = tr.getAttribute("data-path");
+      if (p) showHeatmapNarrativeForPath(p);
+    },
+    true
+  );
+  host.addEventListener("pointerout", (ev) => {
+    const rt = ev.relatedTarget;
+    if (rt && host.contains(rt)) return;
+    tip.hidden = true;
+    tip.textContent = "";
+  });
+}
+
 function heatmapBarBandClass(band) {
   const b = String(band || "").toLowerCase();
   if (b === "low") return "band-low";
@@ -75,7 +129,7 @@ function renderHeatmapPanel() {
           return `<td class="heatmap-metric-cell" style="background:${heatColor(pct)};">${v.toFixed(3)}</td>`;
         })
         .join("");
-      return `<tr>
+      return `<tr data-path="${escapeAttr(r.path || "")}">
   <td class="heatmap-file-col" title="${escapeAttr(r.file || "")}"><span class="heatmap-file-label">${escapeHtml(truncateLeftLabelToWidth(r.file || ""))}</span></td>
   <td class="heatmap-method-col" title="${escapeAttr(r.method || "")}"><span class="heatmap-method">${escapeHtml(r.method || "")}</span></td>
   ${cells}
@@ -85,6 +139,7 @@ function renderHeatmapPanel() {
     .join("");
   panel.className = "";
   panel.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+  bindHeatmapNarrativeTips(panel);
 }
 
 async function refreshHeatmap() {
