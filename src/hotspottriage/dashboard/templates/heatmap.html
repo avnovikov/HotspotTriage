@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+    <div id="view-heatmap" class="view-section active" data-view="heatmap">
+      <section class="wide">
+        <h2>Heatmap</h2>
+        <div class="heatmap-controls">
+          <button id="heatmapUpdateBtn" type="button">Update Heatmap</button>
+          <span class="muted">Necessary when configuration changes.</span>
+          <label>Limit
+            <input id="heatmapLimitInput" type="number" min="1" max="500" value="500" style="width:5rem;min-width:0;" />
+          </label>
+          <label>Presentation filter
+            <input id="heatmapViewFilterInput" type="text" placeholder="path or function (optional)" />
+          </label>
+          <span id="heatmapStatus" class="muted" style="font-size:0.78rem;"></span>
+        </div>
+        <div class="field" style="margin-bottom:0.55rem;">
+          <span class="field-label">Repository root</span>
+          <div id="heatmapRepoRootDisplay" class="mono readonly-repo-display" role="status" aria-live="polite">—</div>
+          <span class="muted" style="font-size:0.72rem;">Edit path and patterns on <a href="/dashboard/">Overview</a>.</span>
+          <span class="muted" style="font-size:0.72rem; display:block; margin-top:0.28rem;">Edit normalisation parameters in <a href="/dashboard/config">Config</a>.</span>
+        </div>
+        <div id="heatmapPanel" class="muted">No heatmap rows yet.</div>
+      </section>
+    </div>
+{% endblock %}
+{% block scripts %}
+<script src="/dashboard/static/js/heatmap.js"></script>
+{% endblock %}
