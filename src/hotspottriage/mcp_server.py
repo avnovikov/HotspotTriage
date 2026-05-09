@@ -248,7 +248,14 @@ def run_cached_block_analysis_dict(
         target, cfg, progress_callback=progress_callback
     )
     # Publish live manager rows to dashboard after cache warm-up.
-    _publish_manager_rows_to_dashboard(target)
+    synthetic_block_rows = [
+        r.as_dict()
+        for r in results_full
+        if str(r.path).split("::", 1)[0].startswith("__")
+    ]
+    _publish_manager_rows_to_dashboard(
+        target, cfg, synthetic_block_rows=synthetic_block_rows
+    )
 
     if compact:
         results_list = _mcp_compact_score_rows(
@@ -605,10 +612,7 @@ def _is_literal_filter_path(pattern: str) -> bool:
 
 def _normalize_filter_path(path: str) -> str:
     """Normalize a filter path to POSIX relative form for exact matching."""
-    normalized = path.strip().replace("\\", "/")
-    while normalized.startswith("./"):
-        normalized = normalized[2:]
-    return normalized
+    return filtering.normalize_filter_pattern(path)
 
 
 def _build_repo_keep_predicate(
@@ -731,17 +735,54 @@ def _publish_block_metrics_to_dashboard(
     dash.publish_latest_block_metrics([r.as_dict() for r in rows])
 
 
-def _publish_manager_rows_to_dashboard(target: str) -> None:
-    """Push the live cache-manager rows to the dashboard."""
+def _block_metric_row_repo_file(path: str) -> str:
+    """Repo-relative file path for a block metric row (strip ``::symbol``)."""
+    file_key = path.split("::", 1)[0] if "::" in path else path
+    return file_key.replace("\\", "/")
+
+
+def _publish_manager_rows_to_dashboard(
+    target: str,
+    cfg: dict[str, Any],
+    *,
+    synthetic_block_rows: list[dict[str, Any]] | None = None,
+) -> None:
+    """Push cache-manager rows to the dashboard, scoped to *cfg* filters.
+
+    Scoped block runs only replace cache entries for targeted files; older rows
+    for other files remain in the manager. Publishing ``get_all_rows()`` without
+    filtering would overwrite the dashboard and look like the filter was ignored.
+    Synthetic rows (paths whose file segment starts with ``__``, e.g. similarity
+    aggregate) are not persisted in the block cache; pass them via
+    *synthetic_block_rows* so the dashboard stays aligned with the analysis run.
+    Manager rows are filtered only with *keep* so stray synthetic keys in the
+    pickle cannot override a similarity-disabled run.
+    """
     dash = _dashboard_server_instance
     if dash is None:
         return
     try:
-        repo = Path(target).resolve()
-        mgr = _get_cache_manager(repo)
-        rows = mgr.get_all_rows()
-        if rows:
-            dash.publish_latest_block_metrics(rows)
+        with discovery.resolve_target(target) as repo:
+            mgr = _get_cache_manager(repo)
+            rows = mgr.get_all_rows()
+            keep = _build_repo_keep_predicate(repo, cfg)
+            merged: dict[str, dict[str, Any]] = {}
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                p = r.get("path")
+                if not isinstance(p, str):
+                    continue
+                fk = _block_metric_row_repo_file(p)
+                if keep(fk):
+                    merged[p] = r
+            if synthetic_block_rows:
+                for row in synthetic_block_rows:
+                    if isinstance(row, dict) and isinstance(row.get("path"), str):
+                        merged[str(row["path"])] = row
+            out = list(merged.values())
+            if out:
+                dash.publish_latest_block_metrics(out)
     except Exception:
         pass
 

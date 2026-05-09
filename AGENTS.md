@@ -1,5 +1,5 @@
 ## Learned User Preferences
-- Before implementing issue work, create or switch to the dedicated issue branch first.
+- **Always create or switch to a git branch before starting any implementation work** in this repo (do not start edits on `main`/`master` unless the user explicitly says so). For a GitHub issue, use that issue’s branch; otherwise use a short-lived `feature/…`, `fix/…`, or `chore/…` branch.
 - When requested to close an issue, complete the full lifecycle in one pass: run relevant tests, commit, create a PR, then close the issue.
 
 ## Learned Workspace Facts
