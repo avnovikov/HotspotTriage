@@ -4,8 +4,6 @@ import threading
 import time
 from pathlib import Path
 
-import pytest
-
 from hotspottriage.cache import (
     BlockCacheManager,
     CACHE_VERSION,
