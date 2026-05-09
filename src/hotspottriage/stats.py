@@ -40,6 +40,7 @@ _DERIVED_BLOCK_CACHE_KEYS = frozenset(
         "score_driver",
         "score_explanation",
         "score_final_weights",
+        "score_norm_inputs",
     }
 )
 
@@ -481,12 +482,16 @@ def _apply_risk_scores(
         fw_map = _risk_score.final_weight_multipliers_for_burdens(
             cfg, similarity_available=similarity_enabled
         )
+        norm_inputs = _risk_score.normalized_block_inputs(
+            rec, cfg, similarity_available=similarity_enabled
+        )
         tmp = replace(
             st,
             score=float(enriched["score"]),
             score_band=str(enriched["score_band"]),
             score_subscores=sub,
             score_final_weights=fw_map,
+            score_norm_inputs=norm_inputs,
         )
         explanation = _explain.build_score_explanation(tmp, final_weights=fw_map)
         driver = _explain.score_driver_from_subscores(sub, final_weights=fw_map)
@@ -608,6 +613,14 @@ def statistic_from_complete_dict(row: dict[str, Any]) -> Statistic:
     sfw: dict[str, float] | None = None
     if isinstance(sfw_raw, dict) and sfw_raw:
         sfw = {str(k): float(v) for k, v in sfw_raw.items()}
+    sni_raw = row.get("score_norm_inputs")
+    sni: dict[str, dict[str, float]] | None = None
+    if isinstance(sni_raw, dict) and sni_raw:
+        sni = {}
+        for bk, inner in sni_raw.items():
+            if not isinstance(inner, dict):
+                continue
+            sni[str(bk)] = {str(k): float(v) for k, v in inner.items()}
     st = Statistic(
         path=str(row.get("path", "")),
         sloc=int(row.get("sloc", 0)),
@@ -632,6 +645,7 @@ def statistic_from_complete_dict(row: dict[str, Any]) -> Statistic:
         score_driver=str(row.get("score_driver", "")),
         score_explanation=expl,
         score_final_weights=sfw,
+        score_norm_inputs=sni,
     )
     if subs and not expl:
         st = replace(

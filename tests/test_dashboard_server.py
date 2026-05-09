@@ -55,7 +55,9 @@ def test_block_narrative_endpoint():
     assert isinstance(data["score_explanation"], list)
     assert "Primary driver:" in data["score_narrative"]
     assert "score contribution" in data["score_narrative"]
+    assert "n_churn=" in data["score_narrative"] or "n_cyclomatic=" in data["score_narrative"]
     assert any("score_contribution" in x for x in data["score_explanation"])
+    assert any("normalized" in x for x in data["score_explanation"])
 
 
 def test_block_narrative_400_without_path():
@@ -637,7 +639,7 @@ def test_publish_latest_block_metrics_derives_bands_from_saved_config(tmp_path):
 
     resp = client.post(
         "/api/config/patch",
-        json={"score_aggregation": {"band_edges": [0.2, 0.5, 0.7]}},
+        json={"score_aggregation": {"band_edges": [0.2, 0.5, 0.66]}},
     )
     assert resp.status_code == 200
     srv.publish_latest_block_metrics(raw_rows)

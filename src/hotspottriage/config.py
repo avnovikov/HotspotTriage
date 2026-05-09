@@ -152,6 +152,10 @@ DEFAULTS: dict[str, Any] = {
             "method": "piecewise",
             "breakpoints": [[0, 0.0], [2, 0.3], [5, 0.7], [10, 1.0]],
         },
+        "smell_severity": {
+            "method": "piecewise",
+            "breakpoints": [[0, 0.0], [0.5, 0.25], [1.0, 0.5], [2.0, 0.8], [5.0, 1.0]],
+        },
         "match_count": {
             "method": "piecewise",
             "breakpoints": [[0, 0.0], [1, 0.3], [3, 0.7], [5, 1.0]],

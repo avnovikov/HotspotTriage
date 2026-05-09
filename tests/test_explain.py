@@ -9,14 +9,33 @@ from hotspottriage.explain import (
     explain_score,
     score_driver_from_subscores,
 )
-from hotspottriage.score import final_weight_multipliers_for_burdens
+from hotspottriage.score import (
+    final_weight_multipliers_for_burdens,
+    normalized_block_inputs,
+)
 from hotspottriage.statistic_row import Statistic
 
 
+def _metric_rec_from_stat_fields(d: dict) -> dict[str, float]:
+    return {
+        "normalized_sloc": float(d.get("normalized_sloc", 0.0)),
+        "cyclomatic": float(d.get("cyclomatic", 0)),
+        "halstead": float(d.get("halstead", 0)),
+        "maintainability": float(d.get("maintainability", 0)),
+        "churn": float(d.get("churn", 0)),
+        "churn_per_sloc": float(d.get("churn_per_sloc", 0.0)),
+        "decayed_churn": float(d.get("decayed_churn", 0.0)),
+        "decayed_churn_per_sloc": float(d.get("decayed_churn_per_sloc", 0.0)),
+        "smell_count": float(d.get("smell_count", 0)),
+        "smell_severity": float(d.get("smell_severity", 0.0)),
+        "similarity_score": float(d.get("similarity_score", 0.0)),
+        "match_count": float(d.get("match_count", 0)),
+    }
+
+
 def _block_stat(**kwargs) -> Statistic:
-    fw = final_weight_multipliers_for_burdens(
-        copy.deepcopy(DEFAULTS), similarity_available=True
-    )
+    cfg = copy.deepcopy(DEFAULTS)
+    fw = final_weight_multipliers_for_burdens(cfg, similarity_available=True)
     base = dict(
         path="src/stats.py::build_block_stats",
         sloc=40,
@@ -47,6 +66,12 @@ def _block_stat(**kwargs) -> Statistic:
         score_final_weights=fw,
     )
     base.update(kwargs)
+    sni = base.pop("score_norm_inputs", None)
+    if sni is None and base.get("score_subscores"):
+        rec = _metric_rec_from_stat_fields(base)
+        sni = normalized_block_inputs(rec, cfg, similarity_available=True)
+    if sni is not None:
+        base["score_norm_inputs"] = sni
     return Statistic(**base)
 
 
@@ -83,6 +108,8 @@ def test_build_score_explanation_orders_by_burden():
     drivers = [x["driver"] for x in expl]
     assert drivers[0] == "complexity"
     assert expl[0]["raw"]["cyclomatic"] == 18
+    assert "normalized" in expl[0]
+    assert 0.0 <= float(expl[0]["normalized"]["cyclomatic"]) <= 1.0
     assert "score_contribution" in expl[0]
     assert "smells" in drivers
 
@@ -94,6 +121,7 @@ def test_explain_score_includes_header_and_recommended_action():
     assert "src/stats.py::build_block_stats" in text
     assert "Primary driver:" in text
     assert "score contribution" in text
+    assert "n_churn=" in text or "n_cyclomatic=" in text
     assert "Assign senior reviewer" in text
 
 

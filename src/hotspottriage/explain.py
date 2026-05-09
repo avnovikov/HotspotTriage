@@ -7,6 +7,10 @@ Template copy lives here only — surfaces call :func:`explain_score` /
 When ``final_weights`` (or :attr:`Statistic.score_final_weights`) is present,
 ordering and ``score_driver`` follow **score contributions**
 (``final_weight × burden``), matching :func:`hotspottriage.score.compute_score`.
+
+When :attr:`Statistic.score_norm_inputs` is present, narrative suffix lines use
+**only** those normalized ``[0, 1]`` metrics (the same values folded into each
+burden before ``final_weights``), not raw counters.
 """
 from __future__ import annotations
 
@@ -71,10 +75,13 @@ def build_score_explanation(
     *,
     final_weights: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
-    """Ranked burden breakdown with raw metrics for tooltips and JSON.
+    """Ranked burden breakdown for tooltips and JSON.
 
-    Each item includes ``driver``, ``burden``, ``raw``. When ``final_weights``
-    is set (or ``stat.score_final_weights``), items are sorted by descending
+    Each item includes ``driver``, ``burden``, ``raw`` (raw counters for
+    debugging). When :attr:`Statistic.score_norm_inputs` is set, a
+    ``normalized`` dict holds the ``[0, 1]`` inputs that feed the burden (same as
+    :func:`hotspottriage.score.compute_score`). When ``final_weights`` is set
+    (or ``stat.score_final_weights``), items are sorted by descending
     ``score_contribution`` (= ``final_weight × burden``) and include
     ``final_weight`` and ``score_contribution`` fields.
     """
@@ -103,6 +110,8 @@ def build_score_explanation(
             "burden": round(burden_f, 4),
             "raw": raw,
         }
+        if stat.score_norm_inputs and bkey in stat.score_norm_inputs:
+            item["normalized"] = dict(stat.score_norm_inputs[bkey])
         if w is not None:
             item["final_weight"] = round(w, 4)
             item["score_contribution"] = round(contribution, 4)
@@ -143,6 +152,12 @@ def _driver_label(driver: str) -> str:
     if driver == "smells":
         return "Smells"
     return driver.capitalize()
+
+
+def _format_norm_phrase(norms: dict[str, float]) -> str:
+    if not norms:
+        return ""
+    return ", ".join(f"n_{k}={float(v):.4f}" for k, v in sorted(norms.items()))
 
 
 def _format_raw_phrase(driver: str, raw: dict[str, Any]) -> str:
@@ -212,7 +227,11 @@ def explain_score(
         driver = item["driver"]
         label_d = _driver_label(driver)
         burden = float(item["burden"])
-        phrase = _format_raw_phrase(driver, item.get("raw") or {})
+        norms = item.get("normalized")
+        if isinstance(norms, dict) and norms:
+            phrase = _format_norm_phrase({str(k): float(v) for k, v in norms.items()})
+        else:
+            phrase = _format_raw_phrase(driver, item.get("raw") or {})
         if "score_contribution" in item and "final_weight" in item:
             c = float(item["score_contribution"])
             w = float(item["final_weight"])
