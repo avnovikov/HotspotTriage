@@ -30,6 +30,7 @@ from hotspottriage.dashboard.server import DashboardServer
 from hotspottriage.dashboard.stats import StatsCollector
 from hotspottriage import discovery, filtering, output as _output, stats
 from hotspottriage.path_utils import resolve_local_repo_path
+from hotspottriage.username_privacy import UsernameRedactingFormatter
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,9 @@ _dashboard_log_handler = MemoryLogHandler(
     max_records=int(_config.DEFAULTS["dashboard"]["max_log_records"])
 )
 _dashboard_log_handler.setFormatter(
-    logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    UsernameRedactingFormatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
 )
 if _dashboard_log_handler not in logging.getLogger().handlers:
     logging.getLogger().addHandler(_dashboard_log_handler)

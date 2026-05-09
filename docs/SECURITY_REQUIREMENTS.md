@@ -4,7 +4,7 @@
 > **Review cadence:** At each release milestone, or upon any significant architectural change
 > **Applicable frameworks:** NIST SP 800-218 (SSDF), NIST SP 800-53 Rev 5, ISO/IEC 27001:2022, COBIT 2019
 > **Status:** Active
-> **Relates to:** [Issue #104](https://github.com/avnovikov/HotspotTriage/issues/104)
+> **Relates to:** [Issue #104](https://github.com/avnovikov/HotspotTriage/issues/104), [Issue #127](https://github.com/avnovikov/HotspotTriage/issues/127)
 
 ---
 
@@ -63,6 +63,23 @@ Continuity is ensured by:
 - No external runtime dependencies (no cloud services, no remote APIs).
 
 > *This proportionate availability treatment is consistent with ISO 27001:2022 A.8.6 (capacity management) and COBIT DSS04 (continuity management), calibrated to the asset classification of a local developer tool.*
+
+### 2.4 Personal data and data minimisation (GDPR alignment)
+
+> *ISO 27001:2022 reference: A.5.34 (Privacy and protection of personally identifiable information)*
+> *GDPR reference: Art. 4(1) (personal data), Art. 5(1)(c) (data minimisation), Art. 6(1)(b) (contract / tool use)*
+
+HotspotTriage does not process personal data as its primary function. However, file system paths supplied as input may constitute personal data under GDPR Article 4(1) when they contain an operating-system username or similar identifier (for example paths under ``/home/<user>/`` or ``/Users/<user>/``).
+
+**Data minimisation controls**
+
+- File paths are used only for local analysis. Block results persisted under ``<repo>/.hotspottriage/cache/`` are written with **username redaction** in string fields: the detected local username is replaced by ``<first>****<last>`` (and a single-character username by ``<char>****``) so on-disk cache does not retain the full username substring.
+- The in-process dashboard log buffer applies the same redaction to formatted log lines.
+- The dashboard binds to localhost only; no paths are transmitted over a network by the tool itself.
+- MCP tool responses may still include paths needed for the requesting agent; persistence of those responses is the responsibility of the consuming system.
+- No analytics, telemetry, or crash reporting collects file path data.
+
+**Lawful basis (documentation only, not legal advice).** Processing is described here as necessary for providing the analysis functionality requested by the local user (GDPR Article 6(1)(b) framing used in [Issue #127](https://github.com/avnovikov/HotspotTriage/issues/127)).
 
 ---
 
