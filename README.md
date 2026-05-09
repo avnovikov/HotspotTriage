@@ -2,7 +2,7 @@
 
 [![SOC 2 Compliant](https://img.shields.io/badge/SOC2-Compliant-blue?style=flat&logo=github)](https://github.com/avnovikov/HotspotTriage/security) [![NIST SSDF](https://img.shields.io/badge/NIST%20SSDF-SP%20800--218-blue?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![ISO 27001](https://img.shields.io/badge/ISO%2027001-2022%20Aligned-blue?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![GDPR](https://img.shields.io/badge/GDPR-data%20minimisation-003399?style=flat)](docs/SECURITY_REQUIREMENTS.md) [![Security Scans](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml) [![Dependabot](https://img.shields.io/badge/Dependabot-enabled-brightgreen?style=flat&logo=dependabot)](https://github.com/avnovikov/HotspotTriage/security/dependabot) [![Tests](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml)
 
-> This codebase is built to support SOC 2 controls and is part of the audited system scope.
+> This codebase is built to be part of the regulated and audited system scope.
 
 Find where Python code gets messy and constantly changing — then stream that signal to supercharge your coding agent.
 
