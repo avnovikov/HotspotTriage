@@ -110,17 +110,22 @@ def _resolve_mcp_target(target: str) -> str:
 
 
 def _effective_dashboard_config() -> dict[str, Any]:
-    cfg = dict(_config.DEFAULTS)
+    """Layered YAML (global + ``<cwd>/.hotspottriage/``) plus MCP CLI dashboard flags."""
+    cfg = _config.load_config(Path.cwd())
     cli = get_mcp_dashboard_cli_args()
-    if cli is None:
-        return cfg
-    cfg = _config.apply_mcp_dashboard_cli_overrides(
-        cfg,
-        no_dashboard=bool(cli.no_dashboard),
-        dashboard_port=cli.dashboard_port,
-        dashboard_host=cli.dashboard_host,
-        open_browser=bool(cli.open_browser),
-    )
+    if cli is not None:
+        cfg = _config.apply_mcp_dashboard_cli_overrides(
+            cfg,
+            no_dashboard=bool(cli.no_dashboard),
+            dashboard_port=cli.dashboard_port,
+            dashboard_host=cli.dashboard_host,
+            open_browser=bool(cli.open_browser),
+        )
+    dt = get_mcp_default_target()
+    if dt:
+        dash = dict(cfg.get("dashboard") or {})
+        dash["default_target"] = dt
+        cfg["dashboard"] = dash
     return cfg
 
 
@@ -133,7 +138,10 @@ async def _mcp_lifespan(_: Any):
     if bool(dash_cfg.get("enabled", True)):
         try:
             dashboard = DashboardServer(
-                config=_config.to_dashboard_snapshot(cfg),
+                config=_config.to_dashboard_snapshot(
+                    cfg,
+                    project_path=str(Path.cwd().resolve()),
+                ),
                 stats=_dashboard_stats,
                 log_handler=_dashboard_log_handler,
                 host=str(dash_cfg.get("host", "127.0.0.1")),
