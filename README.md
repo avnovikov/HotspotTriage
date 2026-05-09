@@ -1,6 +1,6 @@
 # HotspotTriage
 
-[![SOC 2 Compliant](https://img.shields.io/badge/SOC2-Compliant-blue?style=flat&logo=github)](https://github.com/avnovikov/HotspotTriage/security) [![Security Scans](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml) [![Dependabot](https://img.shields.io/badge/Dependabot-enabled-brightgreen?style=flat&logo=dependabot)](https://github.com/avnovikov/HotspotTriage/security/dependabot)
+[![SOC 2 Compliant](https://img.shields.io/badge/SOC2-Compliant-blue?style=flat&logo=github)](https://github.com/avnovikov/HotspotTriage/security) [![Security Scans](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml) [![Dependabot](https://img.shields.io/badge/Dependabot-enabled-brightgreen?style=flat&logo=dependabot)](https://github.com/avnovikov/HotspotTriage/security/dependabot) [![Tests](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml)
 
 > This codebase is built to support SOC 2 controls and is part of the audited system scope.
 
