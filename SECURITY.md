@@ -99,3 +99,45 @@ This VDP satisfies:
 5. Full notification published within **72 hours** of confirmation
 6. Fix developed, tested, and released per `docs/RELEASE_POLICY.md` hotfix process
 7. Final remediation report published within **14 days** of fix release
+
+---
+
+## Regulatory Cross-Reference Mapping
+
+The table below maps every security control implemented in HotspotTriage to all applicable
+regulatory and framework references simultaneously. Detailed requirements and implementation
+evidence are in [`docs/SECURITY_REQUIREMENTS.md`](docs/SECURITY_REQUIREMENTS.md).
+
+| Control | SOC 2 | NIST SSDF (SP 800-218) | NIST SP 800-53 | ISO 27001:2022 | COBIT 2019 | EU CRA | NIS2 | UK Cyber Essentials |
+|---------|-------|------------------------|----------------|----------------|------------|--------|------|---------------------|
+| Security requirements documented | CC7 | PW.1.1 | PL-8 | A.5.1 | APO02 | Art. 13 | Art. 21 | — |
+| CIA objectives defined | CC6, CC7 | PW.1.1 | SC-8, SI-12 | A.5.1 | BAI03 | Art. 13 | Art. 21 | — |
+| Localhost-only binding (no network exposure) | CC6 | PW.1.1 | SC-7, AC-17 | A.8.20 | DSS05 | Art. 13 | Art. 21 | Firewalls |
+| No default passwords / credentials | CC6 | PW.1.1 | IA-5 | A.5.17 | DSS05.04 | Art. 13 | — | Access Control |
+| Input validation (Pydantic, path checks) | CC7 | PW.1.1 | SI-10 | A.8.26 | BAI03 | Art. 13 | — | — |
+| Dependency pinning (`uv.lock`, hash verify) | CC7 | PW.4.1 | SR-3 | A.5.19 | APO10 | Art. 13 | Art. 21(d) | Patch Management |
+| Dependency vetting table | CC7 | PW.4.1 | SR-3 | A.5.20, A.5.22 | APO10 | Art. 13 | Art. 21(d) | — |
+| `pip-audit` pre-release gate | CC7 | PW.4.1 | SR-3, SI-2 | A.8.8 | DSS05.07 | Art. 13 | Art. 21 | Patch Management |
+| SBOM (CycloneDX JSON, publicly accessible) | CC7 | PS.2.1 | SR-4 | A.5.19 | APO10 | Art. 13 | Art. 21(d) | — |
+| SSH-signed commits | CC8 | PS.1.1 | CM-3, SA-12 | A.8.32 | BAI07 | Art. 13 | — | — |
+| SSH-signed release tags | CC8 | PS.3.1 | CM-3 | A.8.32 | BAI07 | Art. 13 | — | — |
+| Branch protection / PR-only merges to `main` | CC8 | PO.1.1 | CM-3, AC-3 | A.8.32 | BAI07 | Art. 13 | — | Access Control |
+| Access control policy (merge and release rights) | CC6 | PO.1.1 | AC-2, AC-3 | A.5.15, A.5.18 | DSS05.04 | Art. 13 | — | Access Control |
+| SAST (CodeQL) | CC7 | PW.7.2 | RA-5, SI-10 | A.8.28 | DSS05.07 | Art. 13 | — | — |
+| Secret scanning (Gitleaks) | CC7 | PW.7.2 | RA-5 | A.8.12 | DSS05 | Art. 13 | — | — |
+| Dependency scanning (Trivy, Dependabot) | CC7 | RV.2.2 | RA-5, SI-2 | A.8.8, A.8.16 | DSS05.07 | Art. 13 | Art. 21 | Patch Management |
+| CVSS-based severity classification and SLA | CC7 | RV.2.2 | RA-5, SI-2 | A.8.8 | MEA03 | Art. 14 | Art. 23 | — |
+| Vulnerability disclosure policy (24h / 72h / 14d) | CC7 | RV.1.3 | IR-6 | A.6.8 | MEA03 | Art. 14 | Art. 23 | — |
+| ENISA / CSIRT notification channel | — | — | IR-6 | A.6.8 | MEA03 | Art. 14 | Art. 23 | — |
+| Release policy (changelog, signed artefacts) | CC8 | PS.3.1 | CM-3 | A.8.32 | BAI07 | Art. 13 | — | — |
+| Secure SDLC / contributing policy | CC8 | PO.1.1 | SA-15 | A.8.25 | BAI03 | Art. 13 | Art. 21 | Secure Configuration |
+| Test data statement (synthetic fixtures only) | CC7 | — | SA-15 | A.8.33 | BAI03 | — | — | — |
+| Configuration baseline (`uv.lock`, `pyproject.toml`) | CC8 | — | CM-2, CM-3 | A.8.9 | BAI10 | Art. 13 | — | Secure Configuration |
+| Post-release monitoring SLA (Dependabot, Trivy cron) | CC7 | RV.2.2 | SI-4, SI-2 | A.8.16 | DSS05.07 | Art. 13 | Art. 21 | — |
+| Supply chain security statement | CC7 | PW.4.1 | SR-3 | A.5.19–5.22 | APO10 | Art. 13 | Art. 21(d) | — |
+| GDPR data minimisation (file path handling) | — | — | — | A.5.34 | MEA03 | — | — | — |
+| End-of-life / support period policy | — | — | — | A.8.8 | — | Art. 13 | — | — |
+
+> **Legend:** Controls marked — indicate the framework does not have a directly applicable requirement
+> for that control in the context of a local developer tool. Detailed evidence and implementation
+> notes for each control are in [`docs/SECURITY_REQUIREMENTS.md`](docs/SECURITY_REQUIREMENTS.md).
