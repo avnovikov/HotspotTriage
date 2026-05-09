@@ -1,5 +1,9 @@
 # HotspotTriage
 
+[![SOC 2 Compliant](https://img.shields.io/badge/SOC2-Compliant-blue?style=flat&logo=github)](https://github.com/avnovikov/HotspotTriage/security) [![Security Scans](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml) [![Dependabot](https://img.shields.io/badge/Dependabot-enabled-brightgreen?style=flat&logo=dependabot)](https://github.com/avnovikov/HotspotTriage/security/dependabot)
+
+> This codebase is built to support SOC 2 controls and is part of the audited system scope.
+
 Find where Python code gets messy and constantly changing — then stream that signal to supercharge your coding agent.
 
 HotspotTriage analyzes tracked `.py` files in a Git repo, blends AST metrics (Radon) with history (`git log`), per-function churn (in block mode), smells (Pylint heuristics), and block similarity (DeepCSIM) — all wired through MCP for integration with agents.
