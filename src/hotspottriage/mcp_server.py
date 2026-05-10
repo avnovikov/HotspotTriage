@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 import json
 import logging
+import math
 import sys
 import threading
 from collections.abc import Callable
@@ -29,6 +30,7 @@ from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.server import DashboardServer
 from hotspottriage.dashboard.stats import StatsCollector
 from hotspottriage import discovery, filtering, explain as _explain, output as _output, stats
+from hotspottriage import git_rev_worktree as _git_rev_wt
 from hotspottriage.path_utils import resolve_local_repo_path
 from hotspottriage.username_privacy import UsernameRedactingFormatter
 
@@ -211,6 +213,169 @@ def _parse_mcp_dashboard_argv() -> argparse.Namespace:
     return args
 
 
+def _is_block_row_for_delta(row: stats.Statistic) -> bool:
+    p = str(row.path)
+    if "::" not in p:
+        return False
+    if p.split("::", 1)[0].startswith("__"):
+        return False
+    return str(row.score_band).lower() != "aggregate"
+
+
+def _metric_triplet(
+    before: int | float | None, after: int | float | None
+) -> dict[str, int | float | None]:
+    if before is None and after is None:
+        return {"before": None, "after": None, "delta": None}
+    if before is None:
+        return {"before": None, "after": after, "delta": None}
+    if after is None:
+        return {"before": before, "after": None, "delta": None}
+    delta = after - before
+    return {"before": before, "after": after, "delta": delta}
+
+
+def _rows_equal_raw(a: stats.Statistic, b: stats.Statistic) -> bool:
+    for name in ("cyclomatic", "sloc", "halstead", "churn", "smell_count"):
+        if getattr(a, name) != getattr(b, name):
+            return False
+    for name in ("churn_per_sloc", "decayed_churn", "decayed_churn_per_sloc"):
+        if not math.isclose(
+            float(getattr(a, name)),
+            float(getattr(b, name)),
+            rel_tol=0.0,
+            abs_tol=1e-6,
+        ):
+            return False
+    return True
+
+
+def _build_block_delta_report(
+    head_rows: list[stats.Statistic],
+    base_rows: list[stats.Statistic],
+) -> dict[str, Any]:
+    """Compare block rows at HEAD vs a baseline revision (raw metrics + score snapshot)."""
+    head_map = {r.path: r for r in head_rows if _is_block_row_for_delta(r)}
+    base_map = {r.path: r for r in base_rows if _is_block_row_for_delta(r)}
+    all_paths = sorted(set(head_map) | set(base_map))
+    by_block: list[dict[str, Any]] = []
+    blocks_added = blocks_removed = blocks_modified = blocks_unchanged = 0
+    total_cyclomatic_delta = 0
+    total_sloc_delta = 0
+    total_halstead_delta = 0
+    total_churn_delta = 0
+    total_smell_count_delta = 0
+
+    for path in all_paths:
+        h = head_map.get(path)
+        b = base_map.get(path)
+        if h and b:
+            if _rows_equal_raw(h, b):
+                blocks_unchanged += 1
+                continue
+            blocks_modified += 1
+            status = "modified"
+        elif h and not b:
+            blocks_added += 1
+            status = "added"
+        else:
+            blocks_removed += 1
+            status = "removed"
+            assert b is not None
+
+        entry: dict[str, Any] = {"path": path, "status": status}
+        for fname in ("cyclomatic", "sloc", "halstead", "churn", "smell_count"):
+            bv = int(getattr(b, fname)) if b else None
+            hv = int(getattr(h, fname)) if h else None
+            entry[fname] = _metric_triplet(bv, hv)
+        for fname in ("churn_per_sloc", "decayed_churn", "decayed_churn_per_sloc"):
+            bv = float(getattr(b, fname)) if b else None
+            hv = float(getattr(h, fname)) if h else None
+            entry[fname] = _metric_triplet(bv, hv)
+        entry["score"] = _metric_triplet(
+            float(b.score) if b else None,
+            float(h.score) if h else None,
+        )
+        by_block.append(entry)
+
+        if status == "modified" and h and b:
+            total_cyclomatic_delta += h.cyclomatic - b.cyclomatic
+            total_sloc_delta += h.sloc - b.sloc
+            total_halstead_delta += h.halstead - b.halstead
+            total_churn_delta += h.churn - b.churn
+            total_smell_count_delta += h.smell_count - b.smell_count
+        elif status == "added" and h:
+            total_cyclomatic_delta += h.cyclomatic
+            total_sloc_delta += h.sloc
+            total_halstead_delta += h.halstead
+            total_churn_delta += h.churn
+            total_smell_count_delta += h.smell_count
+        elif status == "removed" and b:
+            total_cyclomatic_delta -= b.cyclomatic
+            total_sloc_delta -= b.sloc
+            total_halstead_delta -= b.halstead
+            total_churn_delta -= b.churn
+            total_smell_count_delta -= b.smell_count
+
+    return {
+        "summary": {
+            "blocks_added": blocks_added,
+            "blocks_removed": blocks_removed,
+            "blocks_modified": blocks_modified,
+            "blocks_unchanged": blocks_unchanged,
+            "total_cyclomatic_delta": total_cyclomatic_delta,
+            "total_sloc_delta": total_sloc_delta,
+            "total_halstead_delta": total_halstead_delta,
+            "total_churn_delta": total_churn_delta,
+            "total_smell_count_delta": total_smell_count_delta,
+        },
+        "by_block": by_block,
+    }
+
+
+def _format_block_analysis_payload(
+    analysis_root: str,
+    cfg: dict[str, Any],
+    results_full: list[stats.Statistic],
+    *,
+    compact: bool,
+    progress_callback: Callable[[str, int, int], None] | None,
+    deltas: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Publish + limit + cache + optional compact rows (shared MCP analyze path)."""
+    _publish_block_metrics_to_dashboard(analysis_root, results_full, cfg)
+    results = stats.sort_and_limit(results_full, by=cfg["sort"], limit=cfg["limit"])
+
+    cache_info = _initialize_repository(
+        analysis_root, cfg, progress_callback=progress_callback
+    )
+    synthetic_block_rows = [
+        r.as_dict()
+        for r in results_full
+        if str(r.path).split("::", 1)[0].startswith("__")
+    ]
+    _publish_manager_rows_to_dashboard(
+        analysis_root, cfg, synthetic_block_rows=synthetic_block_rows
+    )
+
+    if compact:
+        results_list = _mcp_compact_score_rows(
+            results, granularity="block", merged_config=cfg
+        )
+    else:
+        results_list = []
+        for row in results:
+            output_row = _output.statistic_to_output_dict(row, cfg)
+            output_row["proposed_model"] = _proposed_model_for_band(
+                str(row.score_band), cfg
+            )
+            results_list.append(output_row)
+    out: dict[str, Any] = {"results": results_list, "cache": cache_info}
+    if deltas is not None:
+        out["deltas"] = deltas
+    return out
+
+
 def run_cached_block_analysis_dict(
     target: str,
     *,
@@ -226,14 +391,43 @@ def run_cached_block_analysis_dict(
     sort: str = "score",
     progress_callback: Callable[[str, int, int], None] | None = None,
     config_overrides: dict[str, Any] | None = None,
+    rev: str | None = None,
+    baseline_rev: str | None = None,
 ) -> dict[str, Any]:
     """Block-level analysis + cache warm-up; returns ``results`` / ``cache`` dict (not JSON).
 
     Optional ``progress_callback(label, done, total)`` mirrors
     :func:`hotspottriage.stats.build_block_stats` progress events.
+
+    ``rev`` runs analysis on a **detached worktree** at that revision (local repos
+    only). ``baseline_rev`` compares **HEAD** at ``target`` to that revision and adds
+    a ``deltas`` object; it cannot be combined with ``rev``.
     """
+    if rev and baseline_rev:
+        raise ValueError("cannot combine rev and baseline_rev")
+    rev_t = rev.strip() if isinstance(rev, str) else ""
+    baseline_t = (
+        baseline_rev.strip() if isinstance(baseline_rev, str) else ""
+    )
+    rev = rev_t or None
+    baseline_rev = baseline_t or None
+
+    if rev and discovery.is_git_url(target):
+        raise ValueError("rev requires a local git repository path, not a remote URL")
+    if baseline_rev and discovery.is_git_url(target):
+        raise ValueError(
+            "baseline_rev requires a local git repository path, not a remote URL"
+        )
+
+    if discovery.is_git_url(target):
+        config_target = target.strip()
+        analysis_root = config_target
+    else:
+        config_target = str(resolve_local_repo_path(target))
+        analysis_root = config_target
+
     cfg = _build_analyze_config(
-        target,
+        config_target,
         filter=filter,
         score_metrics=score_metrics,
         granularity="block",
@@ -248,43 +442,61 @@ def run_cached_block_analysis_dict(
     )
     cfg["similarity_enabled"] = similarity
 
-    results_full = _analyze_repository(
-        target, cfg, apply_limit=False, progress_callback=progress_callback
-    )
-    _publish_block_metrics_to_dashboard(target, results_full, cfg)
-    results = stats.sort_and_limit(
-        results_full, by=cfg["sort"], limit=cfg["limit"]
-    )
-
-    cache_info = _initialize_repository(
-        target, cfg, progress_callback=progress_callback
-    )
-    # Publish live manager rows to dashboard after cache warm-up.
-    synthetic_block_rows = [
-        r.as_dict()
-        for r in results_full
-        if str(r.path).split("::", 1)[0].startswith("__")
-    ]
-    _publish_manager_rows_to_dashboard(
-        target, cfg, synthetic_block_rows=synthetic_block_rows
-    )
-
-    if compact:
-        results_list = _mcp_compact_score_rows(
-            results, granularity="block", merged_config=cfg
+    if baseline_rev:
+        head_full = _analyze_repository(
+            analysis_root,
+            cfg,
+            apply_limit=False,
+            progress_callback=progress_callback,
         )
-    else:
-        results_list = []
-        for row in results:
-            output_row = _output.statistic_to_output_dict(row, cfg)
-            output_row["proposed_model"] = _proposed_model_for_band(
-                str(row.score_band), cfg
+        with _git_rev_wt.detached_worktree(Path(config_target), baseline_rev) as wt:
+            base_full = _analyze_repository(
+                str(wt),
+                cfg,
+                apply_limit=False,
+                progress_callback=progress_callback,
             )
-            results_list.append(output_row)
-    return {
-        "results": results_list,
-        "cache": cache_info,
-    }
+        deltas = _build_block_delta_report(head_full, base_full)
+        return _format_block_analysis_payload(
+            analysis_root,
+            cfg,
+            head_full,
+            compact=compact,
+            progress_callback=progress_callback,
+            deltas=deltas,
+        )
+
+    if rev:
+        with _git_rev_wt.detached_worktree(Path(config_target), rev) as wt:
+            results_full = _analyze_repository(
+                str(wt),
+                cfg,
+                apply_limit=False,
+                progress_callback=progress_callback,
+            )
+            return _format_block_analysis_payload(
+                str(wt),
+                cfg,
+                results_full,
+                compact=compact,
+                progress_callback=progress_callback,
+                deltas=None,
+            )
+
+    results_full = _analyze_repository(
+        analysis_root,
+        cfg,
+        apply_limit=False,
+        progress_callback=progress_callback,
+    )
+    return _format_block_analysis_payload(
+        analysis_root,
+        cfg,
+        results_full,
+        compact=compact,
+        progress_callback=progress_callback,
+        deltas=None,
+    )
 
 
 def _run_analyze_cached(
@@ -300,6 +512,8 @@ def _run_analyze_cached(
     similarity: bool = True,
     compact: bool = True,
     sort: str = "score",
+    rev: str | None = None,
+    baseline_rev: str | None = None,
 ) -> str:
     """Block-level analysis with disk cache warm-up; returns JSON ``{results, cache}``."""
     try:
@@ -315,6 +529,8 @@ def _run_analyze_cached(
             similarity=similarity,
             compact=compact,
             sort=sort,
+            rev=rev,
+            baseline_rev=baseline_rev,
         )
         return json.dumps(response, indent=2)
 
@@ -336,11 +552,14 @@ def analyze(
     ignore_dir: str | None = None,
     similarity: bool = True,
     compact: bool = True,
+    rev: str | None = None,
+    baseline_rev: str | None = None,
 ) -> str:
     """Analyze a repository: block-level metrics, disk cache, and dashboard publish.
 
     Always runs the cache-backed block pipeline. Returns JSON
-    ``{"results": [...], "cache": {...}}``.
+    ``{"results": [...], "cache": {...}}`` and, when ``baseline_rev`` is set,
+    a ``deltas`` object comparing HEAD to that revision.
     By default each result row is compact (function, score, bands, model, and
     narrative fields); set ``compact`` to false for full metric dicts.
 
@@ -377,9 +596,18 @@ def analyze(
             ``rationale`` (short natural-language summary for agents). Use
             ``compact=false`` for full metrics, ``score_explanation``, and
             multi-line ``score_narrative``.
+        rev: Optional git revision (branch, tag, SHA, ``HEAD~1``, …) to analyze **at**
+            that commit via a temporary detached worktree. Local repositories only;
+            cannot be combined with ``baseline_rev``. Project config is read from
+            ``target`` while metrics are computed from the worktree checkout.
+        baseline_rev: Optional revision to diff **against** the current ``target``
+            checkout (HEAD). Adds ``deltas`` with raw metric triplets per block; local
+            repositories only. Composite ``score`` values are snapshots from each run
+            and are not comparable across revisions. Incompatible with ``rev``.
 
     Returns:
-        JSON object with ``results`` and ``cache`` keys, or ``{"error": ...}``
+        JSON object with ``results`` and ``cache`` keys, optional ``deltas`` when
+        ``baseline_rev`` is set, or ``{"error": ...}``
     """
     try:
         resolved = _resolve_mcp_target(target)
@@ -397,6 +625,8 @@ def analyze(
         similarity=similarity,
         compact=compact,
         sort=sort,
+        rev=rev,
+        baseline_rev=baseline_rev,
     )
 
 

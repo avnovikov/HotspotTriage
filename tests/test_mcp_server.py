@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -607,3 +608,98 @@ def test_analyze_filtered_dashboard_publish_excludes_other_cached_files(
     files = {row["path"].split("::", 1)[0] for row in final}
     assert "example.py" in files
     assert "helper.py" not in files
+
+
+@pytest.fixture
+def rev_pair_repo(tmp_path: Path) -> Path:
+    """Two commits on ``a.py``: first only ``only()``, second adds ``second()``."""
+    repo = tmp_path / "revpair"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@e.com"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    (repo / "a.py").write_text("def only():\n    return 1\n")
+    subprocess.run(["git", "add", "a.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "c1"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    (repo / "a.py").write_text(
+        "def only():\n    return 1\n\ndef second():\n    return 2\n"
+    )
+    subprocess.run(["git", "add", "a.py"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "c2"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    return repo
+
+
+def test_analyze_rev_excludes_later_functions(rev_pair_repo: Path) -> None:
+    result = mcp_server.analyze(
+        str(rev_pair_repo),
+        rev="HEAD~1",
+        filter="a.py",
+        similarity=False,
+        compact=False,
+    )
+    data = json.loads(result)
+    assert "error" not in data
+    symbols = {row["path"].split("::", 1)[1] for row in data["results"] if "::" in row["path"]}
+    assert "only" in symbols
+    assert "second" not in symbols
+
+
+def test_analyze_baseline_rev_includes_deltas(rev_pair_repo: Path) -> None:
+    result = mcp_server.analyze(
+        str(rev_pair_repo),
+        baseline_rev="HEAD~1",
+        filter="a.py",
+        similarity=False,
+        compact=False,
+    )
+    data = json.loads(result)
+    assert "error" not in data
+    assert "deltas" in data
+    summ = data["deltas"]["summary"]
+    assert summ["blocks_added"] >= 1
+    added = [b for b in data["deltas"]["by_block"] if b["status"] == "added"]
+    assert any("second" in b["path"] for b in added)
+    symbols = {row["path"].split("::", 1)[1] for row in data["results"] if "::" in row["path"]}
+    assert "second" in symbols
+
+
+def test_analyze_rev_and_baseline_mutually_exclusive_json(rev_pair_repo: Path) -> None:
+    result = mcp_server.analyze(
+        str(rev_pair_repo),
+        rev="HEAD",
+        baseline_rev="HEAD~1",
+        similarity=False,
+    )
+    data = json.loads(result)
+    assert "error" in data
+
+
+def test_analyze_rev_rejects_remote_url() -> None:
+    out = mcp_server._run_analyze_cached(
+        "https://example.com/nonexistent.git",
+        rev="main",
+        similarity=False,
+    )
+    data = json.loads(out)
+    assert "error" in data
+    assert "local" in data["error"].lower() or "remote" in data["error"].lower()
