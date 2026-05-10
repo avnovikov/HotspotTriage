@@ -2,15 +2,22 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat)](LICENSE) [![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-blue?style=flat&logo=python)](pyproject.toml) [![Security Scans](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml) [![Tests](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml) [![SSH Signed](https://img.shields.io/badge/Commits-SSH%20Signed-green?style=flat&logo=git)](CONTRIBUTING.md#13-ssh-commit-and-tag-signing-required) [![Compliance](https://img.shields.io/badge/Compliance-SOC2%20%7C%20NIST%20%7C%20ISO%2027001%20%7C%20EU%20CRA-blue?style=flat)](docs/Compliance.md)
 
-> This codebase is built to be part of the regulated and audited system scope. See [Compliance](docs/Compliance.md).
+**Coding agents keep making a mess. Show them where their problems lie.**
 
-Find where Python code gets messy and constantly changing — then stream that signal to supercharge your coding agent.
+HotspotTriage scores every function in your Python repo — blending complexity, churn,
+smells, and duplication — so Cursor and Claude Code know exactly where to focus.
+
+```bash
+uvx -p 3.13 --from git+https://github.com/avnovikov/HotspotTriage \
+  hotspottriage start-mcp-server --open-browser --default-target /path/to/your/repo
+```
+
+> Built for regulated and audited pipelines. See [Compliance](docs/compliance.md).
 
 HotspotTriage analyzes tracked `.py` files in a Git repo, blends AST metrics (Radon) with history (`git log`), per-function churn (in block mode), smells (Pylint heuristics), and block similarity (DeepCSIM) — all wired through MCP for integration with agents.
 
 Designed for engineers and coding agents who want precise, actionable metrics to improve coding style, accelerate refactoring, and boost code quality.
 
-Open source (MIT). Python 3.11+.
 
 ![Geiser Control Room](docs/screenshots/geiser_conrolroom.png)
 
