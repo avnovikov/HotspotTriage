@@ -352,49 +352,6 @@ def run_cached_block_analysis_dict(
     )
 
 
-def _run_analyze_cached(
-    target: str,
-    *,
-    filter: str | None = None,
-    score_metrics: str | None = None,
-    limit: int | None = None,
-    since: str | None = None,
-    until: str | None = None,
-    respect_gitignore: bool = True,
-    ignore_dir: str | None = None,
-    similarity: bool | None = None,
-    compact: bool = True,
-    sort: str = "score",
-    before_sha: str | None = None,
-    after_sha: str | None = None,
-    include_summary: bool = False,
-) -> str:
-    """Block-level analysis with disk cache warm-up; returns JSON with ``metadata``."""
-    try:
-        response = run_cached_block_analysis_dict(
-            target,
-            filter=filter,
-            score_metrics=score_metrics,
-            limit=limit,
-            since=since,
-            until=until,
-            respect_gitignore=respect_gitignore,
-            ignore_dir=ignore_dir,
-            similarity=similarity,
-            compact=compact,
-            sort=sort,
-            before_sha=before_sha,
-            after_sha=after_sha,
-            include_summary=include_summary,
-        )
-        return json.dumps(response, indent=2)
-
-    except Exception as e:
-        logger.exception("Cache-backed analysis failed")
-        code, err_msg, det = _mcp_classify_exception(e)
-        return _mcp_tool_error(code, err_msg, details=det)
-
-
 @mcp.tool()
 def analyze(
     target: str = "",
@@ -483,22 +440,28 @@ def analyze(
         resolved = _resolve_mcp_target(target)
     except ValueError as e:
         return _mcp_tool_error("INVALID_TARGET", str(e))
-    return _run_analyze_cached(
-        resolved,
-        filter=filter,
-        score_metrics=score_metrics,
-        limit=limit,
-        since=since,
-        until=until,
-        respect_gitignore=respect_gitignore,
-        ignore_dir=ignore_dir,
-        similarity=similarity,
-        compact=compact,
-        sort=sort,
-        before_sha=before_sha,
-        after_sha=after_sha,
-        include_summary=include_summary,
-    )
+    try:
+        response = run_cached_block_analysis_dict(
+            resolved,
+            filter=filter,
+            score_metrics=score_metrics,
+            limit=limit,
+            since=since,
+            until=until,
+            respect_gitignore=respect_gitignore,
+            ignore_dir=ignore_dir,
+            similarity=similarity,
+            compact=compact,
+            sort=sort,
+            before_sha=before_sha,
+            after_sha=after_sha,
+            include_summary=include_summary,
+        )
+        return json.dumps(response, indent=2)
+    except Exception as e:
+        logger.exception("Cache-backed analysis failed")
+        code, err_msg, det = _mcp_classify_exception(e)
+        return _mcp_tool_error(code, err_msg, details=det)
 
 
 @mcp.tool()

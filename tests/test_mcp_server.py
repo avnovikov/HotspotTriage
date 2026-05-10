@@ -972,7 +972,7 @@ def test_analyze_before_and_after_cache_only(rev_pair_repo: Path) -> None:
 
 
 def test_analyze_after_sha_requires_before(rev_pair_repo: Path) -> None:
-    out = mcp_server._run_analyze_cached(
+    out = mcp_server.analyze(
         str(rev_pair_repo),
         after_sha="HEAD",
         similarity=False,
@@ -986,7 +986,7 @@ def test_analyze_before_sha_missing_snapshot(rev_pair_repo: Path) -> None:
         ["git", "-C", str(rev_pair_repo), "rev-list", "--max-parents=0", "HEAD"],
         text=True,
     ).strip()
-    out = mcp_server._run_analyze_cached(
+    out = mcp_server.analyze(
         str(rev_pair_repo),
         before_sha=root,
         similarity=False,
@@ -999,7 +999,7 @@ def test_analyze_before_sha_missing_snapshot(rev_pair_repo: Path) -> None:
 
 
 def test_analyze_before_after_rejects_remote_url() -> None:
-    out = mcp_server._run_analyze_cached(
+    out = mcp_server.analyze(
         "https://example.com/nonexistent.git",
         before_sha="0" * 40,
         after_sha="1" * 40,
