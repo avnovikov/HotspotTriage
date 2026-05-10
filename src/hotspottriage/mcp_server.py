@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 from contextlib import asynccontextmanager
-from copy import deepcopy
 from datetime import datetime, timezone
 import json
 import logging
@@ -30,26 +29,29 @@ from hotspottriage import config as _config
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.server import DashboardServer
 from hotspottriage.dashboard.stats import StatsCollector
-from hotspottriage import discovery, filtering, explain as _explain, output as _output, stats
+from hotspottriage import discovery, explain as _explain, output as _output, stats
 from hotspottriage import revision_cache as _rev_cache
 from hotspottriage.mcp.block_row_utils import (
     block_metric_row_repo_file as _block_metric_row_repo_file,
-    is_block_row_for_delta as _is_block_row_for_delta,
-    metric_triplet as _metric_triplet,
     non_synthetic_block_rows as _non_synthetic_block_rows,
     normal_block_stat_count as _normal_block_stat_count,
-    rows_equal_raw as _rows_equal_raw,
 )
 from hotspottriage.mcp.config_fingerprint import config_fingerprint as _config_fingerprint
 from hotspottriage.mcp.errors import mcp_classify_exception as _mcp_classify_exception
 from hotspottriage.mcp.errors import mcp_tool_error as _mcp_tool_error
 from hotspottriage.mcp.filter_paths import (
     effective_mcp_filter_patterns as _effective_mcp_filter_patterns,
-    is_literal_filter_path as _is_literal_filter_path,
-    normalize_filter_path as _normalize_filter_path,
 )
 from hotspottriage.mcp.git import git_live_head_and_branch as _git_live_head_and_branch
 from hotspottriage.mcp.git import git_short_object_name as _git_short_object_name
+from hotspottriage.mcp.analyze_config import (
+    build_analyze_config as _build_analyze_config,
+    effective_similarity_enabled_for_mcp_analyze as _effective_similarity_enabled_for_mcp_analyze,
+)
+from hotspottriage.mcp.block_delta_report import (
+    build_block_delta_report as _build_block_delta_report,
+)
+from hotspottriage.mcp.repo_filter import build_repo_keep_predicate as _build_repo_keep_predicate
 from hotspottriage.mcp.target import resolve_mcp_target as _resolve_mcp_target_impl
 from hotspottriage.path_utils import resolve_local_repo_path
 from hotspottriage.username_privacy import UsernameRedactingFormatter
@@ -125,22 +127,6 @@ def get_mcp_default_target() -> str | None:
 def _resolve_mcp_target(target: str) -> str:
     """Resolve repo path/URL: explicit ``target``, else ``--default-target``, else error."""
     return _resolve_mcp_target_impl(target, default_target=_mcp_default_target)
-
-
-def _effective_similarity_enabled_for_mcp_analyze(
-    similarity: bool | None,
-    filter: str | None,
-) -> bool:
-    """Resolve DeepCSIM default for MCP ``analyze``: off when *filter* is set.
-
-    Omitted ``similarity`` (``None``) uses ``False`` for non-empty *filter*
-    (scoped agent triage) and ``True`` for whole-repo runs. An explicit
-    ``True``/``False`` always wins.
-    """
-    if similarity is not None:
-        return bool(similarity)
-    ft = filter.strip() if isinstance(filter, str) else ""
-    return False if ft else True
 
 
 def _effective_dashboard_config() -> dict[str, Any]:
@@ -239,89 +225,6 @@ def _parse_mcp_dashboard_argv() -> argparse.Namespace:
     args, rest = parser.parse_known_args()
     sys.argv = [sys.argv[0], *rest]
     return args
-
-
-def _build_block_delta_report(
-    head_rows: list[stats.Statistic],
-    base_rows: list[stats.Statistic],
-) -> dict[str, Any]:
-    """Compare block rows at HEAD vs a baseline revision (raw metrics + score snapshot)."""
-    head_map = {r.path: r for r in head_rows if _is_block_row_for_delta(r)}
-    base_map = {r.path: r for r in base_rows if _is_block_row_for_delta(r)}
-    all_paths = sorted(set(head_map) | set(base_map))
-    by_block: list[dict[str, Any]] = []
-    blocks_added = blocks_removed = blocks_modified = blocks_unchanged = 0
-    total_cyclomatic_delta = 0
-    total_sloc_delta = 0
-    total_halstead_delta = 0
-    total_churn_delta = 0
-    total_smell_count_delta = 0
-
-    for path in all_paths:
-        h = head_map.get(path)
-        b = base_map.get(path)
-        if h and b:
-            if _rows_equal_raw(h, b):
-                blocks_unchanged += 1
-                continue
-            blocks_modified += 1
-            status = "modified"
-        elif h and not b:
-            blocks_added += 1
-            status = "added"
-        else:
-            blocks_removed += 1
-            status = "removed"
-            assert b is not None
-
-        entry: dict[str, Any] = {"path": path, "status": status}
-        for fname in ("cyclomatic", "sloc", "halstead", "churn", "smell_count"):
-            bv = int(getattr(b, fname)) if b else None
-            hv = int(getattr(h, fname)) if h else None
-            entry[fname] = _metric_triplet(bv, hv)
-        for fname in ("churn_per_sloc", "decayed_churn", "decayed_churn_per_sloc"):
-            bv = float(getattr(b, fname)) if b else None
-            hv = float(getattr(h, fname)) if h else None
-            entry[fname] = _metric_triplet(bv, hv)
-        entry["score"] = _metric_triplet(
-            float(b.score) if b else None,
-            float(h.score) if h else None,
-        )
-        by_block.append(entry)
-
-        if status == "modified" and h and b:
-            total_cyclomatic_delta += h.cyclomatic - b.cyclomatic
-            total_sloc_delta += h.sloc - b.sloc
-            total_halstead_delta += h.halstead - b.halstead
-            total_churn_delta += h.churn - b.churn
-            total_smell_count_delta += h.smell_count - b.smell_count
-        elif status == "added" and h:
-            total_cyclomatic_delta += h.cyclomatic
-            total_sloc_delta += h.sloc
-            total_halstead_delta += h.halstead
-            total_churn_delta += h.churn
-            total_smell_count_delta += h.smell_count
-        elif status == "removed" and b:
-            total_cyclomatic_delta -= b.cyclomatic
-            total_sloc_delta -= b.sloc
-            total_halstead_delta -= b.halstead
-            total_churn_delta -= b.churn
-            total_smell_count_delta -= b.smell_count
-
-    return {
-        "summary": {
-            "blocks_added": blocks_added,
-            "blocks_removed": blocks_removed,
-            "blocks_modified": blocks_modified,
-            "blocks_unchanged": blocks_unchanged,
-            "total_cyclomatic_delta": total_cyclomatic_delta,
-            "total_sloc_delta": total_sloc_delta,
-            "total_halstead_delta": total_halstead_delta,
-            "total_churn_delta": total_churn_delta,
-            "total_smell_count_delta": total_smell_count_delta,
-        },
-        "by_block": by_block,
-    }
 
 
 def _format_block_analysis_payload(
@@ -452,7 +355,7 @@ def run_cached_block_analysis_dict(
 
     cfg = _build_analyze_config(
         config_target,
-        filter=filter,
+        path_filter=filter,
         score_metrics=score_metrics,
         granularity="block",
         limit=limit,
@@ -618,7 +521,7 @@ def analyze(
 
             **CLI / cache-generator note:** The ``hotspottriage`` CLI and
             ``generate_cache`` always use glob AND mode; the OR shortcut exists only
-            for this MCP ``analyze`` path (``_build_repo_keep_predicate``).
+            for this MCP ``analyze`` path (``build_repo_keep_predicate`` in ``mcp.repo_filter``).
         score_metrics: Comma-separated metrics for scoring (default: churn_per_sloc,cyclomatic)
         limit: Maximum number of block rows returned
         sort: 'score' (default) or 'file'
@@ -870,92 +773,6 @@ def init_config(target: str = "", is_global: bool = False) -> str:
         logger.exception("Config init failed")
         code, err_msg, det = _mcp_classify_exception(e)
         return _mcp_tool_error(code, err_msg, details=det)
-
-
-def _build_analyze_config(
-    target: str,
-    filter: str | None = None,
-    score_metrics: str | None = None,
-    granularity: str = "file",
-    limit: int | None = None,
-    directories: bool = False,
-    sort: str = "score",
-    since: str | None = None,
-    until: str | None = None,
-    respect_gitignore: bool = True,
-    ignore_dir: str | None = None,
-    config_overrides: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Build analysis config: local repos use ``load_config`` + dashboard patch
-    (same as CLI analyze), then MCP tool arguments."""
-    cfg = deepcopy(_config.DEFAULTS)
-    if not discovery.is_git_url(target):
-        local_target = Path(target).expanduser()
-        if local_target.is_dir():
-            cfg = _config.load_analyze_config_for_local_repo(local_target.resolve())
-
-    if filter:
-        cfg["filter"] = [f.strip() for f in filter.split(",")]
-
-    if score_metrics:
-        cfg["score_metrics"] = [m.strip() for m in score_metrics.split(",")]
-
-    cfg["granularity"] = granularity
-    cfg["directories"] = directories
-    cfg["sort"] = sort
-
-    if limit is not None:
-        cfg["limit"] = limit
-
-    if since:
-        cfg["since"] = since
-
-    if until:
-        cfg["until"] = until
-
-    cfg["respect_gitignore"] = respect_gitignore
-
-    if ignore_dir:
-        cfg["ignore_directories"] = [d.strip() for d in ignore_dir.split(",")]
-
-    if config_overrides:
-        cfg = _config._deep_merge(cfg, config_overrides)
-        if filter:
-            cfg["filter"] = [f.strip() for f in filter.split(",")]
-        if score_metrics:
-            cfg["score_metrics"] = [m.strip() for m in score_metrics.split(",")]
-
-    return cfg
-
-
-def _build_repo_keep_predicate(
-    repo: Path,
-    cfg: dict[str, Any],
-) -> Callable[[str], bool]:
-    """Build tracked-path predicate with MCP-friendly multi-file filter handling."""
-    raw_patterns = [p.strip() for p in cfg["filter"] if p and p.strip()]
-    use_literal_list = len(raw_patterns) > 1 and all(
-        _is_literal_filter_path(p) for p in raw_patterns
-    )
-
-    if use_literal_list:
-        allowed_paths = {_normalize_filter_path(p) for p in raw_patterns}
-
-        def glob_keep(rel_posix: str) -> bool:
-            return _normalize_filter_path(rel_posix) in allowed_paths
-
-    else:
-        patterns = list(cfg["filter"])
-        if not cfg["no_default_filter"]:
-            patterns.append(cfg["default_filter"])
-        glob_keep = filtering.make_filter(patterns)
-
-    return filtering.make_tracked_path_predicate(
-        repo,
-        glob_keep=glob_keep,
-        ignore_directories=cfg["ignore_directories"],
-        respect_gitignore=cfg["respect_gitignore"],
-    )
 
 
 def _build_mcp_analyze_summary(rows: list[stats.Statistic]) -> dict[str, Any]:

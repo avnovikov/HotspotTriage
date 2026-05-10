@@ -239,6 +239,9 @@ that does not need FastMCP lives in the **`hotspottriage.mcp`** package
 | `mcp/filter_paths.py` | Literal multi-file OR vs glob AND semantics for `filter` tokens (`is_literal_filter_path`, `normalize_filter_path`, `effective_mcp_filter_patterns`) |
 | `mcp/block_row_utils.py` | Block-row helpers for revision deltas, `include_summary`, and dashboard metric keys (`is_block_row_for_delta`, `metric_triplet`, `rows_equal_raw`, `normal_block_stat_count`, `non_synthetic_block_rows`, `block_metric_row_repo_file`) |
 | `mcp/config_fingerprint.py` | `config_fingerprint` — stable `sha256:` digest of merged analyze config for **metadata** |
+| `mcp/repo_filter.py` | `build_repo_keep_predicate` — MCP multi-file literal OR vs glob AND, then `filtering.make_tracked_path_predicate` |
+| `mcp/analyze_config.py` | `build_analyze_config`, `effective_similarity_enabled_for_mcp_analyze` — merge tool args into analyze cfg (local repos use `load_analyze_config_for_local_repo`) |
+| `mcp/block_delta_report.py` | `build_block_delta_report` — `before_sha` / `after_sha` block-level metric deltas |
 
 `mcp_server` imports these with private aliases (`_mcp_tool_error`, `_resolve_mcp_target`, …) so existing tool code and tests keep a single module object to patch.
 

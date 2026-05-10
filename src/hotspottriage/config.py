@@ -337,7 +337,7 @@ def merge_dashboard_config_patch(
 ) -> dict[str, Any]:
     """Deep-merge ``<repo>/.hotspottriage/dashboard_config_patch.yml`` into *cfg*.
 
-    Same file and semantics as :func:`mcp_server._build_analyze_config` for a
+    Same file and semantics as :func:`hotspottriage.mcp.analyze_config.build_analyze_config` for a
     local target: dashboard UI / heatmap tuning for ``metric_normalization``,
     ``score_aggregation``, and ``proposed_models``. Missing or empty files are
     a no-op. Returns a new dict; *cfg* is not mutated.
