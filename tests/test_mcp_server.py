@@ -371,6 +371,7 @@ def test_analyze_compact_default_returns_function_score_risk_band_and_model(monk
     assert isinstance(rows, list) and len(rows) >= 1
     first = rows[0]
     assert set(first.keys()) == {
+        "file",
         "function",
         "score",
         "risk_band",
@@ -378,12 +379,25 @@ def test_analyze_compact_default_returns_function_score_risk_band_and_model(monk
         "score_driver",
         "rationale",
     }
+    assert isinstance(first["file"], str)
     assert isinstance(first["function"], str)
     assert isinstance(first["score"], float)
     assert isinstance(first["risk_band"], str)
     assert isinstance(first["proposed_model"], str)
     assert isinstance(first["score_driver"], str)
     assert isinstance(first["rationale"], str)
+
+
+def test_analyze_compact_file_key_holds_originating_file_in_block_mode(test_repo):
+    """Compact rows expose ``file`` so agents can edit without re-running with compact=false."""
+    result = mcp_server.analyze(str(test_repo), score_metrics="cyclomatic")
+    data = json.loads(result)
+    block_rows = [r for r in data["results"] if not r["file"].startswith("__")]
+    assert block_rows
+    assert {row["file"] for row in block_rows} <= {"example.py", "helper.py"}
+    for row in block_rows:
+        assert "::" not in row["file"]
+        assert "::" not in row["function"]
 
 
 def test_analyze_compact_uses_configured_proposed_models(monkeypatch, test_repo):

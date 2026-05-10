@@ -12,7 +12,7 @@ uvx -p 3.13 --from git+https://github.com/avnovikov/HotspotTriage \
   hotspottriage start-mcp-server --open-browser --default-target /path/to/your/repo
 ```
 
-> Built for regulated and audited pipelines. See [Compliance](docs/compliance.md).
+> Built for regulated and audited pipelines. See [Compliance](docs/Compliance.md).
 
 HotspotTriage analyzes tracked `.py` files in a Git repo, blends AST metrics (Radon) with history (`git log`), per-function churn (in block mode), smells (Pylint heuristics), and block similarity (DeepCSIM) — all wired through MCP for integration with agents.
 
@@ -97,4 +97,4 @@ claude mcp add hotspottriage -- ./scripts/run_hotspottriage_mcp.sh \
 | [CONTRIBUTING.md](CONTRIBUTING.md#13-ssh-commit-and-tag-signing-required) | SSH-signed commits and tags setup (one-time workstation config) |
 | [SUPPORT.md](SUPPORT.md) | Support policy, supported versions, EOL process (UK PSTI / EU CRA) |
 | [SECURITY.md](SECURITY.md) | Security policy, VDP, regulatory cross-reference mapping |
-| [docs/compliance.md](docs/compliance.md) | Full compliance posture: SOC2, NIST, ISO 27001, EU CRA, GDPR |
+| [docs/Compliance.md](docs/Compliance.md) | Full compliance posture: SOC2, NIST, ISO 27001, EU CRA, GDPR |
