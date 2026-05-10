@@ -11,6 +11,89 @@ from hotspottriage.stats.risk_application import apply_risk_scores
 from hotspottriage.stats.scoring import product_score
 
 
+# ── shared field extraction (DRY) ────────────────────────────────────
+
+def _int_field(row: dict[str, Any], key: str, default: int = 0) -> int:
+    return int(row.get(key, default))
+
+
+def _float_field(row: dict[str, Any], key: str, default: float = 0.0) -> float:
+    return float(row.get(key, default))
+
+
+def _base_fields_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Extract the metric fields common to every Statistic-from-dict path."""
+    return {
+        "path": str(row.get("path", "")),
+        "sloc": _int_field(row, "sloc"),
+        "normalized_sloc": _float_field(row, "normalized_sloc"),
+        "cyclomatic": _int_field(row, "cyclomatic"),
+        "halstead": _int_field(row, "halstead"),
+        "maintainability": _int_field(row, "maintainability"),
+        "churn": _int_field(row, "churn"),
+        "churn_per_sloc": _float_field(row, "churn_per_sloc"),
+        "decayed_churn": _float_field(row, "decayed_churn"),
+        "decayed_churn_per_sloc": _float_field(row, "decayed_churn_per_sloc"),
+        "smell_count": _int_field(row, "smell_count"),
+        "smell_severity": _float_field(row, "smell_severity"),
+        "smell_burden": _float_field(row, "smell_burden"),
+        "smells": dict(row.get("smells") or {}),
+        "similarity_score": _float_field(row, "similarity_score"),
+        "similarity_band": str(row.get("similarity_band", "n/a")),
+        "match_count": _int_field(row, "match_count"),
+    }
+
+
+def _scoring_metrics_from_base(base: dict[str, Any]) -> dict[str, float]:
+    """Float-valued metric dict fed into ``product_score`` / ``apply_risk_scores``."""
+    return {
+        "normalized_sloc": float(base["normalized_sloc"]),
+        "cyclomatic": float(base["cyclomatic"]),
+        "halstead": float(base["halstead"]),
+        "maintainability": float(base["maintainability"]),
+        "churn": float(base["churn"]),
+        "churn_per_sloc": float(base["churn_per_sloc"]),
+        "decayed_churn": float(base["decayed_churn"]),
+        "decayed_churn_per_sloc": float(base["decayed_churn_per_sloc"]),
+        "smell_count": float(base["smell_count"]),
+        "smell_severity": float(base["smell_severity"]),
+        "smell_burden": float(base["smell_burden"]),
+        "similarity_score": float(base["similarity_score"]),
+    }
+
+
+# ── score metadata parsers (SRP) ─────────────────────────────────────
+
+def _parse_score_subscores(raw: Any) -> dict[str, float]:
+    if isinstance(raw, dict):
+        return {str(k): float(v) for k, v in raw.items()}
+    return {}
+
+
+def _parse_score_explanation(raw: Any) -> list[dict[str, Any]]:
+    if isinstance(raw, list):
+        return _explain.sanitize_score_explanation_entries(raw)
+    return []
+
+
+def _parse_final_weights(raw: Any) -> dict[str, float] | None:
+    if isinstance(raw, dict) and raw:
+        return {str(k): float(v) for k, v in raw.items()}
+    return None
+
+
+def _parse_norm_inputs(raw: Any) -> dict[str, dict[str, float]] | None:
+    if not isinstance(raw, dict) or not raw:
+        return None
+    result: dict[str, dict[str, float]] = {}
+    for burden_key, inner in raw.items():
+        if isinstance(inner, dict):
+            result[str(burden_key)] = {str(k): float(v) for k, v in inner.items()}
+    return result or None
+
+
+# ── public functions ──────────────────────────────────────────────────
+
 def statistic_from_raw_block_row(
     row: dict[str, Any],
     score_metrics: Iterable[str],
@@ -20,66 +103,22 @@ def statistic_from_raw_block_row(
     similarity_enabled: bool = True,
 ) -> Statistic:
     """Derive a scored ``Statistic`` from one raw cached block row."""
-    path = str(row.get("path", ""))
+    base = _base_fields_from_row(row)
+    path = base["path"]
+
     if path.startswith("__"):
         return Statistic(
-            path=path,
-            sloc=int(row.get("sloc", 0)),
-            normalized_sloc=float(row.get("normalized_sloc", 0.0)),
-            cyclomatic=int(row.get("cyclomatic", 0)),
-            halstead=int(row.get("halstead", 0)),
-            maintainability=int(row.get("maintainability", 0)),
-            churn=int(row.get("churn", 0)),
-            churn_per_sloc=float(row.get("churn_per_sloc", 0.0)),
-            decayed_churn=float(row.get("decayed_churn", 0.0)),
-            decayed_churn_per_sloc=float(row.get("decayed_churn_per_sloc", 0.0)),
-            smell_count=int(row.get("smell_count", 0)),
-            smell_severity=float(row.get("smell_severity", 0.0)),
-            smell_burden=float(row.get("smell_burden", 0.0)),
-            smells=dict(row.get("smells") or {}),
-            similarity_score=float(row.get("similarity_score", 0.0)),
-            similarity_band=str(row.get("similarity_band", "n/a")),
-            match_count=int(row.get("match_count", 0)),
-            score=float(row.get("score", 0.0)),
+            **base,
+            score=_float_field(row, "score"),
             score_band=str(row.get("score_band", "n/a")),
-            score_subscores=dict(row.get("score_subscores") or {}),
+            score_subscores=_parse_score_subscores(row.get("score_subscores")),
             score_driver=str(row.get("score_driver", "")),
-            score_explanation=_explain.sanitize_score_explanation_entries(
-                row.get("score_explanation") or []
-            ),
+            score_explanation=_parse_score_explanation(row.get("score_explanation")),
         )
-    metrics = {
-        "normalized_sloc": float(row.get("normalized_sloc", 0.0)),
-        "cyclomatic": float(row.get("cyclomatic", 0.0)),
-        "halstead": float(row.get("halstead", 0.0)),
-        "maintainability": float(row.get("maintainability", 0.0)),
-        "churn": float(row.get("churn", 0.0)),
-        "churn_per_sloc": float(row.get("churn_per_sloc", 0.0)),
-        "decayed_churn": float(row.get("decayed_churn", 0.0)),
-        "decayed_churn_per_sloc": float(row.get("decayed_churn_per_sloc", 0.0)),
-        "smell_count": float(row.get("smell_count", 0.0)),
-        "smell_severity": float(row.get("smell_severity", 0.0)),
-        "smell_burden": float(row.get("smell_burden", 0.0)),
-        "similarity_score": float(row.get("similarity_score", 0.0)),
-    }
+
+    metrics = _scoring_metrics_from_base(base)
     stat = Statistic(
-        path=path,
-        sloc=int(row.get("sloc", 0)),
-        normalized_sloc=metrics["normalized_sloc"],
-        cyclomatic=int(metrics["cyclomatic"]),
-        halstead=int(metrics["halstead"]),
-        maintainability=int(metrics["maintainability"]),
-        churn=int(metrics["churn"]),
-        churn_per_sloc=metrics["churn_per_sloc"],
-        decayed_churn=metrics["decayed_churn"],
-        decayed_churn_per_sloc=metrics["decayed_churn_per_sloc"],
-        smell_count=int(metrics["smell_count"]),
-        smell_severity=metrics["smell_severity"],
-        smell_burden=metrics["smell_burden"],
-        smells=dict(row.get("smells") or {}),
-        similarity_score=metrics["similarity_score"],
-        similarity_band=str(row.get("similarity_band", "n/a")),
-        match_count=int(row.get("match_count", 0)),
+        **base,
         score=product_score(metrics, score_metrics, smell_weight=smell_weight),
         score_driver="",
         score_explanation=[],
@@ -92,50 +131,18 @@ def statistic_from_raw_block_row(
 
 def statistic_from_complete_dict(row: dict[str, Any]) -> Statistic:
     """Rebuild a scored :class:`Statistic` from :meth:`Statistic.as_dict` output."""
-    smells_raw = row.get("smells")
-    smells: dict[str, Any] = dict(smells_raw) if isinstance(smells_raw, dict) else {}
-    subs_raw = row.get("score_subscores")
-    if isinstance(subs_raw, dict):
-        subs = {str(k): float(v) for k, v in subs_raw.items()}
-    else:
-        subs = {}
-    expl_raw = row.get("score_explanation")
-    expl: list[dict[str, Any]] = (
-        _explain.sanitize_score_explanation_entries(expl_raw)
-        if isinstance(expl_raw, list)
-        else []
-    )
-    sfw_raw = row.get("score_final_weights")
-    sfw: dict[str, float] | None = None
-    if isinstance(sfw_raw, dict) and sfw_raw:
-        sfw = {str(k): float(v) for k, v in sfw_raw.items()}
-    sni_raw = row.get("score_norm_inputs")
-    sni: dict[str, dict[str, float]] | None = None
-    if isinstance(sni_raw, dict) and sni_raw:
-        sni = {}
-        for bk, inner in sni_raw.items():
-            if not isinstance(inner, dict):
-                continue
-            sni[str(bk)] = {str(k): float(v) for k, v in inner.items()}
+    base = _base_fields_from_row(row)
+    # complete_dict smells are {str: int}; coerce from the generic dict above.
+    base["smells"] = {str(k): int(v) for k, v in base["smells"].items()}
+
+    subs = _parse_score_subscores(row.get("score_subscores"))
+    expl = _parse_score_explanation(row.get("score_explanation"))
+    sfw = _parse_final_weights(row.get("score_final_weights"))
+    sni = _parse_norm_inputs(row.get("score_norm_inputs"))
+
     st = Statistic(
-        path=str(row.get("path", "")),
-        sloc=int(row.get("sloc", 0)),
-        normalized_sloc=float(row.get("normalized_sloc", 0.0)),
-        cyclomatic=int(row.get("cyclomatic", 0)),
-        halstead=int(row.get("halstead", 0)),
-        maintainability=int(row.get("maintainability", 0)),
-        churn=int(row.get("churn", 0)),
-        churn_per_sloc=float(row.get("churn_per_sloc", 0.0)),
-        decayed_churn=float(row.get("decayed_churn", 0.0)),
-        decayed_churn_per_sloc=float(row.get("decayed_churn_per_sloc", 0.0)),
-        smell_count=int(row.get("smell_count", 0)),
-        smell_severity=float(row.get("smell_severity", 0.0)),
-        smell_burden=float(row.get("smell_burden", 0.0)),
-        smells={str(k): int(v) for k, v in smells.items()},
-        similarity_score=float(row.get("similarity_score", 0.0)),
-        similarity_band=str(row.get("similarity_band", "n/a")),
-        match_count=int(row.get("match_count", 0)),
-        score=float(row.get("score", 0.0)),
+        **base,
+        score=_float_field(row, "score"),
         score_band=str(row.get("score_band", "n/a")),
         score_subscores=subs,
         score_driver=str(row.get("score_driver", "")),
