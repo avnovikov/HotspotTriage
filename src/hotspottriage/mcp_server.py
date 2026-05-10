@@ -372,10 +372,11 @@ def analyze(
         respect_gitignore: Apply .gitignore rules (default: true)
         ignore_dir: Comma-separated directory prefixes to skip
         similarity: DeepCSIM similarity per block (default: true)
-        compact: When true (default), each row includes ``function``, ``score``,
-            ``risk_band``, ``proposed_model``, ``score_driver``, and ``rationale``
-            (short natural-language summary for agents). Use ``compact=false`` for
-            full metrics, ``score_explanation``, and multi-line ``score_narrative``.
+        compact: When true (default), each row includes ``file``, ``function``,
+            ``score``, ``risk_band``, ``proposed_model``, ``score_driver``, and
+            ``rationale`` (short natural-language summary for agents). Use
+            ``compact=false`` for full metrics, ``score_explanation``, and
+            multi-line ``score_narrative``.
 
     Returns:
         JSON object with ``results`` and ``cache`` keys, or ``{"error": ...}``
@@ -727,17 +728,18 @@ def _initialize_repository(
 def _mcp_compact_score_rows(
     rows: list[stats.Statistic], *, granularity: str, merged_config: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """One dict per row: symbol, score, band, model, driver, and a short agent rationale."""
+    """One dict per row: file, symbol, score, band, model, driver, and a short agent rationale."""
     out: list[dict[str, Any]] = []
     for r in rows:
         p = r.path
         if granularity == "block" and "::" in p:
-            fn = p.split("::", 1)[1]
+            file_path, fn = p.split("::", 1)
         else:
-            fn = p
+            file_path, fn = p, p
         score_band = str(r.score_band)
         out.append(
             {
+                "file": file_path,
                 "function": fn,
                 "score": float(r.score),
                 "risk_band": score_band,
