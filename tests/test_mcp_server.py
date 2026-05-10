@@ -10,10 +10,14 @@ import pytest
 
 import hotspottriage.mcp_server as mcp_server
 from hotspottriage import config as _config
+from hotspottriage.mcp.analyze_config import (
+    build_analyze_config as _build_analyze_config,
+    effective_similarity_enabled_for_mcp_analyze,
+)
 
 
 def test_effective_similarity_helper_explicit_and_defaults() -> None:
-    fn = mcp_server._effective_similarity_enabled_for_mcp_analyze
+    fn = effective_similarity_enabled_for_mcp_analyze
     assert fn(True, "a.py") is True
     assert fn(False, None) is False
     assert fn(None, None) is True
@@ -66,7 +70,7 @@ def test_mcp_analyze_filtered_explicit_similarity_true(monkeypatch, test_repo):
 
 def test_build_analyze_config_local_matches_load_analyze_for_scoring(test_repo):
     """MCP local analyze must use the same scoring layers as ``load_analyze_config_for_local_repo``."""
-    cfg = mcp_server._build_analyze_config(str(test_repo))
+    cfg = _build_analyze_config(str(test_repo))
     want = _config.load_analyze_config_for_local_repo(Path(test_repo))
     assert cfg["metric_normalization"] == want["metric_normalization"]
     assert cfg["score_aggregation"] == want["score_aggregation"]
@@ -968,7 +972,7 @@ def test_analyze_before_and_after_cache_only(rev_pair_repo: Path) -> None:
 
 
 def test_analyze_after_sha_requires_before(rev_pair_repo: Path) -> None:
-    out = mcp_server._run_analyze_cached(
+    out = mcp_server.analyze(
         str(rev_pair_repo),
         after_sha="HEAD",
         similarity=False,
@@ -982,7 +986,7 @@ def test_analyze_before_sha_missing_snapshot(rev_pair_repo: Path) -> None:
         ["git", "-C", str(rev_pair_repo), "rev-list", "--max-parents=0", "HEAD"],
         text=True,
     ).strip()
-    out = mcp_server._run_analyze_cached(
+    out = mcp_server.analyze(
         str(rev_pair_repo),
         before_sha=root,
         similarity=False,
@@ -995,7 +999,7 @@ def test_analyze_before_sha_missing_snapshot(rev_pair_repo: Path) -> None:
 
 
 def test_analyze_before_after_rejects_remote_url() -> None:
-    out = mcp_server._run_analyze_cached(
+    out = mcp_server.analyze(
         "https://example.com/nonexistent.git",
         before_sha="0" * 40,
         after_sha="1" * 40,
