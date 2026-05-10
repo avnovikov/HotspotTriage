@@ -12,6 +12,58 @@ import hotspottriage.mcp_server as mcp_server
 from hotspottriage import config as _config
 
 
+def test_effective_similarity_helper_explicit_and_defaults() -> None:
+    fn = mcp_server._effective_similarity_enabled_for_mcp_analyze
+    assert fn(True, "a.py") is True
+    assert fn(False, None) is False
+    assert fn(None, None) is True
+    assert fn(None, "") is True
+    assert fn(None, "   ") is True
+    assert fn(None, "x.py") is False
+    assert fn(None, "**/*.py") is False
+
+
+def test_mcp_analyze_filtered_defaults_similarity_off(monkeypatch, test_repo):
+    captured: dict[str, bool | None] = {}
+    _orig = mcp_server.stats.build_block_stats
+
+    def _spy(repo, files, score_metrics, *a, **kw):
+        captured["similarity_enabled"] = kw.get("similarity_enabled")
+        return _orig(repo, files, score_metrics, *a, **kw)
+
+    monkeypatch.setattr(mcp_server.stats, "build_block_stats", _spy)
+    mcp_server.analyze(str(test_repo), filter="example.py", compact=True)
+    assert captured["similarity_enabled"] is False
+
+
+def test_mcp_analyze_unfiltered_defaults_similarity_on(monkeypatch, test_repo):
+    captured: dict[str, bool | None] = {}
+    _orig = mcp_server.stats.build_block_stats
+
+    def _spy(repo, files, score_metrics, *a, **kw):
+        captured["similarity_enabled"] = kw.get("similarity_enabled")
+        return _orig(repo, files, score_metrics, *a, **kw)
+
+    monkeypatch.setattr(mcp_server.stats, "build_block_stats", _spy)
+    mcp_server.analyze(str(test_repo), compact=True)
+    assert captured["similarity_enabled"] is True
+
+
+def test_mcp_analyze_filtered_explicit_similarity_true(monkeypatch, test_repo):
+    captured: dict[str, bool | None] = {}
+    _orig = mcp_server.stats.build_block_stats
+
+    def _spy(repo, files, score_metrics, *a, **kw):
+        captured["similarity_enabled"] = kw.get("similarity_enabled")
+        return _orig(repo, files, score_metrics, *a, **kw)
+
+    monkeypatch.setattr(mcp_server.stats, "build_block_stats", _spy)
+    mcp_server.analyze(
+        str(test_repo), filter="example.py", compact=True, similarity=True
+    )
+    assert captured["similarity_enabled"] is True
+
+
 def test_build_analyze_config_local_matches_load_analyze_for_scoring(test_repo):
     """MCP local analyze must use the same scoring layers as ``load_analyze_config_for_local_repo``."""
     cfg = mcp_server._build_analyze_config(str(test_repo))

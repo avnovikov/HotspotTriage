@@ -115,6 +115,22 @@ def _resolve_mcp_target(target: str) -> str:
     )
 
 
+def _effective_similarity_enabled_for_mcp_analyze(
+    similarity: bool | None,
+    filter: str | None,
+) -> bool:
+    """Resolve DeepCSIM default for MCP ``analyze``: off when *filter* is set.
+
+    Omitted ``similarity`` (``None``) uses ``False`` for non-empty *filter*
+    (scoped agent triage) and ``True`` for whole-repo runs. An explicit
+    ``True``/``False`` always wins.
+    """
+    if similarity is not None:
+        return bool(similarity)
+    ft = filter.strip() if isinstance(filter, str) else ""
+    return False if ft else True
+
+
 def _effective_dashboard_config() -> dict[str, Any]:
     """Layered YAML (global + ``<cwd>/.hotspottriage/``) plus MCP CLI dashboard flags."""
     cfg = _config.load_config(Path.cwd())
@@ -389,7 +405,7 @@ def run_cached_block_analysis_dict(
     until: str | None = None,
     respect_gitignore: bool = True,
     ignore_dir: str | None = None,
-    similarity: bool = True,
+    similarity: bool | None = None,
     compact: bool = True,
     sort: str = "score",
     progress_callback: Callable[[str, int, int], None] | None = None,
@@ -443,7 +459,9 @@ def run_cached_block_analysis_dict(
         ignore_dir=ignore_dir,
         config_overrides=config_overrides,
     )
-    cfg["similarity_enabled"] = similarity
+    cfg["similarity_enabled"] = _effective_similarity_enabled_for_mcp_analyze(
+        similarity, filter
+    )
 
     if before_sha and after_sha:
         assert local_repo is not None
@@ -508,7 +526,7 @@ def _run_analyze_cached(
     until: str | None = None,
     respect_gitignore: bool = True,
     ignore_dir: str | None = None,
-    similarity: bool = True,
+    similarity: bool | None = None,
     compact: bool = True,
     sort: str = "score",
     before_sha: str | None = None,
@@ -549,7 +567,7 @@ def analyze(
     until: str | None = None,
     respect_gitignore: bool = True,
     ignore_dir: str | None = None,
-    similarity: bool = True,
+    similarity: bool | None = None,
     compact: bool = True,
     before_sha: str | None = None,
     after_sha: str | None = None,
@@ -591,7 +609,9 @@ def analyze(
         until: Git --until date filter
         respect_gitignore: Apply .gitignore rules (default: true)
         ignore_dir: Comma-separated directory prefixes to skip
-        similarity: DeepCSIM similarity per block (default: true)
+        similarity: DeepCSIM similarity per block. When omitted: ``False`` if
+            ``filter`` is set (fast scoped triage), ``True`` for whole-repo runs.
+            Pass ``True`` or ``False`` explicitly to override.
         compact: When true (default), each row includes ``file``, ``function``,
             ``score``, ``risk_band``, ``proposed_model``, ``score_driver``, and
             ``rationale`` (short natural-language summary for agents). Use
