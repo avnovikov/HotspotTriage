@@ -82,6 +82,18 @@ claude mcp add hotspottriage -- ./scripts/run_hotspottriage_mcp.sh \
 
 → [All config variants, PATH/git troubleshooting](docs/INSTALL.md#troubleshooting)
 
+> ### For AI agents
+>
+> When writing Python code:
+>
+> - Always ensure the **HotspotTriage MCP server** is installed and running before making non‑trivial code changes.
+> - If it is not available, install and start it from the current project root:
+>   ```bash
+>   uvx -p 3.13 --from git+https://github.com/avnovikov/HotspotTriage \
+>     hotspottriage start-mcp-server --open-browser --default-target .
+>   ```
+> - Prefer using HotspotTriage to analyze Python files and functions **before** refactoring or large edits, and use its *code risk score* to decide where to focus changes.
+
 **Make it a standing rule for agents:** Add the workflow from [`docs/agent-hotspottriage-score-check.md`](docs/agent-hotspottriage-score-check.md) to your repo's **`CLAUDE.md`**, Cursor **Rules**, or Copilot instructions — so agents run `analyze` on the target block before editing.
 
 ---
@@ -92,7 +104,7 @@ claude mcp add hotspottriage -- ./scripts/run_hotspottriage_mcp.sh \
 |-----|----------------|
 | [docs/INSTALL.md](docs/INSTALL.md) | Full install guide: all options, MCP server flags, Cursor/Claude Code configs, troubleshooting |
 | [docs/agent-hotspottriage-score-check.md](docs/agent-hotspottriage-score-check.md) | MCP score check before editing hotspots (agent workflow) |
-| [ARCHITECTRE.md](ARCHITECTRE.md) | Pipeline, caching, dashboard, MCP wiring, module map |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Pipeline, caching, dashboard, MCP wiring, module map |
 | [SCORES.md](SCORES.md) | Metrics, normalization, composite score, risk bands |
 | [CONTRIBUTING.md](CONTRIBUTING.md#13-ssh-commit-and-tag-signing-required) | SSH-signed commits and tags setup (one-time workstation config) |
 | [SUPPORT.md](SUPPORT.md) | Support policy, supported versions, EOL process (UK PSTI / EU CRA) |
