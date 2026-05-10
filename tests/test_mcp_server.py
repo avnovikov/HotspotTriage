@@ -231,6 +231,8 @@ def test_analyze_full_rows_score_explanation_items_never_contain_raw(test_repo):
         for item in expl:
             assert isinstance(item, dict)
             assert "raw" not in item
+
+
 def test_analyze_with_limit(test_repo):
     """Test analyze with limit (non-aggregate rows only; limit excludes similarity summary)."""
     result = mcp_server.analyze(str(test_repo), limit=1, similarity=False)
@@ -270,6 +272,11 @@ def test_analyze_error_handling():
     data = json.loads(result)
 
     assert "error" in data
+    err = data["error"]
+    assert isinstance(err, dict)
+    assert err["code"] in ("TARGET_NOT_FOUND", "INVALID_TARGET", "INTERNAL")
+    assert "message" in err and isinstance(err["message"], str)
+    assert "details" in err and isinstance(err["details"], dict)
 
 
 def test_analyze_with_filter(test_repo):
@@ -326,12 +333,14 @@ def test_init_config_global():
     # Should either succeed or fail with a clear error message
     # (not crash unexpectedly)
     assert isinstance(data, dict)
-    assert "status" in data
-    assert data["status"] in ("success", "error")
-
-    # If it's an error, it should be because config already exists
-    if data["status"] == "error":
-        assert "already exists" in data["message"] or "refusing" in data["message"]
+    if "error" in data:
+        err = data["error"]
+        assert isinstance(err, dict)
+        assert err.get("code") == "CONFIG_VALIDATION"
+        msg = err.get("message", "").lower()
+        assert "already exists" in msg or "refusing" in msg
+    else:
+        assert data.get("status") == "success"
 
 
 def test_analyze_sort_by_file(test_repo):
@@ -616,7 +625,8 @@ def test_analyze_empty_without_default_target_errors(monkeypatch):
     result = mcp_server.analyze("")
     data = json.loads(result)
     assert "error" in data
-    assert "default-target" in data["error"].lower()
+    assert data["error"]["code"] == "INVALID_TARGET"
+    assert "default-target" in data["error"]["message"].lower()
 
 
 @pytest.mark.anyio
@@ -963,7 +973,8 @@ def test_analyze_after_sha_requires_before(rev_pair_repo: Path) -> None:
         after_sha="HEAD",
         similarity=False,
     )
-    assert "error" in json.loads(out)
+    err = json.loads(out)["error"]
+    assert err["code"] == "INVALID_ARGUMENT"
 
 
 def test_analyze_before_sha_missing_snapshot(rev_pair_repo: Path) -> None:
@@ -979,7 +990,8 @@ def test_analyze_before_sha_missing_snapshot(rev_pair_repo: Path) -> None:
     )
     data = json.loads(out)
     assert "error" in data
-    assert "no cached snapshot" in data["error"].lower()
+    assert data["error"]["code"] == "SNAPSHOT_NOT_FOUND"
+    assert "no cached snapshot" in data["error"]["message"].lower()
 
 
 def test_analyze_before_after_rejects_remote_url() -> None:
@@ -991,4 +1003,6 @@ def test_analyze_before_after_rejects_remote_url() -> None:
     )
     data = json.loads(out)
     assert "error" in data
-    assert "local" in data["error"].lower() or "remote" in data["error"].lower()
+    assert data["error"]["code"] == "INVALID_TARGET"
+    msg = data["error"]["message"].lower()
+    assert "local" in msg or "remote" in msg
