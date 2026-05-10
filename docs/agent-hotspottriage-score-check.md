@@ -25,6 +25,26 @@ Tokens are comma-separated, repo-relative POSIX paths. Matching depends on **wha
 
 **Not the same as the CLI:** `hotspottriage … --filter` and `hotspottriage-cache --filter` always use **AND** glob mode (no literal-path OR shortcut). Only the MCP **`analyze`** tool applies `_build_repo_keep_predicate` in `mcp_server.py`, which implements the OR shortcut above.
 
+## MCP `analyze` revision snapshots (`head_sha`, `before_sha`, `after_sha`)
+
+On a **local** `target`, each successful **`analyze`** records a snapshot under
+`<repo>/.hotspottriage/cache/revisions.pkl` and returns **`head_sha`** (the
+recorded commit). To diff two commits **without** HotspotTriage checking out
+another revision:
+
+1. Run **`analyze`** at the older checkout → save **`head_sha`** as `H1`.
+2. Run **`analyze`** at the newer checkout → save **`head_sha`** as `H2`.
+3. Call **`analyze(target, before_sha=H1, after_sha=H2, …)`** with the same
+   filter/options as needed → **`results`** reflect `H2`, **`deltas`** compare
+   `H2` vs `H1`, **`head_sha`** is `H2`.
+
+Alternatively, **`analyze(target, before_sha=H1, …)`** (only `before_sha`)
+runs a **live** analysis at the current `HEAD`, records it, and adds **`deltas`**
+vs the cached `H1` snapshot.
+
+If a SHA was never recorded at that repo path, the tool returns an error
+mentioning **no cached snapshot** (run **`analyze`** at that commit first).
+
 ## Workflow
 
 1. Identify the exact function or method you plan to modify.
