@@ -48,7 +48,11 @@ def _build_analyze_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--filter",
         default=None,
-        help="comma-separated globs (AND semantics, '!' negates)",
+        help=(
+            "comma-separated gitignore-style patterns (AND with each other and the "
+            "default filter unless --no-default-filter; '!' negates). MCP analyze "
+            "uses OR for two+ all-literal paths only — see docs/agent-hotspottriage-score-check.md"
+        ),
     )
     p.add_argument(
         "--no-default-filter",
