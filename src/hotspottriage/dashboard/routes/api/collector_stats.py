@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from hotspottriage.dashboard.stats import StatsCollector
-from hotspottriage.dashboard.stats_api import sse_json_every
+from hotspottriage.dashboard.sse_json import sse_json_every
 
 
 def register_collector_stats_routes(

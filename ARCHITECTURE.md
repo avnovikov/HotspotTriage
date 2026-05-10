@@ -162,8 +162,10 @@ on that path so dashboard explanations use the same weights as MCP/CLI.
 includes `dashboard/routes/pages.py` for HTML, and the `dashboard/routes/api/`
 package (`build_dashboard_api_router` in ``__init__.py``, split across
 ``health_config.py``, ``block_metrics.py``, ``cache.py``, ``collector_stats.py``,
-``log_buffer.py``) for JSON under `/api`. Heatmap matrix and
-histogram helpers for those endpoints are in `dashboard/stats_api.py`; cache
+``log_buffer.py``) for JSON under `/api`. Heatmap matrix JSON is in
+`dashboard/heatmap_matrix.py`, histograms in
+`dashboard/distribution_histogram.py`, block narrative payload in
+`dashboard/block_narrative_payload.py`, and SSE JSON ticks in `dashboard/sse_json.py`; cache
 request parsing and slimmed job payloads in `dashboard/cache_http.py`; threaded
 cache generation jobs in `dashboard/cache_jobs.py`. Persisted UI state is
 `dashboard/local_state.py` (`DashboardLocalState`); merged YAML overlay is
@@ -327,7 +329,7 @@ Locks also live inside `_local_state` and `block_store` for their own data.
      `blocks.pkl` directly (if cache exists and in-memory rows are empty).
      Synchronous pickle load, sub-second.
 
-2. `_build_heatmap_rows` selects score + burden columns, splits
+2. `heatmap_matrix.build_heatmap_rows` selects score + burden columns, splits
    `path::symbol` into `file` + `method`, sorts by file max score
    then method score, applies limit.
 

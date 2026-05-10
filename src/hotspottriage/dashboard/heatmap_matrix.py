@@ -1,30 +1,7 @@
-"""JSON helpers for dashboard ``/api/stats/*`` endpoints (heatmap matrix, histograms, SSE)."""
+"""API heatmap matrix: block rows → sorted table + column maxima for ``/api/stats/heatmap``."""
 from __future__ import annotations
 
-import asyncio
-import json
-from typing import Any, AsyncGenerator, Callable
-
-# Numeric Statistic fields eligible for /api/stats/distribution histograms.
-DISTRIBUTION_METRICS: frozenset[str] = frozenset(
-    {
-        "sloc",
-        "normalized_sloc",
-        "cyclomatic",
-        "halstead",
-        "maintainability",
-        "churn",
-        "churn_per_sloc",
-        "decayed_churn",
-        "decayed_churn_per_sloc",
-        "smell_count",
-        "smell_severity",
-        "smell_burden",
-        "similarity_score",
-        "match_count",
-        "score",
-    }
-)
+from typing import Any
 
 # Upper cap for ``/api/stats/heatmap`` limit (query param).
 HEATMAP_MAX_LIMIT = 500
@@ -121,46 +98,13 @@ def heatmap_column_maxima(
     return out
 
 
-def histogram_buckets(
-    values: list[float], *, bins: int = 20
-) -> tuple[list[list[float]], list[int]]:
-    """Return ``buckets`` as ``[low, high]`` pairs and ``counts`` (same length)."""
-    if not values:
-        return [], []
-    if bins < 1:
-        raise ValueError("bins must be positive")
-    vmin = float(min(values))
-    vmax = float(max(values))
-    if vmin == vmax:
-        return [[vmin, vmax]], [len(values)]
-    width = (vmax - vmin) / bins
-    counts = [0] * bins
-    buckets: list[list[float]] = []
-    for i in range(bins):
-        lo = vmin + i * width
-        hi = vmin + (i + 1) * width
-        if i == bins - 1:
-            hi = vmax
-        buckets.append([lo, hi])
-    for v in values:
-        fv = float(v)
-        if fv >= vmax:
-            idx = bins - 1
-        elif fv <= vmin:
-            idx = 0
-        else:
-            idx = int((fv - vmin) / width)
-            if idx >= bins:
-                idx = bins - 1
-        counts[idx] += 1
-    return buckets, counts
-
-
-async def sse_json_every(
-    interval_s: float,
-    build_payload: Callable[[], Any],
-) -> AsyncGenerator[str, None]:
-    """SSE stream: emit JSON snapshots on a fixed interval."""
-    while True:
-        yield "data: " + json.dumps(build_payload()) + "\n\n"
-        await asyncio.sleep(interval_s)
+def build_heatmap_api_payload(raw_rows: list[dict[str, Any]], *, limit: int) -> dict[str, Any]:
+    """JSON body for ``GET /api/stats/heatmap`` (caller validates *limit*)."""
+    rows = build_heatmap_rows(raw_rows, limit=limit)
+    column_maxima = heatmap_column_maxima(rows, columns=HEATMAP_SCORE_COLUMNS)
+    return {
+        "limit": limit,
+        "columns": list(HEATMAP_SCORE_COLUMNS),
+        "rows": rows,
+        "column_maxima": column_maxima,
+    }
