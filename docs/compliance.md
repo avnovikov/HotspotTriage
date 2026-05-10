@@ -28,6 +28,12 @@ HotspotTriage is designed to be part of a **regulated and audited system scope**
 
 HotspotTriage is built as a **local-execution tool with no cloud dependency**, designed from the ground up to operate within regulated and audited software delivery pipelines. Every architectural decision below is a deliberate compliance control, not an afterthought.
 
+### Input Validation & Hardening (NIST SI-10, ISO 27001 A.8.26)
+
+- **Pydantic boundary validation** on all MCP endpoints and dashboard routes: type, length, and format checks before any processing; invalid inputs are rejected with safe, non-leaky error messages (§4, [#84](https://github.com/avnovikov/HotspotTriage/issues/84)).
+- **No hardcoded secrets** enforced by Gitleaks on every PR (§7.3).
+- **Dashboard binding verified by CodeQL** — the `bind-socket-all-network-interfaces` finding was resolved in [#84](https://github.com/avnovikov/HotspotTriage/issues/84).
+
 ### Data Protection & Privacy (GDPR Art. 5)
 
 - **No outbound telemetry.** Repository paths, file contents, and analysis outputs are processed locally only and never transmitted to external systems (§2.1).
@@ -47,12 +53,6 @@ HotspotTriage is built as a **local-execution tool with no cloud dependency**, d
 - **SSH-signed commits and tags** — every commit to `main` and every release tag is cryptographically signed. See [CONTRIBUTING.md](../CONTRIBUTING.md#13-ssh-commit-and-tag-signing-required).
 - **SemVer 2.0.0** versioning ensures predictable, auditable upgrade paths with no surprise breaking changes.
 - **Branch and tag protection** enforced via GitHub rules — no force-push, no unsigned commits, PRs require maintainer approval before merge (§7.3).
-
-### Input Validation & Hardening (NIST SI-10, ISO 27001 A.8.26)
-
-- **Pydantic boundary validation** on all MCP endpoints and dashboard routes: type, length, and format checks before any processing; invalid inputs are rejected with safe, non-leaky error messages (§4, [#84](https://github.com/avnovikov/HotspotTriage/issues/84)).
-- **No hardcoded secrets** enforced by Gitleaks on every PR (§7.3).
-- **Dashboard binding verified by CodeQL** — the `bind-socket-all-network-interfaces` finding was resolved in [#84](https://github.com/avnovikov/HotspotTriage/issues/84).
 
 ---
 
