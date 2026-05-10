@@ -28,7 +28,6 @@ from typing import Any
 
 from hotspottriage import timestamps
 from hotspottriage.path_utils import sanitize_log_value
-from hotspottriage.username_privacy import redact_usernames_in_structure
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +43,7 @@ def cache_path_for(repo: Path) -> Path:
 
 def _write_versioned_pickle(path: Path, rows: list[dict]) -> None:
     """Atomic write of a versioned pickle envelope to *path*."""
-    safe_rows = redact_usernames_in_structure(rows)
-    envelope = {"__cache_version": CACHE_VERSION, "obj": safe_rows}
+    envelope = {"__cache_version": CACHE_VERSION, "obj": rows}
     cache_dir = path.parent
     cache_dir.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=cache_dir, prefix=".cache-", suffix=".tmp")

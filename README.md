@@ -1,8 +1,8 @@
 # HotspotTriage
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat)](LICENSE) [![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-blue?style=flat&logo=python)](pyproject.toml) [![Security Scans](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml) [![Tests](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml) [![SSH Signed](https://img.shields.io/badge/Commits-SSH%20Signed-green?style=flat&logo=git)](CONTRIBUTING.md#13-ssh-commit-and-tag-signing-required) [![Compliance](https://img.shields.io/badge/Compliance-SOC2%20%7C%20NIST%20%7C%20ISO%2027001%20%7C%20EU%20CRA-blue?style=flat)](docs/compliance.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat)](LICENSE) [![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-blue?style=flat&logo=python)](pyproject.toml) [![Security Scans](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/security.yml) [![Tests](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml/badge.svg)](https://github.com/avnovikov/HotspotTriage/actions/workflows/tests.yml) [![SSH Signed](https://img.shields.io/badge/Commits-SSH%20Signed-green?style=flat&logo=git)](CONTRIBUTING.md#13-ssh-commit-and-tag-signing-required) [![Compliance](https://img.shields.io/badge/Compliance-SOC2%20%7C%20NIST%20%7C%20ISO%2027001%20%7C%20EU%20CRA-blue?style=flat)](docs/Compliance.md)
 
-> This codebase is built to be part of the regulated and audited system scope. See [Compliance](docs/compliance.md).
+> This codebase is built to be part of the regulated and audited system scope. See [Compliance](docs/Compliance.md).
 
 Find where Python code gets messy and constantly changing — then stream that signal to supercharge your coding agent.
 
@@ -188,6 +188,6 @@ Tips:
 | [CONTRIBUTING.md](CONTRIBUTING.md#13-ssh-commit-and-tag-signing-required) | SSH-signed commits and tags setup (one-time workstation config) |
 | [SUPPORT.md](SUPPORT.md) | Support policy, supported versions, EOL process (UK PSTI / EU CRA) |
 | [SECURITY.md](SECURITY.md) | Security policy, VDP, regulatory cross-reference mapping |
-| [docs/compliance.md](docs/compliance.md) | Full compliance posture: SOC2, NIST, ISO 27001, EU CRA, GDPR |
+| [docs/Compliance.md](docs/Compliance.md) | Full compliance posture: SOC2, NIST, ISO 27001, EU CRA, GDPR |
 
 Developing this repo: **`./scripts/install_hotspottriage.sh --venv`** (or **`uv sync`**); run **`uv lock`** after dependency changes in `pyproject.toml`. Run **`pytest`** (or `uv run pytest`) before merging; architecture notes live in [ARCHITECTRE.md](ARCHITECTRE.md) above.
