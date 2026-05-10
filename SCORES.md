@@ -163,11 +163,12 @@ This is often the strongest hotspot signal because it combines:
 
 These come from HotspotTriage's smell-detection pipeline in `src/hotspottriage/smell.py`.
 
-Current implementation combines three sources:
+Current implementation combines four sources:
 
 - selected **Pylint** rules (normalized into smell IDs)
 - **approximate heuristic smells** derived from Pylint signals
 - **comment-density/comment-block** smells from Radon raw + tokenization
+- **block-only synthetic smells** (currently `trivial_wrapper`) added after per-block churn and ratios exist
 
 Interpretation:
 
@@ -188,6 +189,7 @@ The following smell IDs are currently emitted and counted:
 - `data_class` (approximate)
 - `middle_man` (approximate)
 - `speculative_generality` (approximate)
+- `trivial_wrapper` (block pipeline only; synthetic)
 - `excessive_comments`
 - `large_comment_block`
 
@@ -218,6 +220,17 @@ These are intentionally marked approximate in findings:
 - `speculative_generality`:
   - triggered when both unused imports and unused variables hit configured minimum counts
   - threshold: `smell_speculative_generality_min_hits` (default 1)
+
+#### `trivial_wrapper` (block pipeline only)
+
+This is a **synthetic** smell (not a Pylint message) emitted only for **block** rows. It flags very small functions whose body is effectively a single delegation: after an optional docstring, the body is exactly one `return <call>(...)` (or `return await <call>(...)` on `async def`). It is skipped when the function has a `@property`, `@cached_property`, or `@overload` decorator (matched by decorator tail name).
+
+To avoid noise on stable one-liners, a **second signal** is required:
+
+- the block already has an `unused_parameters` finding from Pylint, **or**
+- `churn_per_sloc` for that block is at least `smell_trivial_wrapper_min_churn_per_sloc` (default `5.0`), using the same per-block `churn_per_sloc` as the rest of the pipeline (including `min_sloc_for_ratio` when configured).
+
+Additional gate: block `sloc` must not exceed `smell_trivial_wrapper_max_sloc` (default `4`). Severity uses `smell_rule_weights["trivial_wrapper"]` like other smell IDs.
 
 #### Comment smells
 
