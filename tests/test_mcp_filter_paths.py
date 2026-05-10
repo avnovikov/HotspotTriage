@@ -1,6 +1,6 @@
-"""Tests for :mod:`hotspottriage.mcp_filter_paths`."""
+"""Tests for :mod:`hotspottriage.mcp.filter_paths`."""
 
-from hotspottriage.mcp_filter_paths import (
+from hotspottriage.mcp.filter_paths import (
     effective_mcp_filter_patterns,
     is_literal_filter_path,
     normalize_filter_path,

@@ -1,4 +1,4 @@
-"""MCP tool error payloads and exception-to-code mapping for :mod:`hotspottriage.mcp_server`."""
+"""MCP tool error payloads and exception-to-code mapping (used by :mod:`hotspottriage.mcp_server`)."""
 from __future__ import annotations
 
 import json

@@ -1,8 +1,8 @@
-"""Tests for :mod:`hotspottriage.mcp_target`."""
+"""Tests for :mod:`hotspottriage.mcp.target`."""
 
 import pytest
 
-from hotspottriage.mcp_target import resolve_mcp_target
+from hotspottriage.mcp.target import resolve_mcp_target
 
 
 def test_resolve_mcp_target_explicit_wins():

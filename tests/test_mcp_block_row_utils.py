@@ -1,6 +1,6 @@
-"""Tests for :mod:`hotspottriage.mcp_block_row_utils`."""
+"""Tests for :mod:`hotspottriage.mcp.block_row_utils`."""
 
-from hotspottriage.mcp_block_row_utils import (
+from hotspottriage.mcp.block_row_utils import (
     block_metric_row_repo_file,
     is_block_row_for_delta,
     metric_triplet,

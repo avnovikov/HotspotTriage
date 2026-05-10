@@ -32,7 +32,7 @@ from hotspottriage.dashboard.server import DashboardServer
 from hotspottriage.dashboard.stats import StatsCollector
 from hotspottriage import discovery, filtering, explain as _explain, output as _output, stats
 from hotspottriage import revision_cache as _rev_cache
-from hotspottriage.mcp_block_row_utils import (
+from hotspottriage.mcp.block_row_utils import (
     block_metric_row_repo_file as _block_metric_row_repo_file,
     is_block_row_for_delta as _is_block_row_for_delta,
     metric_triplet as _metric_triplet,
@@ -40,17 +40,17 @@ from hotspottriage.mcp_block_row_utils import (
     normal_block_stat_count as _normal_block_stat_count,
     rows_equal_raw as _rows_equal_raw,
 )
-from hotspottriage.mcp_config_fingerprint import config_fingerprint as _config_fingerprint
-from hotspottriage.mcp_errors import mcp_classify_exception as _mcp_classify_exception
-from hotspottriage.mcp_errors import mcp_tool_error as _mcp_tool_error
-from hotspottriage.mcp_filter_paths import (
+from hotspottriage.mcp.config_fingerprint import config_fingerprint as _config_fingerprint
+from hotspottriage.mcp.errors import mcp_classify_exception as _mcp_classify_exception
+from hotspottriage.mcp.errors import mcp_tool_error as _mcp_tool_error
+from hotspottriage.mcp.filter_paths import (
     effective_mcp_filter_patterns as _effective_mcp_filter_patterns,
     is_literal_filter_path as _is_literal_filter_path,
     normalize_filter_path as _normalize_filter_path,
 )
-from hotspottriage.mcp_git import git_live_head_and_branch as _git_live_head_and_branch
-from hotspottriage.mcp_git import git_short_object_name as _git_short_object_name
-from hotspottriage.mcp_target import resolve_mcp_target as _resolve_mcp_target_impl
+from hotspottriage.mcp.git import git_live_head_and_branch as _git_live_head_and_branch
+from hotspottriage.mcp.git import git_short_object_name as _git_short_object_name
+from hotspottriage.mcp.target import resolve_mcp_target as _resolve_mcp_target_impl
 from hotspottriage.path_utils import resolve_local_repo_path
 from hotspottriage.username_privacy import UsernameRedactingFormatter
 

@@ -1,11 +1,11 @@
-"""Tests for :mod:`hotspottriage.mcp_errors`."""
+"""Tests for :mod:`hotspottriage.mcp.errors`."""
 
 import json
 import subprocess
 
 import pytest
 
-from hotspottriage.mcp_errors import mcp_classify_exception, mcp_tool_error
+from hotspottriage.mcp.errors import mcp_classify_exception, mcp_tool_error
 
 
 def test_mcp_tool_error_shape():

@@ -1,6 +1,6 @@
-"""Tests for :mod:`hotspottriage.mcp_config_fingerprint`."""
+"""Tests for :mod:`hotspottriage.mcp.config_fingerprint`."""
 
-from hotspottriage.mcp_config_fingerprint import config_fingerprint
+from hotspottriage.mcp.config_fingerprint import config_fingerprint
 
 
 def test_config_fingerprint_stable_and_order_independent() -> None:
