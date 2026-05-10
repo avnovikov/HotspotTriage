@@ -12,6 +12,7 @@ These behaviors are **enforced in tests**; keep them when changing MCP, `explain
 2. **Compact row shape.** With **`compact=true`**, each result row is only: **`file`**, **`function`**, **`score`**, **`risk_band`**, **`proposed_model`**, **`score_driver`**, **`rationale`**. There is **no** per-row **`score_explanation`**, **`score_narrative`**, or full metric dict in that mode.
 3. **Similarity default vs `filter`.** When **`similarity`** is omitted on MCP **`analyze`**, DeepCSIM is **off** if **`filter`** is set (scoped runs), **on** for whole-repo runs. Pass **`similarity=true`** explicitly for clone detection on a filtered path.
 4. **No `raw` in `score_explanation`.** Wherever **`score_explanation`** appears (MCP full **`analyze`**, CLI **`--blocks`** JSON/CSV, dashboard payloads, `Statistic` rebuilt from dicts), each explanation object must **not** include a **`raw`** field. Use **`normalized`** (and burdens / weights) only. Legacy cache or hand-built dicts that still carry **`raw`** are stripped when statistics are loaded from dicts (`sanitize_score_explanation_entries`).
+5. **`include_summary` default.** With **`include_summary=false`** (the default), MCP **`analyze`** must **not** include a **`summary`** key. With **`include_summary=true`**, **`summary`** aggregates use the **full** pre-**`limit`** block set so **`limit`** only trims **`results`**, not the overview.
 
 ## MCP `analyze` `filter` parameter (paths and globs)
 
@@ -25,6 +26,30 @@ Tokens are comma-separated, repo-relative POSIX paths. Matching depends on **wha
 | **Literal + glob** in one filter string | **AND** (not “file A or glob B”) — easy to get **empty** results | Prefer two `analyze` calls or a single inclusive glob |
 
 **Not the same as the CLI:** `hotspottriage … --filter` and `hotspottriage-cache --filter` always use **AND** glob mode (no literal-path OR shortcut). Only the MCP **`analyze`** tool applies `_build_repo_keep_predicate` in `mcp_server.py`, which implements the OR shortcut above.
+
+## MCP `analyze` response `metadata`
+
+Successful JSON includes a top-level **`metadata`** object for provenance and
+repeatability: **`git_head`** (short SHA), **`git_branch`** (current branch,
+**`detached`**, or **`snapshot`** when **`results`** are served only from the
+**`after_sha`** revision cache), **`analyzed_at`** (UTC, `Z` suffix),
+**`target`**, **`filter_applied`** (effective filter list after MCP OR/glob
+rules), **`row_count`** (non-aggregate block rows before the response
+**`limit`**), **`truncated`**, and **`config_fingerprint`** (SHA-256 digest of the
+merged config for the run). **`results`** and **`cache`** shapes are unchanged;
+**`head_sha`** and **`deltas`** remain optional sibling keys as in the section
+below.
+
+## MCP `analyze` optional `include_summary`
+
+When **`include_summary=true`**, the response adds a top-level **`summary`**
+object with **`block_count`**, **`high_risk_count`**, **`critical_risk_count`**,
+**`sum_cyclomatic`**, **`sum_sloc`**, **`max_cyclomatic`** and **`max_score`**
+(each ``{"path": "file.py::symbol", "value": …}``, or ``null`` when there are no
+blocks), and **`mean_score`**. Aggregates are computed from the **full**
+pre-**`limit`** block set so a small **`limit`** on **`results`** does not shrink
+the overview. Default **`include_summary=false`** omits **`summary`** so
+existing callers see no change.
 
 ## MCP `analyze` revision snapshots (`head_sha`, `before_sha`, `after_sha`)
 

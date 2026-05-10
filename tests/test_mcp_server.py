@@ -166,6 +166,7 @@ def test_analyze_basic(test_repo):
     result = mcp_server.analyze(str(test_repo), compact=False)
     data = json.loads(result)
 
+    assert "metadata" in data
     assert "results" in data and "cache" in data
     rows = data["results"]
     assert isinstance(rows, list)
@@ -709,6 +710,173 @@ def test_analyze_records_head_sha(test_repo: Path) -> None:
     assert len(data["head_sha"]) == 40
 
 
+def test_analyze_metadata_shape_and_git(test_repo: Path) -> None:
+    result = mcp_server.analyze(str(test_repo), similarity=False, compact=True)
+    data = json.loads(result)
+    assert "error" not in data
+    meta = data["metadata"]
+    want_short = subprocess.check_output(
+        ["git", "-C", str(test_repo), "rev-parse", "--short", "HEAD"],
+        text=True,
+    ).strip()
+    assert meta["git_head"] == want_short
+    assert isinstance(meta["git_branch"], str) and meta["git_branch"]
+    assert meta["target"] == str(test_repo.resolve())
+    assert isinstance(meta["filter_applied"], list)
+    assert "**/*.py" in meta["filter_applied"]
+    assert meta["row_count"] >= 1
+    assert meta["truncated"] is False
+    assert meta["config_fingerprint"].startswith("sha256:")
+    assert len(meta["config_fingerprint"]) == len("sha256:") + 64
+    assert meta["analyzed_at"].endswith("Z")
+
+
+def test_analyze_metadata_truncated_when_limit_excludes_rows(test_repo: Path) -> None:
+    result = mcp_server.analyze(
+        str(test_repo), limit=1, similarity=False, compact=True
+    )
+    data = json.loads(result)
+    meta = data["metadata"]
+    assert meta["truncated"] is True
+    assert meta["row_count"] > 1
+
+
+def test_analyze_metadata_config_fingerprint_stable(test_repo: Path) -> None:
+    a = json.loads(
+        mcp_server.analyze(
+            str(test_repo), similarity=False, compact=True, limit=5
+        )
+    )["metadata"]["config_fingerprint"]
+    b = json.loads(
+        mcp_server.analyze(
+            str(test_repo), similarity=False, compact=True, limit=5
+        )
+    )["metadata"]["config_fingerprint"]
+    assert a == b
+
+
+def test_analyze_metadata_literal_or_filter_no_default_glob(test_repo: Path) -> None:
+    result = mcp_server.analyze(
+        str(test_repo),
+        filter="example.py,helper.py",
+        similarity=False,
+        compact=True,
+    )
+    meta = json.loads(result)["metadata"]
+    assert set(meta["filter_applied"]) == {"example.py", "helper.py"}
+
+
+def test_analyze_include_summary_default_absent(test_repo: Path) -> None:
+    data = json.loads(
+        mcp_server.analyze(str(test_repo), similarity=False, compact=True)
+    )
+    assert "summary" not in data
+
+
+def test_analyze_include_summary_true_shape(test_repo: Path) -> None:
+    data = json.loads(
+        mcp_server.analyze(
+            str(test_repo),
+            similarity=False,
+            compact=True,
+            include_summary=True,
+        )
+    )
+    s = data["summary"]
+    for key in (
+        "block_count",
+        "high_risk_count",
+        "critical_risk_count",
+        "sum_cyclomatic",
+        "sum_sloc",
+        "max_cyclomatic",
+        "max_score",
+        "mean_score",
+    ):
+        assert key in s
+    assert s["block_count"] >= 1
+    assert isinstance(s["max_cyclomatic"], dict)
+    assert "path" in s["max_cyclomatic"] and "value" in s["max_cyclomatic"]
+    assert isinstance(s["max_score"], dict)
+    assert "path" in s["max_score"] and "value" in s["max_score"]
+    assert s["sum_cyclomatic"] >= int(s["max_cyclomatic"]["value"])
+    assert s["block_count"] == data["metadata"]["row_count"]
+
+
+def test_analyze_include_summary_ignores_response_limit(test_repo: Path) -> None:
+    """Summary must use the full pre-limit block set (issue #157)."""
+    full = json.loads(
+        mcp_server.analyze(
+            str(test_repo),
+            similarity=False,
+            compact=True,
+            include_summary=True,
+        )
+    )
+    limited = json.loads(
+        mcp_server.analyze(
+            str(test_repo),
+            similarity=False,
+            compact=True,
+            include_summary=True,
+            limit=1,
+        )
+    )
+    assert full["summary"] == limited["summary"]
+    assert len(limited["results"]) <= 1
+    assert limited["metadata"]["truncated"] is True
+
+
+def test_analyze_include_summary_risk_counts_and_sums_sane(test_repo: Path) -> None:
+    s = json.loads(
+        mcp_server.analyze(
+            str(test_repo), similarity=False, compact=True, include_summary=True
+        )
+    )["summary"]
+    assert s["high_risk_count"] + s["critical_risk_count"] <= s["block_count"]
+    assert s["sum_cyclomatic"] >= 0 and s["sum_sloc"] >= 0
+    assert 0.0 <= s["mean_score"] <= 1.0
+
+
+def test_analyze_include_summary_with_before_after_shas(rev_pair_repo: Path) -> None:
+    """Summary is included when using before_sha+after_sha cached-only diff mode."""
+    lines = subprocess.check_output(
+        ["git", "-C", str(rev_pair_repo), "rev-list", "--max-count=2", "--reverse", "HEAD"],
+        text=True,
+    ).splitlines()
+    sha_old, sha_new = lines[0], lines[1]
+    subprocess.run(
+        ["git", "-C", str(rev_pair_repo), "checkout", sha_old],
+        check=True,
+        capture_output=True,
+    )
+    mcp_server.analyze(str(rev_pair_repo), filter="a.py", similarity=False, compact=False)
+    subprocess.run(
+        ["git", "-C", str(rev_pair_repo), "checkout", sha_new],
+        check=True,
+        capture_output=True,
+    )
+    mcp_server.analyze(str(rev_pair_repo), filter="a.py", similarity=False, compact=False)
+    r = mcp_server.analyze(
+        str(rev_pair_repo),
+        before_sha=sha_old,
+        after_sha=sha_new,
+        filter="a.py",
+        similarity=False,
+        compact=True,
+        include_summary=True,
+    )
+    data = json.loads(r)
+    assert "error" not in data
+    assert "summary" in data
+    s = data["summary"]
+    assert s["block_count"] >= 1
+    assert "high_risk_count" in s
+    assert "critical_risk_count" in s
+    assert "mean_score" in s
+    assert 0.0 <= s["mean_score"] <= 1.0
+
+
 def test_analyze_before_sha_includes_deltas(rev_pair_repo: Path) -> None:
     lines = subprocess.check_output(
         ["git", "-C", str(rev_pair_repo), "rev-list", "--max-count=2", "--reverse", "HEAD"],
@@ -781,6 +949,12 @@ def test_analyze_before_and_after_cache_only(rev_pair_repo: Path) -> None:
     assert "error" not in d3
     assert "deltas" in d3
     assert d3["head_sha"] == sha_new
+    want_short = subprocess.check_output(
+        ["git", "-C", str(rev_pair_repo), "rev-parse", "--short", sha_new],
+        text=True,
+    ).strip()
+    assert d3["metadata"]["git_branch"] == "snapshot"
+    assert d3["metadata"]["git_head"] == want_short
 
 
 def test_analyze_after_sha_requires_before(rev_pair_repo: Path) -> None:
