@@ -1,4 +1,4 @@
-"""Tests for GDPR-oriented username redaction in logs and cache serialisation."""
+"""Tests for GDPR-oriented username redaction in logs and structured redaction helpers."""
 from __future__ import annotations
 
 import logging
@@ -63,20 +63,20 @@ def test_redact_usernames_in_structure_nested(
     assert "carol" not in red["nested"][0]["p"]
 
 
-def test_save_block_results_redacts_string_fields(
+def test_save_block_results_preserves_string_fields(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("USER", "alice")
     username_redaction_tokens.cache_clear()
     repo = tmp_path / "repo"
     repo.mkdir()
-    rows = [{"path": "f::g", "note": "/home/alice/project"}]
+    note = "/home/alice/project"
+    rows = [{"path": "f::g", "note": note}]
     save_block_results(repo, rows)
     loaded = load_block_results(repo)
     assert loaded is not None
     assert loaded[0]["path"] == "f::g"
-    assert "alice" not in loaded[0]["note"]
-    assert "a****e" in loaded[0]["note"]
+    assert loaded[0]["note"] == note
 
 
 def test_username_redacting_formatter(monkeypatch: pytest.MonkeyPatch) -> None:

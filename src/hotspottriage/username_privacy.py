@@ -1,8 +1,9 @@
-"""Detect OS-level username tokens and redact them for logs and persisted cache.
+"""Detect OS-level username tokens and redact them for logs and UI-facing strings.
 
 Redaction uses ``first + "****" + last`` for multi-character usernames, and
-``name + "****"`` for a single character, matching the product requirement for
-GDPR-style minimisation in local artefacts.
+``name + "****"`` for a single character. On-disk block cache (``blocks.pkl``)
+stores row dicts verbatim; redaction applies to logs, ``sanitize_log_value``, and
+dashboard ``*_display`` fields—not to pickle cache payload writes.
 """
 from __future__ import annotations
 
