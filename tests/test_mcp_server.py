@@ -32,7 +32,8 @@ def test_mcp_analyze_filtered_defaults_similarity_off(monkeypatch, test_repo):
     _orig = mcp_server.stats.build_block_stats
 
     def _spy(repo, files, score_metrics, *a, **kw):
-        captured["similarity_enabled"] = kw.get("similarity_enabled")
+        sim = kw.get("similarity")
+        captured["similarity_enabled"] = sim.enabled if sim is not None else None
         return _orig(repo, files, score_metrics, *a, **kw)
 
     monkeypatch.setattr(mcp_server.stats, "build_block_stats", _spy)
@@ -45,7 +46,8 @@ def test_mcp_analyze_unfiltered_defaults_similarity_on(monkeypatch, test_repo):
     _orig = mcp_server.stats.build_block_stats
 
     def _spy(repo, files, score_metrics, *a, **kw):
-        captured["similarity_enabled"] = kw.get("similarity_enabled")
+        sim = kw.get("similarity")
+        captured["similarity_enabled"] = sim.enabled if sim is not None else None
         return _orig(repo, files, score_metrics, *a, **kw)
 
     monkeypatch.setattr(mcp_server.stats, "build_block_stats", _spy)
@@ -58,7 +60,8 @@ def test_mcp_analyze_filtered_explicit_similarity_true(monkeypatch, test_repo):
     _orig = mcp_server.stats.build_block_stats
 
     def _spy(repo, files, score_metrics, *a, **kw):
-        captured["similarity_enabled"] = kw.get("similarity_enabled")
+        sim = kw.get("similarity")
+        captured["similarity_enabled"] = sim.enabled if sim is not None else None
         return _orig(repo, files, score_metrics, *a, **kw)
 
     monkeypatch.setattr(mcp_server.stats, "build_block_stats", _spy)

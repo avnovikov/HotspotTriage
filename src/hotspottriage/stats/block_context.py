@@ -18,3 +18,4 @@ class BlockAnalysisContext:
     timestamps: dict[str, int]
     current_time: int
     merged_config: dict[str, Any]
+    decay_half_life: int | None = None

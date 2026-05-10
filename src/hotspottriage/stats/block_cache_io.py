@@ -7,6 +7,8 @@ from typing import Any
 from hotspottriage import cache as _cache
 from hotspottriage.statistic_row import Statistic
 
+from hotspottriage.stats.block_options import BlockPersistPayload
+
 DERIVED_BLOCK_CACHE_KEYS = frozenset(
     {
         "score",
@@ -47,28 +49,21 @@ def raw_block_cache_row(
     return row
 
 
-def persist_block_cache(
-    out: list[Statistic],
-    row_cache_meta: list[dict[str, str | int]],
-    files: list[str],
-    repo: Path,
-    cache_manager: _cache.BlockCacheManager | None,
-    prev_rows_list: list[dict[str, Any]],
-) -> None:
+def persist_block_cache(payload: BlockPersistPayload) -> None:
     """Persist results with cache metadata for next run's churn lookup."""
     cache_rows: list[dict[str, Any]] = []
-    for stat, meta in zip(out, row_cache_meta):
+    for stat, meta in zip(payload.out, payload.row_cache_meta):
         cache_rows.append(raw_block_cache_row(stat, meta))
 
-    if not files:
+    if not payload.files:
         return
 
-    targeted_files = set(files)
-    if cache_manager is not None:
-        cache_manager.put_rows(cache_rows, targeted_files=targeted_files)
+    targeted_files = set(payload.files)
+    if payload.cache_manager is not None:
+        payload.cache_manager.put_rows(cache_rows, targeted_files=targeted_files)
     else:
         preserved: list[dict[str, Any]] = []
-        for row in prev_rows_list:
+        for row in payload.prev_rows_list:
             if not isinstance(row, dict):
                 continue
             path = str(row.get("path", ""))
@@ -77,4 +72,4 @@ def persist_block_cache(
             rel, _ = path.split("::", 1)
             if rel not in targeted_files:
                 preserved.append(row)
-        _cache.save_block_results(repo, [*preserved, *cache_rows])
+        _cache.save_block_results(payload.repo, [*preserved, *cache_rows])

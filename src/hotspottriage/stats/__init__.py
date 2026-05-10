@@ -18,6 +18,12 @@ from __future__ import annotations
 
 from hotspottriage.statistic_row import Statistic
 
+from hotspottriage.stats.block_options import (
+    BlockChurnWindow,
+    BlockSimilarityConfig,
+    BlockStatsRuntime,
+    FileStatsRun,
+)
 from hotspottriage.stats.block_orchestration import build_block_stats
 from hotspottriage.stats.directory_aggregate import aggregate_by_directory
 from hotspottriage.stats.file_stats import build_stats
@@ -37,6 +43,10 @@ __all__ = [
     "_decayed_value",
     "_ratio",
     "aggregate_by_directory",
+    "BlockChurnWindow",
+    "BlockSimilarityConfig",
+    "BlockStatsRuntime",
+    "FileStatsRun",
     "block_similarity_kwargs_from_config",
     "build_block_stats",
     "build_stats",

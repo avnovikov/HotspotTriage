@@ -289,14 +289,18 @@ def main(argv: list[str] | None = None) -> int:
                     repo,
                     files,
                     score_metrics,
-                    since=cfg["since"],
-                    until=cfg["until"],
-                    workers=cfg["block_workers"],
-                    decay_half_life=decay_half_life,
-                    smell_weight=smell_weight,
-                    progress_callback=progress_cb,
-                    merged_config=cfg,
-                    **stats.block_similarity_kwargs_from_config(cfg),
+                    churn=stats.BlockChurnWindow(
+                        since=cfg["since"],
+                        until=cfg["until"],
+                        workers=cfg["block_workers"],
+                        decay_half_life=decay_half_life,
+                    ),
+                    runtime=stats.BlockStatsRuntime(
+                        smell_weight=smell_weight,
+                        progress_callback=progress_cb,
+                        merged_config=cfg,
+                    ),
+                    similarity=stats.BlockSimilarityConfig.from_config(cfg),
                 )
 
             if show_progress:

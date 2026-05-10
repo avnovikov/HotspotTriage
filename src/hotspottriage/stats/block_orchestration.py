@@ -2,13 +2,11 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Iterable
 
 from hotspottriage import block_churn as _block_churn
 from hotspottriage import block_similarity as _block_similarity
-from hotspottriage import cache as _cache
 from hotspottriage.statistic_row import Statistic
 
 from hotspottriage.stats.block_assembly import assemble_block_metrics
@@ -16,6 +14,14 @@ from hotspottriage.stats.block_build import build_block_statistics_rows
 from hotspottriage.stats.block_cache_io import load_previous_cache, persist_block_cache
 from hotspottriage.stats.block_churn_pass import compute_block_churns
 from hotspottriage.stats.block_context import BlockAnalysisContext
+from hotspottriage.stats.block_options import (
+    BlockAssemblyInputs,
+    BlockChurnWindow,
+    BlockPersistPayload,
+    BlockSimilarityConfig,
+    BlockStatsRuntime,
+    ChurnComputeSpec,
+)
 from hotspottriage.stats.block_scan import scan_files_for_blocks
 from hotspottriage.stats.risk_application import apply_risk_scores
 from hotspottriage.stats.similarity_row import similarity_aggregate_statistic
@@ -28,22 +34,10 @@ def build_block_stats(
     repo: Path,
     files: Iterable[str],
     score_metrics: Iterable[str],
-    since: str | None = None,
-    until: str | None = None,
-    workers: int | None = None,
-    decay_half_life: int | None = None,
-    smell_weight: float = 0.0,
-    progress_callback: Callable[[str, int, int], None] | None = None,
-    merged_config: dict[str, Any] | None = None,
     *,
-    cache_manager: _cache.BlockCacheManager | None = None,
-    similarity_enabled: bool = True,
-    similarity_threshold: float = 80.0,
-    similarity_band_high: float = 85.0,
-    similarity_band_medium: float = 70.0,
-    similarity_band_low: float = 50.0,
-    similarity_max_pairwise_blocks: int = 2500,
-    similarity_aggregate_row: bool = True,
+    churn: BlockChurnWindow | None = None,
+    runtime: BlockStatsRuntime | None = None,
+    similarity: BlockSimilarityConfig | None = None,
 ) -> list[Statistic]:
     """One Statistic per function/method (no class rows).
 
@@ -53,11 +47,15 @@ def build_block_stats(
     from hotspottriage import churn as _churn
     from datetime import datetime
 
+    c = churn or BlockChurnWindow()
+    rt = runtime or BlockStatsRuntime()
+    sim = similarity or BlockSimilarityConfig()
+
     sm = list(score_metrics)
     files_list = list(files)
-    cfg = merged_config if merged_config is not None else {}
+    cfg = rt.merged_config if rt.merged_config is not None else {}
 
-    previous_rows, prev_rows_list = load_previous_cache(repo, cache_manager)
+    previous_rows, prev_rows_list = load_previous_cache(repo, rt.cache_manager)
     ctx = BlockAnalysisContext(
         repo=repo,
         files=files_list,
@@ -67,42 +65,61 @@ def build_block_stats(
         timestamps=_churn.get_file_timestamps(repo, files_list),
         current_time=int(datetime.now().timestamp()),
         merged_config=cfg,
+        decay_half_life=c.decay_half_life,
     )
 
     file_metrics, file_blocks, file_sources, file_smells, requests = scan_files_for_blocks(
-        ctx, progress_callback
+        ctx, rt.progress_callback
     )
-    churns = compute_block_churns(ctx, requests, since, until, workers, progress_callback)
-    rows, row_cache_meta = assemble_block_metrics(
-        ctx, file_metrics, file_blocks, file_sources, file_smells, churns, decay_half_life
+    churns = compute_block_churns(
+        ctx,
+        requests,
+        ChurnComputeSpec(
+            since=c.since,
+            until=c.until,
+            workers=c.workers,
+            progress_callback=rt.progress_callback,
+        ),
     )
+    assembly = BlockAssemblyInputs(
+        file_metrics=file_metrics,
+        file_blocks=file_blocks,
+        file_sources=file_sources,
+        file_smells=file_smells,
+        churns=churns,
+    )
+    rows, row_cache_meta = assemble_block_metrics(ctx, assembly)
 
     finalize_smell_burden([m for _, _, m in rows])
 
     sim_agg = _block_similarity.attach_similarity_to_rows(
         rows,
         file_sources,
-        similarity_enabled=similarity_enabled,
-        similarity_threshold=similarity_threshold,
-        similarity_band_high=similarity_band_high,
-        similarity_band_medium=similarity_band_medium,
-        similarity_band_low=similarity_band_low,
-        similarity_max_pairwise_blocks=similarity_max_pairwise_blocks,
+        **sim.attach_similarity_kwargs(),
     )
 
-    out = build_block_statistics_rows(rows, sm, smell_weight, progress_callback)
-    apply_risk_scores(out, cfg, similarity_enabled)
+    out = build_block_statistics_rows(rows, sm, rt.smell_weight, rt.progress_callback)
+    apply_risk_scores(out, cfg, sim.enabled)
 
     if (
-        similarity_enabled
-        and similarity_aggregate_row
+        sim.enabled
+        and sim.aggregate_row
         and sim_agg is not None
         and int(sim_agg.get("blocks_total") or 0) > 0
     ):
         out.append(similarity_aggregate_statistic(sim_agg))
 
     try:
-        persist_block_cache(out, row_cache_meta, files_list, repo, cache_manager, prev_rows_list)
+        persist_block_cache(
+            BlockPersistPayload(
+                out=out,
+                row_cache_meta=row_cache_meta,
+                files=files_list,
+                repo=repo,
+                cache_manager=rt.cache_manager,
+                prev_rows_list=prev_rows_list,
+            )
+        )
     except Exception:
         logger.debug("Persisting block cache after analysis skipped", exc_info=True)
 
