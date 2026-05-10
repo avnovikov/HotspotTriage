@@ -406,6 +406,55 @@ def _parse_csv(raw: str | list[str]) -> list[str]:
     return [s for s in (p.strip() for p in str(raw).split(",")) if s]
 
 
+def _cli_bool_override_sets_true(out: dict[str, Any], cfg_key: str, val: Any) -> bool:
+    """store_true semantics: True writes True; False leaves config unchanged."""
+    if not isinstance(val, bool):
+        return False
+    if val:
+        out[cfg_key] = True
+    return True
+
+
+def _cli_special_mapped_override(out: dict[str, Any], cfg_key: str, val: Any) -> bool:
+    """CSV/list parsing for keys that do not take raw CLI values."""
+    if cfg_key == "score_metrics":
+        out[cfg_key] = _parse_csv(val)
+        return True
+    if cfg_key == "filter":
+        csv_val = _parse_csv(val)
+        if csv_val:
+            out[cfg_key] = csv_val
+        return True
+    return False
+
+
+def _apply_mapped_cli_overrides(out: dict[str, Any], args: argparse.Namespace) -> None:
+    for cli_key, cfg_key in _CLI_TO_CONFIG.items():
+        if not hasattr(args, cli_key):
+            continue
+        val = getattr(args, cli_key)
+        if val is None:
+            continue
+        if _cli_bool_override_sets_true(out, cfg_key, val):
+            continue
+        if _cli_special_mapped_override(out, cfg_key, val):
+            continue
+        out[cfg_key] = val
+
+
+def _apply_no_respect_gitignore_override(out: dict[str, Any], args: argparse.Namespace) -> None:
+    if getattr(args, "no_respect_gitignore", None):
+        out["respect_gitignore"] = False
+
+
+def _apply_ignore_dir_override(out: dict[str, Any], args: argparse.Namespace) -> None:
+    extra_dirs = getattr(args, "ignore_dir", None)
+    if extra_dirs:
+        merged_dirs = list(out.get("ignore_directories") or [])
+        merged_dirs.extend(extra_dirs)
+        out["ignore_directories"] = merged_dirs
+
+
 def apply_cli_overrides(
     config: dict[str, Any], args: argparse.Namespace
 ) -> dict[str, Any]:
@@ -419,36 +468,9 @@ def apply_cli_overrides(
     which matches every other "store_true" tool's semantics.
     """
     out = deepcopy(config)
-    for cli_key, cfg_key in _CLI_TO_CONFIG.items():
-        if not hasattr(args, cli_key):
-            continue
-        val = getattr(args, cli_key)
-        if val is None:
-            continue
-        if isinstance(val, bool):
-            if val:
-                out[cfg_key] = True
-            continue
-        if cfg_key == "score_metrics":
-            out[cfg_key] = _parse_csv(val)
-            continue
-        if cfg_key == "filter":
-            csv_val = _parse_csv(val)
-            if csv_val:
-                out[cfg_key] = csv_val
-            continue
-        out[cfg_key] = val
-
-    # Flags handled outside the generic _CLI_TO_CONFIG loop.
-    if getattr(args, "no_respect_gitignore", None):
-        out["respect_gitignore"] = False
-
-    extra_dirs = getattr(args, "ignore_dir", None)
-    if extra_dirs:
-        merged_dirs = list(out.get("ignore_directories") or [])
-        merged_dirs.extend(extra_dirs)
-        out["ignore_directories"] = merged_dirs
-
+    _apply_mapped_cli_overrides(out, args)
+    _apply_no_respect_gitignore_override(out, args)
+    _apply_ignore_dir_override(out, args)
     return out
 
 
@@ -659,25 +681,37 @@ def _validate_similarity_metric_vs_granularity(
         )
 
 
-def _validate_similarity_settings(config: dict[str, Any]) -> None:
+def _validate_similarity_enabled_flag(config: dict[str, Any]) -> None:
     sim_en = config.get("similarity_enabled")
     if not isinstance(sim_en, bool):
         raise ValueError(
             f"similarity_enabled must be a boolean; got {type(sim_en).__name__}: {sim_en!r}"
         )
+
+
+def _validate_similarity_threshold_value(config: dict[str, Any]) -> None:
     st = config.get("similarity_threshold")
     if not isinstance(st, (int, float)) or not (0 < st <= 100):
         raise ValueError(
             f"similarity_threshold must be between 0 and 100 (exclusive 0); got {st!r}"
         )
-    for key in (
-        "similarity_band_high",
-        "similarity_band_medium",
-        "similarity_band_low",
-    ):
+
+
+_SIMILARITY_BAND_KEYS = (
+    "similarity_band_high",
+    "similarity_band_medium",
+    "similarity_band_low",
+)
+
+
+def _validate_similarity_band_bounds(config: dict[str, Any]) -> None:
+    for key in _SIMILARITY_BAND_KEYS:
         v = config.get(key)
         if not isinstance(v, (int, float)) or not (0 < v <= 100):
             raise ValueError(f"{key} must be a number in (0, 100]; got {v!r}")
+
+
+def _validate_similarity_band_ordering(config: dict[str, Any]) -> None:
     bh = float(config["similarity_band_high"])
     bm = float(config["similarity_band_medium"])
     bl = float(config["similarity_band_low"])
@@ -685,16 +719,31 @@ def _validate_similarity_settings(config: dict[str, Any]) -> None:
         raise ValueError(
             "similarity_band_high >= similarity_band_medium >= similarity_band_low is required"
         )
+
+
+def _validate_similarity_max_pairwise_blocks_value(config: dict[str, Any]) -> None:
     smb = config.get("similarity_max_pairwise_blocks")
     if not isinstance(smb, int) or smb < 2:
         raise ValueError(
             f"similarity_max_pairwise_blocks must be an int >= 2; got {smb!r}"
         )
+
+
+def _validate_similarity_aggregate_row_flag(config: dict[str, Any]) -> None:
     sar = config.get("similarity_aggregate_row")
     if not isinstance(sar, bool):
         raise ValueError(
             f"similarity_aggregate_row must be a boolean; got {type(sar).__name__}: {sar!r}"
         )
+
+
+def _validate_similarity_settings(config: dict[str, Any]) -> None:
+    _validate_similarity_enabled_flag(config)
+    _validate_similarity_threshold_value(config)
+    _validate_similarity_band_bounds(config)
+    _validate_similarity_band_ordering(config)
+    _validate_similarity_max_pairwise_blocks_value(config)
+    _validate_similarity_aggregate_row_flag(config)
 
 
 def validate(config: dict[str, Any]) -> None:
@@ -751,40 +800,69 @@ def _validate_proposed_models(config: dict[str, Any]) -> None:
             )
 
 
-def _validate_dashboard_section(config: dict[str, Any]) -> None:
+def _dashboard_section_mapping(config: dict[str, Any]) -> dict[str, Any]:
     d = config.get("dashboard")
     if not isinstance(d, dict):
         raise ValueError(
             f"dashboard must be a dict; got {type(d).__name__}: {d!r}"
         )
+    return d
+
+
+def _validate_dashboard_enabled(d: dict[str, Any]) -> None:
     if not isinstance(d.get("enabled"), bool):
         raise ValueError(
             "dashboard.enabled must be a boolean "
             f"(got {type(d.get('enabled')).__name__}: {d.get('enabled')!r})"
         )
+
+
+def _validate_dashboard_host(d: dict[str, Any]) -> None:
     host = d.get("host")
     if not isinstance(host, str) or not host.strip():
         raise ValueError(f"dashboard.host must be a non-empty string; got {host!r}")
+
+
+def _validate_dashboard_base_port(d: dict[str, Any]) -> None:
     bp = d.get("base_port")
     if not isinstance(bp, int) or not (1 <= bp <= 65535):
         raise ValueError(
             f"dashboard.base_port must be an int in [1, 65535]; got {bp!r}"
         )
+
+
+def _validate_dashboard_open_on_start(d: dict[str, Any]) -> None:
     if not isinstance(d.get("open_on_start"), bool):
         raise ValueError(
             "dashboard.open_on_start must be a boolean "
             f"(got {type(d.get('open_on_start')).__name__}: {d.get('open_on_start')!r})"
         )
+
+
+def _validate_dashboard_max_log_records(d: dict[str, Any]) -> None:
     ml = d.get("max_log_records")
     if not isinstance(ml, int) or ml < 1:
         raise ValueError(
             f"dashboard.max_log_records must be a positive int; got {ml!r}"
         )
+
+
+def _validate_dashboard_default_target(d: dict[str, Any]) -> None:
     dt = d.get("default_target")
     if not isinstance(dt, str):
         raise ValueError(
             f"dashboard.default_target must be a string; got {type(dt).__name__}: {dt!r}"
         )
+
+
+def _validate_dashboard_section(config: dict[str, Any]) -> None:
+    d = _dashboard_section_mapping(config)
+    _validate_dashboard_enabled(d)
+    _validate_dashboard_host(d)
+    _validate_dashboard_base_port(d)
+    _validate_dashboard_open_on_start(d)
+    _validate_dashboard_max_log_records(d)
+    _validate_dashboard_default_target(d)
 
 
 def apply_mcp_dashboard_cli_overrides(
