@@ -68,16 +68,45 @@ def display_headers(merged_config: dict[str, Any] | None) -> tuple[str, ...]:
     return HEADERS + normalization_suffix_headers(merged_config)
 
 
+def proposed_model_for_band(
+    score_band: str, merged_config: dict[str, Any] | None
+) -> str:
+    """Config ``proposed_models`` entry for ``score_band`` (MCP / CLI JSON parity)."""
+    if not merged_config:
+        return ""
+    proposed = merged_config.get("proposed_models")
+    if not isinstance(proposed, dict):
+        return ""
+    key = str(score_band).strip().lower()
+    model = proposed.get(key)
+    return model if isinstance(model, str) else ""
+
+
+def score_narrative_text(
+    s: Statistic, merged_config: dict[str, Any] | None
+) -> str:
+    """Multi-line score narrative; uses ``proposed_models`` like MCP full rows."""
+    if not s.score_subscores:
+        return ""
+    pm = proposed_model_for_band(str(s.score_band), merged_config)
+    rec: str | None = pm if pm else None
+    return _explain.explain_score(
+        s, recommended_action=rec, final_weights=s.score_final_weights
+    )
+
+
 def statistic_to_output_dict(
     s: Statistic, merged_config: dict[str, Any] | None
 ) -> dict[str, Any]:
     """``Statistic`` as dict, optionally augmented with ``norm_*`` fields."""
     row: dict[str, Any] = s.as_dict()
-    row["score_narrative"] = (
-        _explain.explain_score(s, final_weights=s.score_final_weights)
+    row["proposed_model"] = proposed_model_for_band(str(s.score_band), merged_config)
+    row["rationale"] = (
+        _explain.compact_agent_rationale(s, final_weights=s.score_final_weights)
         if s.score_subscores
         else ""
     )
+    row["score_narrative"] = score_narrative_text(s, merged_config)
     mn = _metric_normalization(merged_config)
     if not mn:
         return row
@@ -108,9 +137,7 @@ def _row_tuple(s: Statistic, merged_config: dict[str, Any] | None) -> tuple[Any,
         json.dumps(s.score_subscores, sort_keys=True),
         s.score_driver,
         json.dumps(s.score_explanation),
-        _explain.explain_score(s, final_weights=s.score_final_weights)
-        if s.score_subscores
-        else "",
+        score_narrative_text(s, merged_config),
     )
     if not _metric_normalization(merged_config):
         return base
@@ -168,9 +195,7 @@ def render_csv(stats: Iterable[Statistic], merged_config: dict[str, Any] | None 
             json.dumps(s.score_subscores, sort_keys=True),
             s.score_driver,
             json.dumps(s.score_explanation),
-            _explain.explain_score(s, final_weights=s.score_final_weights)
-        if s.score_subscores
-        else "",
+            score_narrative_text(s, merged_config),
         )
         if not mn:
             w.writerow(base)

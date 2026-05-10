@@ -388,11 +388,7 @@ def _format_block_analysis_payload(
     else:
         results_list = []
         for row in results:
-            output_row = _output.statistic_to_output_dict(row, cfg)
-            output_row["proposed_model"] = _proposed_model_for_band(
-                str(row.score_band), cfg
-            )
-            results_list.append(output_row)
+            results_list.append(_output.statistic_to_output_dict(row, cfg))
 
     row_count = _normal_block_stat_count(results_full)
     truncated = _normal_block_stat_count(results) < row_count
@@ -1136,17 +1132,7 @@ def _initialize_repository(
         )
         mgr.flush()
 
-        # Return cache info from manager (live, not stale disk)
-        cache_dir = _cache.cache_path_for(repo)
-        cache_file = cache_dir / _cache._CACHE_FILE
-        cache_size = cache_file.stat().st_size if cache_file.exists() else 0
-        entries = mgr.entry_count
-
-        return {
-            "cache_file": str(cache_file),
-            "entries": entries,
-            "size_bytes": cache_size,
-        }
+        return _cache.block_cache_stats(repo)
 
 
 def _mcp_compact_score_rows(
@@ -1167,7 +1153,9 @@ def _mcp_compact_score_rows(
                 "function": fn,
                 "score": float(r.score),
                 "risk_band": score_band,
-                "proposed_model": _proposed_model_for_band(score_band, merged_config),
+                "proposed_model": _output.proposed_model_for_band(
+                    score_band, merged_config
+                ),
                 "score_driver": r.score_driver,
                 "rationale": _explain.compact_agent_rationale(
                     r, final_weights=r.score_final_weights
@@ -1175,14 +1163,6 @@ def _mcp_compact_score_rows(
             }
         )
     return out
-
-
-def _proposed_model_for_band(score_band: str, merged_config: dict[str, Any]) -> str:
-    proposed = merged_config.get("proposed_models")
-    if not isinstance(proposed, dict):
-        return ""
-    model = proposed.get(score_band)
-    return model if isinstance(model, str) else ""
 
 
 def _publish_block_metrics_to_dashboard(
