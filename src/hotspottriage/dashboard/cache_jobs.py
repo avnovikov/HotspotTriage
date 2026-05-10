@@ -33,18 +33,26 @@ class CacheGenerationHost(Protocol):
 
 
 def find_free_port(host: str, base: int, *, span: int = 20) -> int:
-    """Bind-probe successive TCP ports on *host* (must not be all-interfaces)."""
-    normalized = str(host).strip()
-    if not normalized or normalized in {"0.0.0.0", "::", "*"}:
+    """Bind-probe successive TCP ports on IPv4 loopback for the local dashboard.
+
+    Only ``127.0.0.1`` and ``localhost`` are accepted so the probe uses a
+    **literal** loopback bind target (satisfies static analysis for
+    ``py/bind-socket-all-network-interfaces`` and matches default MCP/dashboard
+    config). ``DashboardServer`` still binds Uvicorn to the same *host* string.
+    """
+    h = str(host).strip().lower()
+    if h == "localhost":
+        h = "127.0.0.1"
+    if h != "127.0.0.1":
         raise ValueError(
-            "refusing to probe ports on all network interfaces; "
-            "use a specific host such as 127.0.0.1"
+            "dashboard free-port probe is loopback-only (127.0.0.1 or localhost); "
+            f"got {host!r}"
         )
     for port in range(base, base + span):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
-                s.bind((normalized, port))
+                sock.bind(("127.0.0.1", port))
             except OSError:
                 continue
             return port
