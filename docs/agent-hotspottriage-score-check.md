@@ -12,6 +12,19 @@ These behaviors are **enforced in tests**; keep them when changing MCP, `explain
 2. **Compact row shape.** With **`compact=true`**, each result row is only: **`function`**, **`score`**, **`risk_band`**, **`proposed_model`**, **`score_driver`**, **`rationale`**. There is **no** per-row **`score_explanation`**, **`score_narrative`**, or full metric dict in that mode.
 3. **No `raw` in `score_explanation`.** Wherever **`score_explanation`** appears (MCP full **`analyze`**, CLI **`--blocks`** JSON/CSV, dashboard payloads, `Statistic` rebuilt from dicts), each explanation object must **not** include a **`raw`** field. Use **`normalized`** (and burdens / weights) only. Legacy cache or hand-built dicts that still carry **`raw`** are stripped when statistics are loaded from dicts (`sanitize_score_explanation_entries`).
 
+## MCP `analyze` `filter` parameter (paths and globs)
+
+Tokens are comma-separated, repo-relative POSIX paths. Matching depends on **what** you pass:
+
+| Situation | Semantics | Example |
+|-----------|------------|---------|
+| **Two or more tokens**, each a **literal path** (no `* ? [ ] { }`) | **OR** — file kept if it equals **any** token | `src/a.py,src/b.py` |
+| **One token** (literal or glob) | **AND** glob mode (with default filter) | `src/hotspottriage/stats.py` |
+| **Any glob** in any token, or **mixed** literal + glob | **AND** across all tokens | `src/**,!**/test_*` |
+| **Literal + glob** in one filter string | **AND** (not “file A or glob B”) — easy to get **empty** results | Prefer two `analyze` calls or a single inclusive glob |
+
+**Not the same as the CLI:** `hotspottriage … --filter` and `hotspottriage-cache --filter` always use **AND** glob mode (no literal-path OR shortcut). Only the MCP **`analyze`** tool applies `_build_repo_keep_predicate` in `mcp_server.py`, which implements the OR shortcut above.
+
 ## Workflow
 
 1. Identify the exact function or method you plan to modify.

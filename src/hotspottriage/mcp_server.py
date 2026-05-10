@@ -347,11 +347,23 @@ def analyze(
     Args:
         target: Path to a local git repo or remote git URL. Empty uses ``--default-target``
             from ``hotspottriage start-mcp-server`` if set.
-        filter: Comma-separated filters, matched against repo-relative POSIX paths.
-            Globs use AND semantics ('!' negates). Example: ``*dashboard/*.py``
-            only matches root-level ``<name>dashboard/<file>.py`` paths, while
-            ``**/dashboard/*.py`` matches dashboard directories at any depth.
-            Multiple literal file paths are treated as an include list.
+        filter: Comma-separated tokens, matched against repo-relative POSIX paths
+            (forward slashes; no leading ``./``). Behaviour depends on the tokens:
+
+            **Literal path list (OR):** When there are **two or more** tokens and **every**
+            token is a concrete path (no ``* ? [ ] { }`` glob characters), a file is kept
+            if it equals **any** token after normalisation — OR semantics.
+
+            **Glob mode (AND):** Otherwise (a single token, any token contains glob
+            characters, or a mix of literals and globs), tokens use gitignore-style
+            matching and a file must satisfy **all** patterns (``!`` negates one
+            pattern). The implicit ``default_filter`` is appended unless disabled in
+            config. Example: ``**/dashboard/*.py`` matches dashboard dirs at any depth;
+            ``src/**,!**/test_*`` includes ``src`` but excludes ``test_*`` paths.
+
+            **CLI / cache-generator note:** The ``hotspottriage`` CLI and
+            ``generate_cache`` always use glob AND mode; the OR shortcut exists only
+            for this MCP ``analyze`` path (``_build_repo_keep_predicate``).
         score_metrics: Comma-separated metrics for scoring (default: churn_per_sloc,cyclomatic)
         limit: Maximum number of block rows returned
         sort: 'score' (default) or 'file'
@@ -502,7 +514,9 @@ def generate_cache(
 
     Args:
         target: Path to a local git repo. Empty uses ``--default-target`` if set.
-        filter: Comma-separated glob patterns
+        filter: Comma-separated gitignore-style patterns (AND with each other and the
+            default filter; ``!`` negates). No MCP literal-path OR shortcut — same as
+            the ``hotspottriage-cache`` CLI.
         score_metrics: Metrics to compute score from (default: churn_per_sloc,cyclomatic)
 
     Returns:
