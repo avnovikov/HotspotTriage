@@ -288,6 +288,40 @@ def _ns(**kwargs) -> argparse.Namespace:
     return argparse.Namespace(**base)
 
 
+def test_apply_cli_overrides_since_until():
+    """CLI since/until should be passed through to config."""
+    cfg = dict(_config.DEFAULTS)
+    out = _config.apply_cli_overrides(
+        cfg,
+        _ns(since="2024-01-01", until="2024-12-31"),
+    )
+    assert out["since"] == "2024-01-01"
+    assert out["until"] == "2024-12-31"
+
+
+def test_apply_cli_overrides_no_default_filter_true():
+    """--no-default-filter should set no_default_filter to True."""
+    cfg = dict(_config.DEFAULTS)
+    out = _config.apply_cli_overrides(cfg, _ns(no_default_filter=True))
+    assert out["no_default_filter"] is True
+
+
+def test_apply_cli_overrides_no_default_filter_false():
+    """When no_default_filter is False (not passed), config should not change."""
+    cfg = {**_config.DEFAULTS, "no_default_filter": True}
+    out = _config.apply_cli_overrides(cfg, _ns(no_default_filter=False))
+    # False means "not passed" for store_true flags, so config should retain its value
+    assert out["no_default_filter"] is True
+
+
+def test_apply_cli_overrides_empty_since_until():
+    """Empty since/until strings should still override (be passed through)."""
+    cfg = {**_config.DEFAULTS, "since": "2023-01-01", "until": "2023-12-31"}
+    out = _config.apply_cli_overrides(cfg, _ns(since="", until=""))
+    assert out["since"] == ""
+    assert out["until"] == ""
+
+
 def test_apply_cli_overrides_skips_none_sentinels():
     cfg = dict(_config.DEFAULTS)
     out = _config.apply_cli_overrides(cfg, _ns())
@@ -354,6 +388,81 @@ def test_validate_rejects_dashboard_default_target_non_string():
         _config.validate(cfg)
 
 
+def test_validate_rejects_dashboard_enabled_non_bool():
+    cfg = {
+        **_config.DEFAULTS,
+        "dashboard": {**_config.DEFAULTS["dashboard"], "enabled": "yes"},
+    }
+    with pytest.raises(ValueError, match="dashboard.enabled must be a boolean"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_dashboard_base_port_too_low():
+    cfg = {
+        **_config.DEFAULTS,
+        "dashboard": {**_config.DEFAULTS["dashboard"], "base_port": 0},
+    }
+    with pytest.raises(ValueError, match="dashboard.base_port must be an int in"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_dashboard_base_port_too_high():
+    cfg = {
+        **_config.DEFAULTS,
+        "dashboard": {**_config.DEFAULTS["dashboard"], "base_port": 70000},
+    }
+    with pytest.raises(ValueError, match="dashboard.base_port must be an int in"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_dashboard_open_on_start_non_bool():
+    cfg = {
+        **_config.DEFAULTS,
+        "dashboard": {**_config.DEFAULTS["dashboard"], "open_on_start": 1},
+    }
+    with pytest.raises(ValueError, match="dashboard.open_on_start must be a boolean"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_dashboard_max_log_records_zero():
+    cfg = {
+        **_config.DEFAULTS,
+        "dashboard": {**_config.DEFAULTS["dashboard"], "max_log_records": 0},
+    }
+    with pytest.raises(ValueError, match="dashboard.max_log_records must be a positive int"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_dashboard_not_a_dict():
+    cfg = {**_config.DEFAULTS, "dashboard": "enabled"}
+    with pytest.raises(ValueError, match="dashboard must be a dict"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_proposed_models_not_a_dict():
+    cfg = {**_config.DEFAULTS, "proposed_models": "Auto"}
+    with pytest.raises(ValueError, match="proposed_models must be a dict"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_proposed_models_missing_band():
+    cfg = {
+        **_config.DEFAULTS,
+        "proposed_models": {"low": "Auto", "medium": "Auto", "high": "Auto"},
+    }
+    with pytest.raises(ValueError, match="proposed_models missing required key 'critical'"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_proposed_models_band_non_string():
+    cfg = {
+        **_config.DEFAULTS,
+        "proposed_models": {**_config.DEFAULTS["proposed_models"], "low": 123},
+    }
+    with pytest.raises(ValueError, match="proposed_models\\['low'\\] must be a string"):
+        _config.validate(cfg)
+
+
 def test_to_dashboard_snapshot_shape():
     snap = _config.to_dashboard_snapshot(dict(_config.DEFAULTS), project_path="/tmp/r")
     assert snap["version"]
@@ -409,12 +518,99 @@ def test_validate_allows_similarity_enabled_with_file_granularity():
     _config.validate(cfg)
 
 
+def test_validate_rejects_similarity_enabled_non_bool():
+    cfg = {**_config.DEFAULTS, "similarity_enabled": "true"}
+    with pytest.raises(ValueError, match="similarity_enabled must be a boolean"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_similarity_threshold_out_of_range():
+    cfg = {**_config.DEFAULTS, "similarity_threshold": 0}
+    with pytest.raises(ValueError, match="similarity_threshold must be between 0 and 100"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_similarity_threshold_above_100():
+    cfg = {**_config.DEFAULTS, "similarity_threshold": 101}
+    with pytest.raises(ValueError, match="similarity_threshold must be between 0 and 100"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_similarity_band_high_out_of_range():
+    cfg = {**_config.DEFAULTS, "similarity_band_high": 0}
+    with pytest.raises(ValueError, match="similarity_band_high must be a number in"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_similarity_band_ordering():
+    """Band thresholds must satisfy high >= medium >= low."""
+    cfg = {
+        **_config.DEFAULTS,
+        "similarity_band_high": 70.0,
+        "similarity_band_medium": 80.0,
+        "similarity_band_low": 50.0,
+    }
+    with pytest.raises(ValueError, match="similarity_band_high >= similarity_band_medium"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_similarity_max_pairwise_blocks_too_low():
+    cfg = {**_config.DEFAULTS, "similarity_max_pairwise_blocks": 1}
+    with pytest.raises(ValueError, match="similarity_max_pairwise_blocks must be an int >= 2"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_similarity_aggregate_row_non_bool():
+    cfg = {**_config.DEFAULTS, "similarity_aggregate_row": "yes"}
+    with pytest.raises(ValueError, match="similarity_aggregate_row must be a boolean"):
+        _config.validate(cfg)
+
+
 def test_validate_rejects_smell_rule_weight_out_of_range():
     cfg = {
         **_config.DEFAULTS,
         "smell_rule_weights": {**_config.DEFAULTS["smell_rule_weights"], "x": 1.5},
     }
     with pytest.raises(ValueError, match="smell_rule_weights"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_smell_category_weights_not_a_dict():
+    cfg = {**_config.DEFAULTS, "smell_category_weights": [0.5, 0.5]}
+    with pytest.raises(ValueError, match="smell_category_weights must be a non-empty dict"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_smell_category_weights_empty():
+    cfg = {**_config.DEFAULTS, "smell_category_weights": {}}
+    with pytest.raises(ValueError, match="smell_category_weights must be a non-empty dict"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_smell_category_weights_invalid_key():
+    cfg = {
+        **_config.DEFAULTS,
+        "smell_category_weights": {**_config.DEFAULTS["smell_category_weights"], "X": 0.5},
+    }
+    with pytest.raises(ValueError, match="smell_category_weights keys must be a single letter in"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_smell_category_weights_non_numeric():
+    cfg = {
+        **_config.DEFAULTS,
+        "smell_category_weights": {**_config.DEFAULTS["smell_category_weights"], "E": "high"},
+    }
+    with pytest.raises(ValueError, match="smell_category_weights\\['E'\\] must be a number in"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_smell_category_weights_out_of_range():
+    cfg = {
+        **_config.DEFAULTS,
+        "smell_category_weights": {**_config.DEFAULTS["smell_category_weights"], "W": 1.5},
+    }
+    with pytest.raises(ValueError, match="smell_category_weights\\['W'\\] must be a number in"):
         _config.validate(cfg)
 
 
