@@ -2,11 +2,14 @@
 
 from hotspottriage.mcp.block_row_utils import (
     block_metric_row_repo_file,
+    block_statistic_file_segment,
     is_block_row_for_delta,
+    is_synthetic_block_statistic,
     metric_triplet,
     non_synthetic_block_rows,
     normal_block_stat_count,
     rows_equal_raw,
+    synthetic_block_row_dicts,
 )
 from hotspottriage.stats import Statistic
 
@@ -66,5 +69,21 @@ def test_non_synthetic_and_normal_count() -> None:
     assert normal_block_stat_count(rows) == 1
 
 
-def test_block_metric_row_repo_file() -> None:
-    assert block_metric_row_repo_file(r"a\b.py::foo") == "a/b.py"
+def test_synthetic_block_row_dicts() -> None:
+    syn = _stat("__agg__::x", score=9.0)
+    real = _stat("a.py::f")
+    out = synthetic_block_row_dicts([syn, real])
+    assert len(out) == 1
+    assert out[0]["path"] == "__agg__::x"
+
+
+def test_block_statistic_file_segment() -> None:
+    assert block_statistic_file_segment(_stat("dir/f.py::fn")) == "dir/f.py"
+    assert block_statistic_file_segment(_stat("g.py")) == "g.py"
+
+
+def test_is_synthetic_block_statistic() -> None:
+    assert is_synthetic_block_statistic(_stat("__x__::agg")) is True
+    assert is_synthetic_block_statistic(_stat("a.py::f")) is False
+
+

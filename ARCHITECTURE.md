@@ -237,7 +237,7 @@ that does not need FastMCP lives in the **`hotspottriage.mcp`** package
 | `mcp/target.py` | `resolve_mcp_target` — non-empty `target` or `--default-target`, else `ValueError` |
 | `mcp/git.py` | `git_short_object_name`, `git_live_head_and_branch` — short SHAs and branch labels for MCP `analyze` **metadata** |
 | `mcp/filter_paths.py` | Literal multi-file OR vs glob AND semantics for `filter` tokens (`is_literal_filter_path`, `normalize_filter_path`, `effective_mcp_filter_patterns`) |
-| `mcp/block_row_utils.py` | Block-row helpers for revision deltas, `include_summary`, and dashboard metric keys (`is_block_row_for_delta`, `metric_triplet`, `rows_equal_raw`, `normal_block_stat_count`, `non_synthetic_block_rows`, `block_metric_row_repo_file`) |
+| `mcp/block_row_utils.py` | Block-row helpers for revision deltas, `include_summary`, and dashboard metric keys (`is_block_row_for_delta`, `metric_triplet`, `rows_equal_raw`, `normal_block_stat_count`, `non_synthetic_block_rows`, `block_statistic_file_segment`, `is_synthetic_block_statistic`, `synthetic_block_row_dicts`, `block_metric_row_repo_file`) |
 | `mcp/config_fingerprint.py` | `config_fingerprint` — stable `sha256:` digest of merged analyze config for **metadata** |
 | `mcp/repo_filter.py` | `build_repo_keep_predicate` — MCP multi-file literal OR vs glob AND, then `filtering.make_tracked_path_predicate` |
 | `mcp/analyze_config.py` | `build_analyze_config`, `effective_similarity_enabled_for_mcp_analyze` — merge tool args into analyze cfg (local repos use `load_analyze_config_for_local_repo`) |
@@ -247,7 +247,8 @@ that does not need FastMCP lives in the **`hotspottriage.mcp`** package
 | `mcp/cache_warmup.py` | `initialize_repository_cache` — warm ``blocks.pkl`` via injected ``get_cache_manager`` |
 | `mcp/analyze_pipeline.py` | `analyze_repository` — file- or block-level pipeline (same as CLI), with injected cache manager |
 | `mcp/analyze_args.py` | `AnalyzeInputs` dataclass + `resolve_analyze_inputs` — validate/normalize MCP `analyze` tool arguments (SHA constraints, target resolution, config build) |
-| `mcp/analyze_orchestration.py` | `run_snapshot_compare`, `run_live_analysis` — high-level analyze paths (snapshot-only compare vs live analysis + optional delta) |
+| `mcp/analyze_metadata.py` | `build_analyze_metadata` — MCP analyze ``metadata`` (git labels, timestamps, filter list, row counts, ``config_fingerprint``) |
+| `mcp/block_result_serialization.py` | `block_analysis_results_as_dicts` — compact vs full JSON rows for limited block results |
 
 `mcp_server` imports these with private aliases (`_mcp_tool_error`, `_resolve_mcp_target`, …) so existing tool code and tests keep a single module object to patch.
 

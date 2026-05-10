@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 import json
 import logging
 import sys
@@ -27,25 +26,20 @@ from hotspottriage import config as _config
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.server import DashboardServer
 from hotspottriage.dashboard.stats import StatsCollector
-from hotspottriage import discovery, output as _output, stats
+from hotspottriage import discovery, stats
 from hotspottriage import revision_cache as _rev_cache
 from hotspottriage.mcp.analyze_args import resolve_analyze_inputs
+from hotspottriage.mcp.analyze_metadata import build_analyze_metadata
 from hotspottriage.mcp.analyze_orchestration import run_live_analysis, run_snapshot_compare
 from hotspottriage.mcp.analyze_summary import build_mcp_analyze_summary
+from hotspottriage.mcp.block_result_serialization import block_analysis_results_as_dicts
 from hotspottriage.mcp.block_row_utils import (
     block_metric_row_repo_file as _block_metric_row_repo_file,
-    normal_block_stat_count as _normal_block_stat_count,
+    synthetic_block_row_dicts as _synthetic_block_row_dicts,
 )
 from hotspottriage.mcp.cache_warmup import initialize_repository_cache
-from hotspottriage.mcp.compact_score_rows import compact_score_rows
-from hotspottriage.mcp.config_fingerprint import config_fingerprint as _config_fingerprint
 from hotspottriage.mcp.errors import mcp_classify_exception as _mcp_classify_exception
 from hotspottriage.mcp.errors import mcp_tool_error as _mcp_tool_error
-from hotspottriage.mcp.filter_paths import (
-    effective_mcp_filter_patterns as _effective_mcp_filter_patterns,
-)
-from hotspottriage.mcp.git import git_live_head_and_branch as _git_live_head_and_branch
-from hotspottriage.mcp.git import git_short_object_name as _git_short_object_name
 from hotspottriage.mcp.repo_filter import build_repo_keep_predicate as _build_repo_keep_predicate
 from hotspottriage.mcp.target import resolve_mcp_target as _resolve_mcp_target_impl
 from hotspottriage.path_utils import resolve_local_repo_path
@@ -245,46 +239,23 @@ def _format_block_analysis_payload(
         get_cache_manager=_get_cache_manager,
         progress_callback=progress_callback,
     )
-    synthetic_block_rows = [
-        r.as_dict()
-        for r in results_full
-        if str(r.path).split("::", 1)[0].startswith("__")
-    ]
     _publish_manager_rows_to_dashboard(
-        analysis_root, cfg, synthetic_block_rows=synthetic_block_rows
+        analysis_root,
+        cfg,
+        synthetic_block_rows=_synthetic_block_row_dicts(results_full),
     )
 
-    if compact:
-        results_list = compact_score_rows(
-            results, granularity="block", merged_config=cfg
-        )
-    else:
-        results_list = []
-        for row in results:
-            results_list.append(_output.statistic_to_output_dict(row, cfg))
-
-    row_count = _normal_block_stat_count(results_full)
-    truncated = _normal_block_stat_count(results) < row_count
-    analyzed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    git_head: str | None = None
-    git_branch: str | None = None
-    if git_repo is not None and snapshot_commit_full:
-        git_head = _git_short_object_name(git_repo, snapshot_commit_full)
-        git_branch = "snapshot"
-    elif git_repo is not None:
-        git_head, git_branch = _git_live_head_and_branch(git_repo)
-
-    metadata: dict[str, Any] = {
-        "git_head": git_head,
-        "git_branch": git_branch,
-        "analyzed_at": analyzed_at,
-        "target": analysis_root,
-        "filter_applied": _effective_mcp_filter_patterns(cfg),
-        "row_count": row_count,
-        "truncated": truncated,
-        "config_fingerprint": _config_fingerprint(cfg),
-    }
+    results_list = block_analysis_results_as_dicts(
+        results, compact=compact, merged_config=cfg
+    )
+    metadata = build_analyze_metadata(
+        cfg,
+        analysis_root,
+        results_full,
+        results,
+        git_repo=git_repo,
+        snapshot_commit_full=snapshot_commit_full,
+    )
 
     out: dict[str, Any] = {
         "metadata": metadata,
