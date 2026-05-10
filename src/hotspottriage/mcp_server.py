@@ -30,7 +30,7 @@ from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.server import DashboardServer
 from hotspottriage.dashboard.stats import StatsCollector
 from hotspottriage import discovery, filtering, explain as _explain, output as _output, stats
-from hotspottriage import git_rev_worktree as _git_rev_wt
+from hotspottriage import revision_cache as _rev_cache
 from hotspottriage.path_utils import resolve_local_repo_path
 from hotspottriage.username_privacy import UsernameRedactingFormatter
 
@@ -113,6 +113,22 @@ def _resolve_mcp_target(target: str) -> str:
         "MCP tool requires a non-empty target (local git repo path or remote URL), "
         "or start the server with --default-target PATH_OR_URL"
     )
+
+
+def _effective_similarity_enabled_for_mcp_analyze(
+    similarity: bool | None,
+    filter: str | None,
+) -> bool:
+    """Resolve DeepCSIM default for MCP ``analyze``: off when *filter* is set.
+
+    Omitted ``similarity`` (``None``) uses ``False`` for non-empty *filter*
+    (scoped agent triage) and ``True`` for whole-repo runs. An explicit
+    ``True``/``False`` always wins.
+    """
+    if similarity is not None:
+        return bool(similarity)
+    ft = filter.strip() if isinstance(filter, str) else ""
+    return False if ft else True
 
 
 def _effective_dashboard_config() -> dict[str, Any]:
@@ -341,6 +357,7 @@ def _format_block_analysis_payload(
     compact: bool,
     progress_callback: Callable[[str, int, int], None] | None,
     deltas: dict[str, Any] | None = None,
+    head_sha: str | None = None,
 ) -> dict[str, Any]:
     """Publish + limit + cache + optional compact rows (shared MCP analyze path)."""
     _publish_block_metrics_to_dashboard(analysis_root, results_full, cfg)
@@ -373,6 +390,8 @@ def _format_block_analysis_payload(
     out: dict[str, Any] = {"results": results_list, "cache": cache_info}
     if deltas is not None:
         out["deltas"] = deltas
+    if head_sha is not None:
+        out["head_sha"] = head_sha
     return out
 
 
@@ -386,45 +405,45 @@ def run_cached_block_analysis_dict(
     until: str | None = None,
     respect_gitignore: bool = True,
     ignore_dir: str | None = None,
-    similarity: bool = True,
+    similarity: bool | None = None,
     compact: bool = True,
     sort: str = "score",
     progress_callback: Callable[[str, int, int], None] | None = None,
     config_overrides: dict[str, Any] | None = None,
-    rev: str | None = None,
-    baseline_rev: str | None = None,
+    before_sha: str | None = None,
+    after_sha: str | None = None,
 ) -> dict[str, Any]:
     """Block-level analysis + cache warm-up; returns ``results`` / ``cache`` dict (not JSON).
 
     Optional ``progress_callback(label, done, total)`` mirrors
     :func:`hotspottriage.stats.build_block_stats` progress events.
 
-    ``rev`` runs analysis on a **detached worktree** at that revision (local repos
-    only). ``baseline_rev`` compares **HEAD** at ``target`` to that revision and adds
-    a ``deltas`` object; it cannot be combined with ``rev``.
+    Local repositories record a **revision snapshot** on each successful analyze
+    (``revisions.pkl``).  ``before_sha`` / ``after_sha`` compare cached snapshots
+    only — HotspotTriage never checks out another revision.
     """
-    if rev and baseline_rev:
-        raise ValueError("cannot combine rev and baseline_rev")
-    rev_t = rev.strip() if isinstance(rev, str) else ""
-    baseline_t = (
-        baseline_rev.strip() if isinstance(baseline_rev, str) else ""
-    )
-    rev = rev_t or None
-    baseline_rev = baseline_t or None
+    after_t = after_sha.strip() if isinstance(after_sha, str) else ""
+    before_t = before_sha.strip() if isinstance(before_sha, str) else ""
+    after_sha = after_t or None
+    before_sha = before_t or None
 
-    if rev and discovery.is_git_url(target):
-        raise ValueError("rev requires a local git repository path, not a remote URL")
-    if baseline_rev and discovery.is_git_url(target):
+    if after_sha and not before_sha:
+        raise ValueError("after_sha requires before_sha")
+
+    if (before_sha or after_sha) and discovery.is_git_url(target):
         raise ValueError(
-            "baseline_rev requires a local git repository path, not a remote URL"
+            "before_sha and after_sha require a local git repository path, "
+            "not a remote URL"
         )
 
     if discovery.is_git_url(target):
         config_target = target.strip()
         analysis_root = config_target
+        local_repo: Path | None = None
     else:
         config_target = str(resolve_local_repo_path(target))
         analysis_root = config_target
+        local_repo = Path(config_target)
 
     cfg = _build_analyze_config(
         config_target,
@@ -440,48 +459,29 @@ def run_cached_block_analysis_dict(
         ignore_dir=ignore_dir,
         config_overrides=config_overrides,
     )
-    cfg["similarity_enabled"] = similarity
+    cfg["similarity_enabled"] = _effective_similarity_enabled_for_mcp_analyze(
+        similarity, filter
+    )
 
-    if baseline_rev:
-        head_full = _analyze_repository(
-            analysis_root,
-            cfg,
-            apply_limit=False,
-            progress_callback=progress_callback,
-        )
-        with _git_rev_wt.detached_worktree(Path(config_target), baseline_rev) as wt:
-            base_full = _analyze_repository(
-                str(wt),
-                cfg,
-                apply_limit=False,
-                progress_callback=progress_callback,
-            )
-        deltas = _build_block_delta_report(head_full, base_full)
+    if before_sha and after_sha:
+        assert local_repo is not None
+        mgr = _rev_cache.RevisionCacheManager(local_repo)
+        try:
+            after_rows = mgr.get_snapshot_statistics(after_sha)
+            before_rows = mgr.get_snapshot_statistics(before_sha)
+        except _rev_cache.SnapshotNotFoundError as e:
+            raise ValueError(str(e)) from e
+        deltas = _build_block_delta_report(after_rows, before_rows)
+        after_resolved = _rev_cache.resolve_commit_sha(local_repo, after_sha)
         return _format_block_analysis_payload(
-            analysis_root,
+            str(local_repo),
             cfg,
-            head_full,
+            after_rows,
             compact=compact,
             progress_callback=progress_callback,
             deltas=deltas,
+            head_sha=after_resolved,
         )
-
-    if rev:
-        with _git_rev_wt.detached_worktree(Path(config_target), rev) as wt:
-            results_full = _analyze_repository(
-                str(wt),
-                cfg,
-                apply_limit=False,
-                progress_callback=progress_callback,
-            )
-            return _format_block_analysis_payload(
-                str(wt),
-                cfg,
-                results_full,
-                compact=compact,
-                progress_callback=progress_callback,
-                deltas=None,
-            )
 
     results_full = _analyze_repository(
         analysis_root,
@@ -489,13 +489,30 @@ def run_cached_block_analysis_dict(
         apply_limit=False,
         progress_callback=progress_callback,
     )
+    head_sha_val: str | None = None
+    if local_repo is not None:
+        head_sha_val = _rev_cache.RevisionCacheManager(local_repo).record_snapshot(
+            results_full
+        )
+
+    deltas: dict[str, Any] | None = None
+    if before_sha:
+        assert local_repo is not None
+        mgr = _rev_cache.RevisionCacheManager(local_repo)
+        try:
+            before_rows = mgr.get_snapshot_statistics(before_sha)
+        except _rev_cache.SnapshotNotFoundError as e:
+            raise ValueError(str(e)) from e
+        deltas = _build_block_delta_report(results_full, before_rows)
+
     return _format_block_analysis_payload(
         analysis_root,
         cfg,
         results_full,
         compact=compact,
         progress_callback=progress_callback,
-        deltas=None,
+        deltas=deltas,
+        head_sha=head_sha_val,
     )
 
 
@@ -509,11 +526,11 @@ def _run_analyze_cached(
     until: str | None = None,
     respect_gitignore: bool = True,
     ignore_dir: str | None = None,
-    similarity: bool = True,
+    similarity: bool | None = None,
     compact: bool = True,
     sort: str = "score",
-    rev: str | None = None,
-    baseline_rev: str | None = None,
+    before_sha: str | None = None,
+    after_sha: str | None = None,
 ) -> str:
     """Block-level analysis with disk cache warm-up; returns JSON ``{results, cache}``."""
     try:
@@ -529,8 +546,8 @@ def _run_analyze_cached(
             similarity=similarity,
             compact=compact,
             sort=sort,
-            rev=rev,
-            baseline_rev=baseline_rev,
+            before_sha=before_sha,
+            after_sha=after_sha,
         )
         return json.dumps(response, indent=2)
 
@@ -550,16 +567,18 @@ def analyze(
     until: str | None = None,
     respect_gitignore: bool = True,
     ignore_dir: str | None = None,
-    similarity: bool = True,
+    similarity: bool | None = None,
     compact: bool = True,
-    rev: str | None = None,
-    baseline_rev: str | None = None,
+    before_sha: str | None = None,
+    after_sha: str | None = None,
 ) -> str:
     """Analyze a repository: block-level metrics, disk cache, and dashboard publish.
 
     Always runs the cache-backed block pipeline. Returns JSON
-    ``{"results": [...], "cache": {...}}`` and, when ``baseline_rev`` is set,
-    a ``deltas`` object comparing HEAD to that revision.
+    ``{"results": [...], "cache": {...}}``, optional ``head_sha`` (commit recorded
+    for revision snapshots on local repos), and optional ``deltas`` when
+    ``before_sha`` is set (or when both ``before_sha`` and ``after_sha`` select
+    cached snapshots only).
     By default each result row is compact (function, score, bands, model, and
     narrative fields); set ``compact`` to false for full metric dicts.
 
@@ -590,24 +609,28 @@ def analyze(
         until: Git --until date filter
         respect_gitignore: Apply .gitignore rules (default: true)
         ignore_dir: Comma-separated directory prefixes to skip
-        similarity: DeepCSIM similarity per block (default: true)
+        similarity: DeepCSIM similarity per block. When omitted: ``False`` if
+            ``filter`` is set (fast scoped triage), ``True`` for whole-repo runs.
+            Pass ``True`` or ``False`` explicitly to override.
         compact: When true (default), each row includes ``file``, ``function``,
             ``score``, ``risk_band``, ``proposed_model``, ``score_driver``, and
             ``rationale`` (short natural-language summary for agents). Use
             ``compact=false`` for full metrics, ``score_explanation``, and
             multi-line ``score_narrative``.
-        rev: Optional git revision (branch, tag, SHA, ``HEAD~1``, …) to analyze **at**
-            that commit via a temporary detached worktree. Local repositories only;
-            cannot be combined with ``baseline_rev``. Project config is read from
-            ``target`` while metrics are computed from the worktree checkout.
-        baseline_rev: Optional revision to diff **against** the current ``target``
-            checkout (HEAD). Adds ``deltas`` with raw metric triplets per block; local
-            repositories only. Composite ``score`` values are snapshots from each run
-            and are not comparable across revisions. Incompatible with ``rev``.
+        before_sha: Optional commit (SHA, branch, ``HEAD~1``, …) to diff **against**.
+            Must already have been recorded by a prior ``analyze`` at that checkout
+            (use the returned ``head_sha``). With **only** ``before_sha``: runs live
+            analysis at the current ``target`` HEAD, records that snapshot, and adds
+            ``deltas`` vs the cached ``before_sha`` snapshot. Local repos only.
+        after_sha: Optional second commit; requires ``before_sha``. When both are set,
+            returns cached results for ``after_sha`` plus ``deltas`` vs ``before_sha``
+            **without** running a new analysis (both snapshots must exist). Cannot be
+            used without ``before_sha``.
 
     Returns:
-        JSON object with ``results`` and ``cache`` keys, optional ``deltas`` when
-        ``baseline_rev`` is set, or ``{"error": ...}``
+        JSON object with ``results`` and ``cache`` keys, optional ``head_sha`` for
+        local targets, optional ``deltas`` when ``before_sha`` is set, or
+        ``{"error": ...}``
     """
     try:
         resolved = _resolve_mcp_target(target)
@@ -625,8 +648,8 @@ def analyze(
         similarity=similarity,
         compact=compact,
         sort=sort,
-        rev=rev,
-        baseline_rev=baseline_rev,
+        before_sha=before_sha,
+        after_sha=after_sha,
     )
 
 
@@ -685,7 +708,10 @@ def cache_status(target: str = "") -> str:
 
 @mcp.tool()
 def clear_cache(target: str = "") -> str:
-    """Clear the block-level cache for a repository.
+    """Clear the block-level cache and revision snapshot store for a repository.
+
+    Removes ``blocks.pkl`` and ``revisions.pkl`` under
+    ``<repo>/.hotspottriage/cache/`` when present.
 
     Args:
         target: Path to a local git repo. Empty uses ``--default-target`` if set.
@@ -712,6 +738,10 @@ def clear_cache(target: str = "") -> str:
         cache_file = cache_dir / _cache._CACHE_FILE
         if cache_file.exists():
             cache_file.unlink()
+
+        rev_file = _rev_cache.revisions_cache_path(repo_path)
+        if rev_file.exists():
+            rev_file.unlink()
 
         # Remove directory if empty
         try:

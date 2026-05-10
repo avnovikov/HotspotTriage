@@ -10,7 +10,8 @@ These behaviors are **enforced in tests**; keep them when changing MCP, `explain
 
 1. **Compact-first triage.** Default MCP **`analyze`** uses **`compact=true`**. Agents should call **`analyze`** that way first, then **`compact=false`** only when compact rows are insufficient (full **`path`**, all scalar metrics, **`score_subscores`**, **`score_explanation`**, **`score_narrative`**, optional **`norm_*`**).
 2. **Compact row shape.** With **`compact=true`**, each result row is only: **`file`**, **`function`**, **`score`**, **`risk_band`**, **`proposed_model`**, **`score_driver`**, **`rationale`**. There is **no** per-row **`score_explanation`**, **`score_narrative`**, or full metric dict in that mode.
-3. **No `raw` in `score_explanation`.** Wherever **`score_explanation`** appears (MCP full **`analyze`**, CLI **`--blocks`** JSON/CSV, dashboard payloads, `Statistic` rebuilt from dicts), each explanation object must **not** include a **`raw`** field. Use **`normalized`** (and burdens / weights) only. Legacy cache or hand-built dicts that still carry **`raw`** are stripped when statistics are loaded from dicts (`sanitize_score_explanation_entries`).
+3. **Similarity default vs `filter`.** When **`similarity`** is omitted on MCP **`analyze`**, DeepCSIM is **off** if **`filter`** is set (scoped runs), **on** for whole-repo runs. Pass **`similarity=true`** explicitly for clone detection on a filtered path.
+4. **No `raw` in `score_explanation`.** Wherever **`score_explanation`** appears (MCP full **`analyze`**, CLI **`--blocks`** JSON/CSV, dashboard payloads, `Statistic` rebuilt from dicts), each explanation object must **not** include a **`raw`** field. Use **`normalized`** (and burdens / weights) only. Legacy cache or hand-built dicts that still carry **`raw`** are stripped when statistics are loaded from dicts (`sanitize_score_explanation_entries`).
 
 ## MCP `analyze` `filter` parameter (paths and globs)
 
@@ -24,6 +25,26 @@ Tokens are comma-separated, repo-relative POSIX paths. Matching depends on **wha
 | **Literal + glob** in one filter string | **AND** (not “file A or glob B”) — easy to get **empty** results | Prefer two `analyze` calls or a single inclusive glob |
 
 **Not the same as the CLI:** `hotspottriage … --filter` and `hotspottriage-cache --filter` always use **AND** glob mode (no literal-path OR shortcut). Only the MCP **`analyze`** tool applies `_build_repo_keep_predicate` in `mcp_server.py`, which implements the OR shortcut above.
+
+## MCP `analyze` revision snapshots (`head_sha`, `before_sha`, `after_sha`)
+
+On a **local** `target`, each successful **`analyze`** records a snapshot under
+`<repo>/.hotspottriage/cache/revisions.pkl` and returns **`head_sha`** (the
+recorded commit). To diff two commits **without** HotspotTriage checking out
+another revision:
+
+1. Run **`analyze`** at the older checkout → save **`head_sha`** as `H1`.
+2. Run **`analyze`** at the newer checkout → save **`head_sha`** as `H2`.
+3. Call **`analyze(target, before_sha=H1, after_sha=H2, …)`** with the same
+   filter/options as needed → **`results`** reflect `H2`, **`deltas`** compare
+   `H2` vs `H1`, **`head_sha`** is `H2`.
+
+Alternatively, **`analyze(target, before_sha=H1, …)`** (only `before_sha`)
+runs a **live** analysis at the current `HEAD`, records it, and adds **`deltas`**
+vs the cached `H1` snapshot.
+
+If a SHA was never recorded at that repo path, the tool returns an error
+mentioning **no cached snapshot** (run **`analyze`** at that commit first).
 
 ## Workflow
 

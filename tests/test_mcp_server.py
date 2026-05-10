@@ -12,6 +12,58 @@ import hotspottriage.mcp_server as mcp_server
 from hotspottriage import config as _config
 
 
+def test_effective_similarity_helper_explicit_and_defaults() -> None:
+    fn = mcp_server._effective_similarity_enabled_for_mcp_analyze
+    assert fn(True, "a.py") is True
+    assert fn(False, None) is False
+    assert fn(None, None) is True
+    assert fn(None, "") is True
+    assert fn(None, "   ") is True
+    assert fn(None, "x.py") is False
+    assert fn(None, "**/*.py") is False
+
+
+def test_mcp_analyze_filtered_defaults_similarity_off(monkeypatch, test_repo):
+    captured: dict[str, bool | None] = {}
+    _orig = mcp_server.stats.build_block_stats
+
+    def _spy(repo, files, score_metrics, *a, **kw):
+        captured["similarity_enabled"] = kw.get("similarity_enabled")
+        return _orig(repo, files, score_metrics, *a, **kw)
+
+    monkeypatch.setattr(mcp_server.stats, "build_block_stats", _spy)
+    mcp_server.analyze(str(test_repo), filter="example.py", compact=True)
+    assert captured["similarity_enabled"] is False
+
+
+def test_mcp_analyze_unfiltered_defaults_similarity_on(monkeypatch, test_repo):
+    captured: dict[str, bool | None] = {}
+    _orig = mcp_server.stats.build_block_stats
+
+    def _spy(repo, files, score_metrics, *a, **kw):
+        captured["similarity_enabled"] = kw.get("similarity_enabled")
+        return _orig(repo, files, score_metrics, *a, **kw)
+
+    monkeypatch.setattr(mcp_server.stats, "build_block_stats", _spy)
+    mcp_server.analyze(str(test_repo), compact=True)
+    assert captured["similarity_enabled"] is True
+
+
+def test_mcp_analyze_filtered_explicit_similarity_true(monkeypatch, test_repo):
+    captured: dict[str, bool | None] = {}
+    _orig = mcp_server.stats.build_block_stats
+
+    def _spy(repo, files, score_metrics, *a, **kw):
+        captured["similarity_enabled"] = kw.get("similarity_enabled")
+        return _orig(repo, files, score_metrics, *a, **kw)
+
+    monkeypatch.setattr(mcp_server.stats, "build_block_stats", _spy)
+    mcp_server.analyze(
+        str(test_repo), filter="example.py", compact=True, similarity=True
+    )
+    assert captured["similarity_enabled"] is True
+
+
 def test_build_analyze_config_local_matches_load_analyze_for_scoring(test_repo):
     """MCP local analyze must use the same scoring layers as ``load_analyze_config_for_local_repo``."""
     cfg = mcp_server._build_analyze_config(str(test_repo))
@@ -649,55 +701,118 @@ def rev_pair_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def test_analyze_rev_excludes_later_functions(rev_pair_repo: Path) -> None:
-    result = mcp_server.analyze(
+def test_analyze_records_head_sha(test_repo: Path) -> None:
+    result = mcp_server.analyze(str(test_repo), similarity=False, compact=True)
+    data = json.loads(result)
+    assert "error" not in data
+    assert "head_sha" in data
+    assert len(data["head_sha"]) == 40
+
+
+def test_analyze_before_sha_includes_deltas(rev_pair_repo: Path) -> None:
+    lines = subprocess.check_output(
+        ["git", "-C", str(rev_pair_repo), "rev-list", "--max-count=2", "--reverse", "HEAD"],
+        text=True,
+    ).splitlines()
+    sha_old, sha_new = lines[0], lines[1]
+    subprocess.run(
+        ["git", "-C", str(rev_pair_repo), "checkout", sha_old],
+        check=True,
+        capture_output=True,
+    )
+    r1 = mcp_server.analyze(
+        str(rev_pair_repo), filter="a.py", similarity=False, compact=False
+    )
+    d1 = json.loads(r1)
+    assert "error" not in d1
+    assert d1["head_sha"] == sha_old
+    subprocess.run(
+        ["git", "-C", str(rev_pair_repo), "checkout", sha_new],
+        check=True,
+        capture_output=True,
+    )
+    r2 = mcp_server.analyze(
         str(rev_pair_repo),
-        rev="HEAD~1",
+        before_sha=sha_old,
         filter="a.py",
         similarity=False,
         compact=False,
     )
-    data = json.loads(result)
-    assert "error" not in data
-    symbols = {row["path"].split("::", 1)[1] for row in data["results"] if "::" in row["path"]}
-    assert "only" in symbols
-    assert "second" not in symbols
-
-
-def test_analyze_baseline_rev_includes_deltas(rev_pair_repo: Path) -> None:
-    result = mcp_server.analyze(
-        str(rev_pair_repo),
-        baseline_rev="HEAD~1",
-        filter="a.py",
-        similarity=False,
-        compact=False,
-    )
-    data = json.loads(result)
-    assert "error" not in data
-    assert "deltas" in data
-    summ = data["deltas"]["summary"]
-    assert summ["blocks_added"] >= 1
-    added = [b for b in data["deltas"]["by_block"] if b["status"] == "added"]
+    d2 = json.loads(r2)
+    assert "error" not in d2
+    assert d2["head_sha"] == sha_new
+    assert "deltas" in d2
+    assert d2["deltas"]["summary"]["blocks_added"] >= 1
+    added = [b for b in d2["deltas"]["by_block"] if b["status"] == "added"]
     assert any("second" in b["path"] for b in added)
-    symbols = {row["path"].split("::", 1)[1] for row in data["results"] if "::" in row["path"]}
+    symbols = {
+        row["path"].split("::", 1)[1] for row in d2["results"] if "::" in row["path"]
+    }
     assert "second" in symbols
 
 
-def test_analyze_rev_and_baseline_mutually_exclusive_json(rev_pair_repo: Path) -> None:
-    result = mcp_server.analyze(
+def test_analyze_before_and_after_cache_only(rev_pair_repo: Path) -> None:
+    lines = subprocess.check_output(
+        ["git", "-C", str(rev_pair_repo), "rev-list", "--max-count=2", "--reverse", "HEAD"],
+        text=True,
+    ).splitlines()
+    sha_old, sha_new = lines[0], lines[1]
+    subprocess.run(
+        ["git", "-C", str(rev_pair_repo), "checkout", sha_old],
+        check=True,
+        capture_output=True,
+    )
+    mcp_server.analyze(str(rev_pair_repo), filter="a.py", similarity=False, compact=False)
+    subprocess.run(
+        ["git", "-C", str(rev_pair_repo), "checkout", sha_new],
+        check=True,
+        capture_output=True,
+    )
+    mcp_server.analyze(str(rev_pair_repo), filter="a.py", similarity=False, compact=False)
+    r3 = mcp_server.analyze(
         str(rev_pair_repo),
-        rev="HEAD",
-        baseline_rev="HEAD~1",
+        before_sha=sha_old,
+        after_sha=sha_new,
+        filter="a.py",
+        similarity=False,
+        compact=False,
+    )
+    d3 = json.loads(r3)
+    assert "error" not in d3
+    assert "deltas" in d3
+    assert d3["head_sha"] == sha_new
+
+
+def test_analyze_after_sha_requires_before(rev_pair_repo: Path) -> None:
+    out = mcp_server._run_analyze_cached(
+        str(rev_pair_repo),
+        after_sha="HEAD",
         similarity=False,
     )
-    data = json.loads(result)
+    assert "error" in json.loads(out)
+
+
+def test_analyze_before_sha_missing_snapshot(rev_pair_repo: Path) -> None:
+    root = subprocess.check_output(
+        ["git", "-C", str(rev_pair_repo), "rev-list", "--max-parents=0", "HEAD"],
+        text=True,
+    ).strip()
+    out = mcp_server._run_analyze_cached(
+        str(rev_pair_repo),
+        before_sha=root,
+        similarity=False,
+        filter="a.py",
+    )
+    data = json.loads(out)
     assert "error" in data
+    assert "no cached snapshot" in data["error"].lower()
 
 
-def test_analyze_rev_rejects_remote_url() -> None:
+def test_analyze_before_after_rejects_remote_url() -> None:
     out = mcp_server._run_analyze_cached(
         "https://example.com/nonexistent.git",
-        rev="main",
+        before_sha="0" * 40,
+        after_sha="1" * 40,
         similarity=False,
     )
     data = json.loads(out)

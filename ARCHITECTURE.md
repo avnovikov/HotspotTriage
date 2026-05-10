@@ -248,10 +248,10 @@ Git allows only **one** linked worktree to hold a given branch; `git checkout ma
 
 | MCP Tool              | Pipeline                                           | Notes |
 |-----------------------|----------------------------------------------------|-------|
-| `analyze`             | `_analyze_repository` + `_initialize_repository`   | Block granularity only; **double** `build_block_stats` (see §9.1); publishes to dashboard |
+| `analyze`             | `_analyze_repository` + `_initialize_repository` + `revision_cache` | Block granularity only; **double** `build_block_stats` (see §9.1); publishes to dashboard; local repos record `revisions.pkl` snapshots (`head_sha`, optional `before_sha` / `after_sha`); when **`similarity`** is omitted, DeepCSIM defaults **off** if **`filter`** is set, **on** for whole-repo runs |
 | `generate_cache`      | `cache_generator.generate_full_cache` → `run_cached_block_analysis_dict` + `extract_class_method_structure` + `cache_status` | Inherits double-pass; optional progress callbacks surface current file in the dashboard job |
 | `cache_status`        | `Cache(repo).get_metadata()` + `blocks.pkl` stat   | Lightweight, no analysis |
-| `clear_cache`         | Deletes `blocks.pkl`                                | Leaves `metadata.json` |
+| `clear_cache`         | Deletes `blocks.pkl` and `revisions.pkl` when present | Leaves `metadata.json` |
 | `init_config`         | `config.init_config` scaffolding                    | No analysis |
 
 ### 6.3 Dashboard Publishing
