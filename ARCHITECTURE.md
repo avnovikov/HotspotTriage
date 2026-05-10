@@ -159,8 +159,10 @@ and cache-job `config_overrides` then call `load_analyze_config_for_local_repo`
 on that path so dashboard explanations use the same weights as MCP/CLI.
 
 `DashboardServer` lives in `dashboard/server.py`, which mounts static assets,
-includes `dashboard/routes/pages.py` for HTML, and `dashboard/routes/api.py`
-(`build_dashboard_api_router`) for JSON under `/api`. Heatmap matrix and
+includes `dashboard/routes/pages.py` for HTML, and the `dashboard/routes/api/`
+package (`build_dashboard_api_router` in ``__init__.py``, split across
+``health_config.py``, ``block_metrics.py``, ``cache.py``, ``collector_stats.py``,
+``log_buffer.py``) for JSON under `/api`. Heatmap matrix and
 histogram helpers for those endpoints are in `dashboard/stats_api.py`; cache
 request parsing and slimmed job payloads in `dashboard/cache_http.py`; threaded
 cache generation jobs in `dashboard/cache_jobs.py`. Persisted UI state is
