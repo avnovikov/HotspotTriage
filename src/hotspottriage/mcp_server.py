@@ -363,6 +363,7 @@ def _format_block_analysis_payload(
     head_sha: str | None = None,
     git_repo: Path | None = None,
     snapshot_commit_full: str | None = None,
+    include_summary: bool = False,
 ) -> dict[str, Any]:
     """Publish + limit + cache + optional compact rows (shared MCP analyze path)."""
     _publish_block_metrics_to_dashboard(analysis_root, results_full, cfg)
@@ -421,6 +422,8 @@ def _format_block_analysis_payload(
         "results": results_list,
         "cache": cache_info,
     }
+    if include_summary:
+        out["summary"] = _build_mcp_analyze_summary(results_full)
     if deltas is not None:
         out["deltas"] = deltas
     if head_sha is not None:
@@ -445,6 +448,7 @@ def run_cached_block_analysis_dict(
     config_overrides: dict[str, Any] | None = None,
     before_sha: str | None = None,
     after_sha: str | None = None,
+    include_summary: bool = False,
 ) -> dict[str, Any]:
     """Block-level analysis + cache warm-up; returns dict with ``metadata``, ``results``, ``cache`` (not JSON).
 
@@ -516,6 +520,7 @@ def run_cached_block_analysis_dict(
             head_sha=after_resolved,
             git_repo=local_repo,
             snapshot_commit_full=after_resolved,
+            include_summary=include_summary,
         )
 
     results_full = _analyze_repository(
@@ -550,6 +555,7 @@ def run_cached_block_analysis_dict(
         head_sha=head_sha_val,
         git_repo=local_repo,
         snapshot_commit_full=None,
+        include_summary=include_summary,
     )
 
 
@@ -568,6 +574,7 @@ def _run_analyze_cached(
     sort: str = "score",
     before_sha: str | None = None,
     after_sha: str | None = None,
+    include_summary: bool = False,
 ) -> str:
     """Block-level analysis with disk cache warm-up; returns JSON with ``metadata``."""
     try:
@@ -585,6 +592,7 @@ def _run_analyze_cached(
             sort=sort,
             before_sha=before_sha,
             after_sha=after_sha,
+            include_summary=include_summary,
         )
         return json.dumps(response, indent=2)
 
@@ -608,6 +616,7 @@ def analyze(
     compact: bool = True,
     before_sha: str | None = None,
     after_sha: str | None = None,
+    include_summary: bool = False,
 ) -> str:
     """Analyze a repository: block-level metrics, disk cache, and dashboard publish.
 
@@ -665,11 +674,15 @@ def analyze(
             returns cached results for ``after_sha`` plus ``deltas`` vs ``before_sha``
             **without** running a new analysis (both snapshots must exist). Cannot be
             used without ``before_sha``.
+        include_summary: When ``True``, add a ``summary`` object with aggregates
+            (**block_count**, risk counts, sums, max cyclomatic/score, **mean_score**)
+            computed from the **full** pre-``limit`` result set. Default ``False``
+            keeps the response shape unchanged for callers that do not need it.
 
     Returns:
         JSON object with ``metadata``, ``results``, and ``cache``; optional
-        ``head_sha`` for local targets; optional ``deltas`` when ``before_sha`` is
-        set; or ``{"error": ...}``
+        ``summary`` when ``include_summary`` is true; optional ``head_sha`` for local
+        targets; optional ``deltas`` when ``before_sha`` is set; or ``{"error": ...}``
     """
     try:
         resolved = _resolve_mcp_target(target)
@@ -689,6 +702,7 @@ def analyze(
         sort=sort,
         before_sha=before_sha,
         after_sha=after_sha,
+        include_summary=include_summary,
     )
 
 
@@ -1001,6 +1015,46 @@ def _normal_block_stat_count(rows: list[stats.Statistic]) -> int:
         for r in rows
         if not str(r.path).split("::", 1)[0].startswith("__")
     )
+
+
+def _non_synthetic_block_rows(rows: list[stats.Statistic]) -> list[stats.Statistic]:
+    return [r for r in rows if not str(r.path).split("::", 1)[0].startswith("__")]
+
+
+def _build_mcp_analyze_summary(rows: list[stats.Statistic]) -> dict[str, Any]:
+    """Aggregate metrics over the full (pre-``limit``) block list for MCP ``include_summary``."""
+    blocks = _non_synthetic_block_rows(rows)
+    n = len(blocks)
+    if n == 0:
+        return {
+            "block_count": 0,
+            "high_risk_count": 0,
+            "critical_risk_count": 0,
+            "sum_cyclomatic": 0,
+            "sum_sloc": 0,
+            "max_cyclomatic": None,
+            "max_score": None,
+            "mean_score": 0.0,
+        }
+    high_risk_count = sum(1 for r in blocks if str(r.score_band).lower() == "high")
+    critical_risk_count = sum(
+        1 for r in blocks if str(r.score_band).lower() == "critical"
+    )
+    sum_cyclomatic = sum(int(r.cyclomatic) for r in blocks)
+    sum_sloc = sum(int(r.sloc) for r in blocks)
+    max_cyc = max(blocks, key=lambda r: int(r.cyclomatic))
+    max_sc = max(blocks, key=lambda r: float(r.score))
+    total_score = sum(float(r.score) for r in blocks)
+    return {
+        "block_count": n,
+        "high_risk_count": high_risk_count,
+        "critical_risk_count": critical_risk_count,
+        "sum_cyclomatic": sum_cyclomatic,
+        "sum_sloc": sum_sloc,
+        "max_cyclomatic": {"path": max_cyc.path, "value": int(max_cyc.cyclomatic)},
+        "max_score": {"path": max_sc.path, "value": round(float(max_sc.score), 4)},
+        "mean_score": round(total_score / n, 4),
+    }
 
 
 def _config_fingerprint(cfg: dict[str, Any]) -> str:
