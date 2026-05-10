@@ -61,8 +61,8 @@ def test_record_snapshot_roundtrip(tiny_git_repo: Path) -> None:
         tiny_git_repo,
         ["m.py"],
         cfg["score_metrics"],
-        merged_config=cfg,
-        similarity_enabled=False,
+        runtime=stats.BlockStatsRuntime(merged_config=cfg),
+        similarity=stats.BlockSimilarityConfig(enabled=False),
     )
     mgr = RevisionCacheManager(tiny_git_repo)
     sha = mgr.record_snapshot(rows)
@@ -126,8 +126,8 @@ def test_statistic_from_dict_roundtrip(tiny_git_repo: Path) -> None:
         tiny_git_repo,
         ["m.py"],
         cfg["score_metrics"],
-        merged_config=cfg,
-        similarity_enabled=False,
+        runtime=stats.BlockStatsRuntime(merged_config=cfg),
+        similarity=stats.BlockSimilarityConfig(enabled=False),
     )
     assert rows
     s0 = rows[0]
@@ -150,8 +150,8 @@ def test_clear_revision_cache_file(tiny_git_repo: Path) -> None:
         tiny_git_repo,
         ["m.py"],
         cfg["score_metrics"],
-        merged_config=cfg,
-        similarity_enabled=False,
+        runtime=stats.BlockStatsRuntime(merged_config=cfg),
+        similarity=stats.BlockSimilarityConfig(enabled=False),
     )
     RevisionCacheManager(tiny_git_repo).record_snapshot(rows)
     assert revisions_cache_path(tiny_git_repo).exists()
@@ -165,8 +165,8 @@ def test_flush_preserves_version_envelope(tiny_git_repo: Path) -> None:
         tiny_git_repo,
         ["m.py"],
         cfg["score_metrics"],
-        merged_config=cfg,
-        similarity_enabled=False,
+        runtime=stats.BlockStatsRuntime(merged_config=cfg),
+        similarity=stats.BlockSimilarityConfig(enabled=False),
     )
     RevisionCacheManager(tiny_git_repo).record_snapshot(rows)
     with open(revisions_cache_path(tiny_git_repo), "rb") as f:

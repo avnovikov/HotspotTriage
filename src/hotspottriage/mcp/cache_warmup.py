@@ -31,15 +31,19 @@ def initialize_repository_cache(
             repo,
             files,
             score_metrics,
-            since=cfg["since"],
-            until=cfg["until"],
-            workers=cfg.get("block_workers"),
-            decay_half_life=cfg.get("decay_half_life"),
-            smell_weight=float(cfg.get("smell_weight", 0.0)),
-            progress_callback=progress_callback,
-            merged_config=cfg,
-            cache_manager=mgr,
-            **stats.block_similarity_kwargs_from_config(cfg),
+            churn=stats.BlockChurnWindow(
+                since=cfg["since"],
+                until=cfg["until"],
+                workers=cfg.get("block_workers"),
+                decay_half_life=cfg.get("decay_half_life"),
+            ),
+            runtime=stats.BlockStatsRuntime(
+                smell_weight=float(cfg.get("smell_weight", 0.0)),
+                progress_callback=progress_callback,
+                merged_config=cfg,
+                cache_manager=mgr,
+            ),
+            similarity=stats.BlockSimilarityConfig.from_config(cfg),
         )
         mgr.flush()
 

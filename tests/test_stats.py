@@ -6,6 +6,9 @@ import pytest
 from hotspottriage import cache as _cache
 from hotspottriage.config import DEFAULTS
 from hotspottriage.stats import (
+    BlockSimilarityConfig,
+    BlockStatsRuntime,
+    FileStatsRun,
     Statistic,
     _ratio,
     aggregate_by_directory,
@@ -61,9 +64,7 @@ def test_default_score_is_churn_per_sloc_times_cyclomatic(tmp_path: Path):
     repo = build_repo(tmp_path / "r")
     files = ["a.py", "b.py", "c/d.py"]
     fake_churn = {"a.py": 20, "b.py": 4, "c/d.py": 12}
-    stats = build_stats(
-        repo, files, fake_churn, score_metrics=["churn_per_sloc", "cyclomatic"]
-    )
+    stats = build_stats(repo, files, fake_churn, score_metrics=["churn_per_sloc", "cyclomatic"])
     for s in stats:
         assert s.score == pytest.approx(s.churn_per_sloc * s.cyclomatic)
 
@@ -119,9 +120,11 @@ def test_build_block_stats_similarity_deepcsim_pair(tmp_path: Path):
         repo,
         ["a.py", "b.py"],
         score_metrics=["cyclomatic"],
-        similarity_enabled=True,
-        similarity_aggregate_row=False,
-        similarity_threshold=50.0,
+        similarity=BlockSimilarityConfig(
+            enabled=True,
+            aggregate_row=False,
+            threshold=50.0,
+        ),
     )
     assert len(rows) == 2
     by_path = {s.path: s for s in rows}
@@ -137,9 +140,8 @@ def test_block_stats_sets_normalized_sloc_zscore(tmp_path: Path):
         repo,
         ["mod.py"],
         score_metrics=["cyclomatic"],
-        similarity_enabled=False,
-        similarity_aggregate_row=False,
-        merged_config=DEFAULTS,
+        runtime=BlockStatsRuntime(merged_config=DEFAULTS),
+        similarity=BlockSimilarityConfig(enabled=False, aggregate_row=False),
     )
     assert stats
     assert all(s.similarity_band == "off" for s in stats)
@@ -164,9 +166,8 @@ def test_build_block_stats_preserves_unrelated_cache_rows_on_scoped_run(tmp_path
         repo,
         ["a.py", "b.py", "c/d.py"],
         score_metrics=["cyclomatic"],
-        similarity_enabled=False,
-        similarity_aggregate_row=False,
-        merged_config=DEFAULTS,
+        runtime=BlockStatsRuntime(merged_config=DEFAULTS),
+        similarity=BlockSimilarityConfig(enabled=False, aggregate_row=False),
     )
     first_rows = _cache.load_block_results(repo) or []
     assert first_rows
@@ -178,9 +179,8 @@ def test_build_block_stats_preserves_unrelated_cache_rows_on_scoped_run(tmp_path
         repo,
         ["no_blocks.py"],
         score_metrics=["cyclomatic"],
-        similarity_enabled=False,
-        similarity_aggregate_row=False,
-        merged_config=DEFAULTS,
+        runtime=BlockStatsRuntime(merged_config=DEFAULTS),
+        similarity=BlockSimilarityConfig(enabled=False, aggregate_row=False),
     )
     after_rows = _cache.load_block_results(repo) or []
     assert any(str(r.get("path", "")).startswith("a.py::") for r in after_rows)
@@ -192,9 +192,8 @@ def test_build_block_stats_persists_raw_cache_rows(tmp_path: Path):
         repo,
         ["a.py", "b.py", "c/d.py"],
         score_metrics=["cyclomatic"],
-        similarity_enabled=False,
-        similarity_aggregate_row=False,
-        merged_config=DEFAULTS,
+        runtime=BlockStatsRuntime(merged_config=DEFAULTS),
+        similarity=BlockSimilarityConfig(enabled=False, aggregate_row=False),
     )
     rows = _cache.load_block_results(repo) or []
     assert rows

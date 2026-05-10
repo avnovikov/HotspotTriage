@@ -36,15 +36,19 @@ def analyze_repository(
                 repo,
                 files,
                 score_metrics,
-                since=cfg["since"],
-                until=cfg["until"],
-                workers=cfg.get("block_workers"),
-                decay_half_life=decay_half_life,
-                smell_weight=smell_weight,
-                progress_callback=progress_callback,
-                merged_config=cfg,
-                cache_manager=mgr,
-                **stats.block_similarity_kwargs_from_config(cfg),
+                churn=stats.BlockChurnWindow(
+                    since=cfg["since"],
+                    until=cfg["until"],
+                    workers=cfg.get("block_workers"),
+                    decay_half_life=decay_half_life,
+                ),
+                runtime=stats.BlockStatsRuntime(
+                    smell_weight=smell_weight,
+                    progress_callback=progress_callback,
+                    merged_config=cfg,
+                    cache_manager=mgr,
+                ),
+                similarity=stats.BlockSimilarityConfig.from_config(cfg),
             )
         else:
             churn = ht_churn.compute_churn(
@@ -55,9 +59,11 @@ def analyze_repository(
                 files,
                 churn,
                 score_metrics,
-                decay_half_life=decay_half_life,
-                smell_weight=smell_weight,
-                merged_config=cfg,
+                options=stats.FileStatsRun(
+                    decay_half_life=decay_half_life,
+                    smell_weight=smell_weight,
+                    merged_config=cfg,
+                ),
             )
             if cfg["directories"]:
                 results = stats.aggregate_by_directory(
