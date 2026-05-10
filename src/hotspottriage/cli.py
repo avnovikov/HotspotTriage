@@ -341,7 +341,14 @@ def main(argv: list[str] | None = None) -> int:
             results = stats.sort_and_limit(
                 results, by=cfg["sort"], limit=cfg["limit"]
             )
-            print(output.render(results, cfg["format"], cfg))
+            output_text = output.render(results, cfg["format"], cfg)
+            print(output_text)
+            if cfg["format"] == "json":
+                # JSON format must produce valid JSON on stdout — narratives
+                # go to stderr so json.loads() works on the output.
+                stderr = sys.stderr
+            else:
+                stderr = None
             if cfg["granularity"] == "block":
                 pm_raw = cfg.get("proposed_models")
                 pm = pm_raw if isinstance(pm_raw, dict) else {}
@@ -357,8 +364,11 @@ def main(argv: list[str] | None = None) -> int:
                         s, recommended_action=rec_s, final_weights=s.score_final_weights
                     )
                     if narrative:
-                        print()
-                        print(narrative)
+                        if stderr:
+                            print(narrative, file=stderr)
+                        else:
+                            print()
+                            print(narrative)
         return 0
     except (NotADirectoryError, RuntimeError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
