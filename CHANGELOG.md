@@ -15,6 +15,7 @@ This project adheres to [Semantic Versioning](https://semver.org/) and [Keep a C
 - Replace broken in-repo hyperlink to `.cursor` skills in branch-protection audit evidence with a workstation-local path description (#147).
 
 ### Added
+- MCP `analyze` JSON responses include a `metadata` object (git provenance, `analyzed_at`, effective filters, row counts, `config_fingerprint`) (#156).
 - SOC 2 compliance files: `SECURITY.md`, `CODEOWNERS`, `dependabot.yml`
 - Security scanning workflow: CodeQL, Trivy, Gitleaks
 - Pre-commit hooks for secret scanning and linting

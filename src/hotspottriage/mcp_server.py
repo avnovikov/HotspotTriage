@@ -11,9 +11,12 @@ from __future__ import annotations
 import argparse
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from datetime import datetime, timezone
+import hashlib
 import json
 import logging
 import math
+import subprocess
 import sys
 import threading
 from collections.abc import Callable
@@ -358,6 +361,8 @@ def _format_block_analysis_payload(
     progress_callback: Callable[[str, int, int], None] | None,
     deltas: dict[str, Any] | None = None,
     head_sha: str | None = None,
+    git_repo: Path | None = None,
+    snapshot_commit_full: str | None = None,
 ) -> dict[str, Any]:
     """Publish + limit + cache + optional compact rows (shared MCP analyze path)."""
     _publish_block_metrics_to_dashboard(analysis_root, results_full, cfg)
@@ -387,7 +392,35 @@ def _format_block_analysis_payload(
                 str(row.score_band), cfg
             )
             results_list.append(output_row)
-    out: dict[str, Any] = {"results": results_list, "cache": cache_info}
+
+    row_count = _normal_block_stat_count(results_full)
+    truncated = _normal_block_stat_count(results) < row_count
+    analyzed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    git_head: str | None = None
+    git_branch: str | None = None
+    if git_repo is not None and snapshot_commit_full:
+        git_head = _git_short_object_name(git_repo, snapshot_commit_full)
+        git_branch = "snapshot"
+    elif git_repo is not None:
+        git_head, git_branch = _git_live_head_and_branch(git_repo)
+
+    metadata: dict[str, Any] = {
+        "git_head": git_head,
+        "git_branch": git_branch,
+        "analyzed_at": analyzed_at,
+        "target": analysis_root,
+        "filter_applied": _effective_mcp_filter_patterns(cfg),
+        "row_count": row_count,
+        "truncated": truncated,
+        "config_fingerprint": _config_fingerprint(cfg),
+    }
+
+    out: dict[str, Any] = {
+        "metadata": metadata,
+        "results": results_list,
+        "cache": cache_info,
+    }
     if deltas is not None:
         out["deltas"] = deltas
     if head_sha is not None:
@@ -413,7 +446,7 @@ def run_cached_block_analysis_dict(
     before_sha: str | None = None,
     after_sha: str | None = None,
 ) -> dict[str, Any]:
-    """Block-level analysis + cache warm-up; returns ``results`` / ``cache`` dict (not JSON).
+    """Block-level analysis + cache warm-up; returns dict with ``metadata``, ``results``, ``cache`` (not JSON).
 
     Optional ``progress_callback(label, done, total)`` mirrors
     :func:`hotspottriage.stats.build_block_stats` progress events.
@@ -481,6 +514,8 @@ def run_cached_block_analysis_dict(
             progress_callback=progress_callback,
             deltas=deltas,
             head_sha=after_resolved,
+            git_repo=local_repo,
+            snapshot_commit_full=after_resolved,
         )
 
     results_full = _analyze_repository(
@@ -513,6 +548,8 @@ def run_cached_block_analysis_dict(
         progress_callback=progress_callback,
         deltas=deltas,
         head_sha=head_sha_val,
+        git_repo=local_repo,
+        snapshot_commit_full=None,
     )
 
 
@@ -532,7 +569,7 @@ def _run_analyze_cached(
     before_sha: str | None = None,
     after_sha: str | None = None,
 ) -> str:
-    """Block-level analysis with disk cache warm-up; returns JSON ``{results, cache}``."""
+    """Block-level analysis with disk cache warm-up; returns JSON with ``metadata``."""
     try:
         response = run_cached_block_analysis_dict(
             target,
@@ -574,9 +611,11 @@ def analyze(
 ) -> str:
     """Analyze a repository: block-level metrics, disk cache, and dashboard publish.
 
-    Always runs the cache-backed block pipeline. Returns JSON
-    ``{"results": [...], "cache": {...}}``, optional ``head_sha`` (commit recorded
-    for revision snapshots on local repos), and optional ``deltas`` when
+    Always runs the cache-backed block pipeline. Returns JSON with a top-level
+    ``metadata`` object (provenance: git head/branch, timestamps, filter list,
+    row counts, config fingerprint), ``results``, ``cache``, optional ``head_sha``
+    (full commit recorded for revision snapshots on local repos), and optional
+    ``deltas`` when
     ``before_sha`` is set (or when both ``before_sha`` and ``after_sha`` select
     cached snapshots only).
     By default each result row is compact (function, score, bands, model, and
@@ -628,9 +667,9 @@ def analyze(
             used without ``before_sha``.
 
     Returns:
-        JSON object with ``results`` and ``cache`` keys, optional ``head_sha`` for
-        local targets, optional ``deltas`` when ``before_sha`` is set, or
-        ``{"error": ...}``
+        JSON object with ``metadata``, ``results``, and ``cache``; optional
+        ``head_sha`` for local targets; optional ``deltas`` when ``before_sha`` is
+        set; or ``{"error": ...}``
     """
     try:
         resolved = _resolve_mcp_target(target)
@@ -937,6 +976,77 @@ def _build_repo_keep_predicate(
         ignore_directories=cfg["ignore_directories"],
         respect_gitignore=cfg["respect_gitignore"],
     )
+
+
+def _effective_mcp_filter_patterns(cfg: dict[str, Any]) -> list[str]:
+    """Return the filter token list actually used by :func:`_build_repo_keep_predicate`."""
+    raw_patterns = [p.strip() for p in cfg.get("filter", []) if p and str(p).strip()]
+    use_literal_list = len(raw_patterns) > 1 and all(
+        _is_literal_filter_path(p) for p in raw_patterns
+    )
+    if use_literal_list:
+        return list(raw_patterns)
+    patterns = list(raw_patterns)
+    if not cfg.get("no_default_filter", False):
+        df = cfg.get("default_filter")
+        if isinstance(df, str) and df.strip():
+            patterns.append(df.strip())
+    return patterns
+
+
+def _normal_block_stat_count(rows: list[stats.Statistic]) -> int:
+    """Count non-synthetic block rows (exclude aggregate paths whose file starts with ``__``)."""
+    return sum(
+        1
+        for r in rows
+        if not str(r.path).split("::", 1)[0].startswith("__")
+    )
+
+
+def _config_fingerprint(cfg: dict[str, Any]) -> str:
+    """Stable digest of the merged analyze config (for comparing runs)."""
+    payload = json.dumps(cfg, sort_keys=True, separators=(",", ":"), default=str)
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return f"sha256:{digest}"
+
+
+def _git_short_object_name(repo: Path, full_sha: str) -> str | None:
+    token = full_sha.strip()
+    if not token:
+        return None
+    proc = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--short", f"{token}^{{commit}}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    lines = proc.stdout.strip().splitlines()
+    return lines[0].strip() if lines else None
+
+
+def _git_live_head_and_branch(repo: Path) -> tuple[str | None, str | None]:
+    """Return ``(short HEAD sha, branch name or ``detached``)`` for a local repo."""
+    proc = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return None, None
+    short_head = (proc.stdout.strip().splitlines() or [""])[0].strip() or None
+    br = subprocess.run(
+        ["git", "-C", str(repo), "branch", "--show-current"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    branch = (br.stdout.strip().splitlines() or [""])[0].strip()
+    if not branch:
+        branch = "detached"
+    return short_head, branch
 
 
 def _initialize_repository(

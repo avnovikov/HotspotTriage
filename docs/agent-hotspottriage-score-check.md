@@ -26,6 +26,19 @@ Tokens are comma-separated, repo-relative POSIX paths. Matching depends on **wha
 
 **Not the same as the CLI:** `hotspottriage … --filter` and `hotspottriage-cache --filter` always use **AND** glob mode (no literal-path OR shortcut). Only the MCP **`analyze`** tool applies `_build_repo_keep_predicate` in `mcp_server.py`, which implements the OR shortcut above.
 
+## MCP `analyze` response `metadata`
+
+Successful JSON includes a top-level **`metadata`** object for provenance and
+repeatability: **`git_head`** (short SHA), **`git_branch`** (current branch,
+**`detached`**, or **`snapshot`** when **`results`** are served only from the
+**`after_sha`** revision cache), **`analyzed_at`** (UTC, `Z` suffix),
+**`target`**, **`filter_applied`** (effective filter list after MCP OR/glob
+rules), **`row_count`** (non-aggregate block rows before the response
+**`limit`**), **`truncated`**, and **`config_fingerprint`** (SHA-256 digest of the
+merged config for the run). **`results`** and **`cache`** shapes are unchanged;
+**`head_sha`** and **`deltas`** remain optional sibling keys as in the section
+below.
+
 ## MCP `analyze` revision snapshots (`head_sha`, `before_sha`, `after_sha`)
 
 On a **local** `target`, each successful **`analyze`** records a snapshot under
