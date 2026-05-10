@@ -1,1 +1,232 @@
-IyBDb250cmlidXRpbmcgdG8gSG90c3BvdFRyaWFnZQoKPiAqKk5JU1QgU1NERiByZWZlcmVuY2U6KiogUE8uMS4xIOKAlCBJbXBsZW1lbnQgYSBzZWN1cml0eSBwb2xpY3kgZm9yIHRoZSBzb2Z0d2FyZSBkZXZlbG9wbWVudCBsaWZlY3ljbGUKPiAqSVNPIDI3MDAxOjIwMjI6IEEuNS4xIChQb2xpY2llcyksIEEuOC4zMiAoQ2hhbmdlIG1hbmFnZW1lbnQpLCBBLjYuMyAoSW5mb3JtYXRpb24gc2VjdXJpdHkgYXdhcmVuZXNzKSoKPiAqQ09CSVQgMjAxOTogQVBPMDEgKE1hbmFnZSB0aGUgSVQgTWFuYWdlbWVudCBGcmFtZXdvcmspLCBCQUkwNiAoTWFuYWdlIElUIENoYW5nZXMpKgoKVGhhbmsgeW91IGZvciB5b3VyIGludGVyZXN0IGluIEhvdHNwb3RUcmlhZ2UuIFRoaXMgZG9jdW1lbnQgZGVmaW5lcyB0aGUgc2VjdXJlIGRldmVsb3BtZW50IGxpZmVjeWNsZSBwb2xpY3kgZm9yIGFsbCBjb250cmlidXRvcnMuCgotLS0KCiMjIDEuIERldmVsb3BtZW50IEVudmlyb25tZW50IFNldHVwCgojIyMgMS4xIFByZXJlcXVpc2l0ZXMKCnwgVG9vbCB8IFZlcnNpb24gfCBQdXJwb3NlIHwKfC0tLS0tLXwtLS0tLS0tLS18LS0tLS0tLS0tfAp8IFB5dGhvbiB8IDMuMTEg4oCTIDMuMTMgfCBSdW50aW1lIChtYXRjaGVzIGByZXF1aXJlcy1weXRob25gIGluIGBweXByb2plY3QudG9tbGApIHwKfCBbYHV2YF0oaHR0cHM6Ly9naXRodWIuY29tL2FzdHJhbC1zaC91dikgfCBMYXRlc3Qgc3RhYmxlIHwgUGFja2FnZSBtYW5hZ2VyLCB2aXJ0dWFsZW52LCBidWlsZCB8CnwgR2l0IHwg4omlIDIuMzQgfCBWZXJzaW9uIGNvbnRyb2wgKFNTSCBzaWduaW5nIHN1cHBvcnQpIHwKCiMjIyAxLjIgSW5zdGFsbCBkZXBlbmRlbmNpZXMKCmBgYGJhc2gKZ2l0IGNsb25lIGh0dHBzOi8vZ2l0aHViLmNvbS9hdm5vdmlrb3YvSG90c3BvdFRyaWFnZS5naXQKY2QgSG90c3BvdFRyaWFnZQp1diBzeW5jIC0tYWxsLWV4dHJhcyAtLWRldgpgYGAKClRoaXMgaW5zdGFsbHMgYWxsIHJ1bnRpbWUgYW5kIGRldmVsb3BtZW50IGRlcGVuZGVuY2llcyBpbnRvIGFuIGlzb2xhdGVkIHZpcnR1YWxlbnYgbWFuYWdlZCBieSBgdXZgLCB1c2luZyBoYXNoLXZlcmlmaWVkIHZlcnNpb25zIGZyb20gYHV2LmxvY2tgLgoKIyMjIDEuMyBTU0ggQ29tbWl0IGFuZCBUYWcgU2lnbmluZyAocmVxdWlyZWQpCgpBbGwgY29tbWl0cyB0byB0aGlzIHJlcG9zaXRvcnkgKiptdXN0IGJlIFNTSC1zaWduZWQqKi4gVGhpcyBpcyBlbmZvcmNlZCBieSB0aGUgYnJhbmNoIHByb3RlY3Rpb24gcnVsZSBvbiBgbWFpbmAgLS0gdW5zaWduZWQgY29tbWl0cyB3aWxsIGJlIHJlamVjdGVkLgoKKipPbmUtdGltZSB3b3Jrc3RhdGlvbiBzZXR1cDoqKgoKYGBgYmFzaAojIFVzZSBTU0ggZm9yIHNpZ25pbmcgKG5vIEdQRyBrZXlyaW5nIHJlcXVpcmVkKQpnaXQgY29uZmlnIC0tZ2xvYmFsIGdwZy5mb3JtYXQgc3NoCmdpdCBjb25maWcgLS1nbG9iYWwgdXNlci5zaWduaW5nS2V5IH4vLnNzaC9pZF9lZDI1NTE5LnB1YiAgICMgcmVwbGFjZSB3aXRoIHlvdXIga2V5IHBhdGgKZ2l0IGNvbmZpZyAtLWdsb2JhbCBjb21taXQuZ3BnU2lnbiB0cnVlICAgICMgYXV0by1zaWduIGFsbCBjb21taXRzCmdpdCBjb25maWcgLS1nbG9iYWwgdGFnLmdwZ1NpZ24gdHJ1ZSAgICAgICAjIGF1dG8tc2lnbiBhbGwgdGFncwpgYGAKCioqR2l0SHViIHNldHVwOioqIFJlZ2lzdGVyIHlvdXIgU1NIIGtleSB1bmRlciAqKlNldHRpbmdzIOKGkiBTU0ggYW5kIEdQRyBrZXlzKiogYXMgYSAqU2lnbmluZyBLZXkqIChzZXBhcmF0ZSBmcm9tIHlvdXIgYXV0aGVudGljYXRpb24ga2V5KS4gR2l0SHViIHdpbGwgZGlzcGxheSBhIGBWZXJpZmllZGAgYmFkZ2Ugb24geW91ciBzaWduZWQgY29tbWl0cy4KCj4gKlRoaXMgdHdvLWxheWVyIHNpZ25pbmcgcG9saWN5IChjb21taXRzICsgdGFncykgZXN0YWJsaXNoZXMgYW4gdW5icm9rZW4gY2hhaW4gb2YgY3VzdG9keSBmcm9tIGluZGl2aWR1YWwgY2hhbmdlIHRvIHJlbGVhc2UsIHNhdGlzZnlpbmcgTklTVCBTU0RGIFBTLjMuMSBhbmQgSVNPIDI3MDAxOjIwMjIgQS44LjMyLiBTZWUgYGRvY3MvUkVMRUFTRV9QT0xJQ1kubWRgIMKnNC4xIGZvciB0aGUgZnVsbCBzaWduaW5nIHJhdGlvbmFsZS4qCgojIyMgMS40IFByZS1jb21taXQgSG9va3MKClByZS1jb21taXQgaG9va3MgYXJlICoqcGxhbm5lZCoqIGZvciBhIGZ1dHVyZSBtaWxlc3RvbmUuIE9uY2UgYXZhaWxhYmxlLCBzZXR1cCB3aWxsIGJlOgoKYGBgYmFzaAp1diBydW4gcHJlLWNvbW1pdCBpbnN0YWxsCmBgYAoKVW50aWwgdGhlbiwgcnVuIGxpbnRpbmcgYW5kIHNlY3VyaXR5IGNoZWNrcyBtYW51YWxseSBiZWZvcmUgb3BlbmluZyBhIFBSIChzZWUgU2VjdGlvbnMgNCBhbmQgNSkuCgotLS0KCiMjIDIuIEJyYW5jaGluZyBhbmQgUHVsbCBSZXF1ZXN0IFBvbGljeQoKPiAqTklTVCBTU0RGIFBXLjYuMSAtLS0gcmV2aWV3IGFuZCBtZXJnZSBjb2RlIGNoYW5nZXMqCj4gKklTTyAyNzAwMToyMDIyOiBBLjguMzIgKENoYW5nZSBtYW5hZ2VtZW50KSoKCi0gKipObyBkaXJlY3QgcHVzaGVzIHRvIGBtYWluYC4qKiBBbGwgY2hhbmdlcyBtdXN0IGdvIHRocm91Z2ggYSBmZWF0dXJlIGJyYW5jaCBhbmQgUFIuCi0gKipCcmFuY2ggbmFtaW5nIGNvbnZlbnRpb246KioKCnwgVHlwZSB8IFBhdHRlcm4gfCBFeGFtcGxlIHwKfC0tLS0tLXwtLS0tLS0tLS18LS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS18CnwgRmVhdHVyZSB8IGBmZWF0dXJlL2lzc3VlLU5OTi1zaG9ydC1kZXNjcmlwdGlvbmAgfCBgZmVhdHVyZS9pc3N1ZS00Mi1zY29yZS1leHBsYWluZXJgIHwKfCBCdWcgZml4IHwgYGZpeC9pc3N1ZS1OTk4tc2hvcnQtZGVzY3JpcHRpb25gIHwgYGZpeC9pc3N1ZS05OS1wYXRoLWluamVjdGlvbmAgfAp8IFJlbGVhc2UgfCBgcmVsZWFzZS92WC5ZLlpgIHwgYHJlbGVhc2UvdjEuMS4wYCB8CnwgSG90Zml4IHwgYGhvdGZpeC92WC5ZLlpgIHwgYGhvdGZpeC92MS4wLjFgIHwKfCBEb2NzIHwgYGRvY3MvaXNzdWUtTk5OLXNob3J0LWRlc2NyaXB0aW9uYCB8IGBkb2NzL2lzc3VlLTEwOC1jb250cmlidXRpbmdgIHwKCi0gKipFdmVyeSBQUiBtdXN0OioqCiAgLSBSZWZlcmVuY2UgdGhlIHJlbGF0ZWQgaXNzdWUgKGBDbG9zZXMgI05OTmAgb3IgYFJlbGF0ZXMgdG8gI05OTmAgaW4gdGhlIFBSIGJvZHkpCiAgLSBIYXZlICoqYXQgbGVhc3Qgb25lIGFwcHJvdmFsKiogZnJvbSBhIG1haW50YWluZXIgYmVmb3JlIG1lcmdlCiAgLSBQYXNzIGFsbCBDSSBjaGVja3M6IGB0ZXN0cy55bWxgIChweXRlc3QgbWF0cml4LCBQeXRob24gMy4xMS0zLjEzKSBhbmQgYHNlY3VyaXR5LnltbGAgKENvZGVRTCwgVHJpdnksIEdpdGxlYWtzKQogIC0gQ29udGFpbiBvbmx5IFNTSC1zaWduZWQgY29tbWl0cyAtLS0gdW5zaWduZWQgY29tbWl0cyBibG9jayBtZXJnZSB2aWEgYnJhbmNoIHByb3RlY3Rpb24KCi0gKipTcXVhc2ggb3IgbWVyZ2UgY29tbWl0cyoqIGFyZSBib3RoIGFjY2VwdGFibGU7IHJlYmFzZSBpcyBwcmVmZXJyZWQgZm9yIGNsZWFuIGhpc3Rvcnkgb24gZmVhdHVyZSBicmFuY2hlcy4KCi0tLQoKIyMgMy4gU2VjdXJlIENvZGluZyBTdGFuZGFyZHMKCj4gKk5JU1QgU1NERiBQVy4xLjEgLS0tIGRlZmluZSBzZWN1cml0eSByZXF1aXJlbWVudHM7IFBXLjQuMSAtLS0gdmV0IGNvbXBvbmVudHMqCj4gKklTTyAyNzAwMToyMDIyOiBBLjguMjYgKEFwcGxpY2F0aW9uIHNlY3VyaXR5IHJlcXVpcmVtZW50cyksIEEuOC4yNSAoU2VjdXJlIGRldmVsb3BtZW50IGxpZmVjeWNsZSkqCgotICoqRm9sbG93IE9XQVNQIFRVCCAXMCOQIHBYAW5jaXBsZXMgd2hlcmUgYXBwbGljYWJsZSwgcGFydGljdWxhcmx5IGluamVjdGlvbiBwcmV2ZW50aW9uLCBicm9rZW4gYWNjZXNzIGNvbnRyb2wsIGFuZCBzZWN1cml0eSBtaXNjb25maWd1cmF0aW9uLgotICoqTm8gaGFyZGNvZGVkIHNlY3JldHMgb3IgY3JlZGVudGlhbHMqKiBpbiBzb3VyY2UgY29kZSwgY29uZmlndXJhdGlvbiBmaWxlcywgb3IgdGVzdHMuIFNlY3JldCBzY2FubmluZyAoR2l0bGVha3MpIHJ1bnMgb24gZXZlcnkgUFIgYW5kIHdpbGwgYmxvY2sgbWVyZ2UgaWYgc2VjcmV0cyBhcmUgZGV0ZWN0ZWQuCi0gKipJbnB1dCB2YWxpZGF0aW9uIGlzIHJlcXVpcmVkKiogZm9yIGFsbCB1c2VyLWZhY2luZyBvciBBUEktZmFjaW5nIGlucHV0cy4gVXNlIFB5ZGFudGljIG1vZGVscyBhdCB0cnVzdCBib3VuZGFyaWVzLiBTZWUgYGRvY3MvU0VDVVJJVFlfUkVRVUlSRU1FTlRTLm1kYCDCpzQgZm9yIGZ1bGwgcmVxdWlyZW1lbnRzIGFuZCBpbXBsZW1lbnRhdGlvbiBldmlkZW5jZS4KLSAqKk5ldyBkZXBlbmRlbmNpZXMgbXVzdCBwYXNzIHRoZSB2ZXR0aW5nIGNoZWNrbGlzdCoqIGluIGBkb2NzL1NFQ1VSSVRZX1JFUVVJUkVNRU5UUy5tZGAgwqc1LjEgYmVmb3JlIGJlaW5nIGFkZGVkLiBEb2N1bWVudCB2ZXR0aW5nIGV2aWRlbmNlIGluIHRoZSBQUiBib2R5LgotICoqYHB5bGludGAgbXVzdCBzY29yZSDiiaUgOS4wKiogYWNyb3NzIGBzcmMvaG90c3BvdHRyaWFnZS9gOgogIGBgYGJhc2gKICB1diBydW4gcHlsaW50IHNyYy9ob3RzcG90dHJpYWdlIC0tZmFpbC11bmRlcj05LjAKICBgYGAKLSAqKlBhdGggb3BlcmF0aW9ucyoqIG11c3QgdXNlIHRoZSBjZW50cmFsaXNlZCBgcGF0aF91dGlscy5yZXNvbHZlX2xvY2FsX3JlcG9fcGF0aCgpYCB1dGlsaXR5IC0tLSBuZXZlciByYXcgc3RyaW5nIGNvbmNhdGVuYXRpb24gb3IgYG9zLnBhdGguam9pbmAgd2l0aCB1bnRydXN0ZWQgaW5wdXQuCgotLS0KCiMjIDQuIFRlc3RpbmcKCj4gKk5JU1QgU1NERiBQVy43LjIgLS0tIHRlc3QgdGhlIHNvZnR3YXJlIHRvIGlkZW50aWZ5IHZ1bG5lcmFiaWxpdGllcyoKPiAqSVNPIDI3MDAxOjIwMjI6IEEuOC4yOSAoU2VjdXJpdHkgdGVzdGluZyBpbiBkZXZlbG9wbWVudCBhbmQgYWNjZXB0YW5jZSksIEEuOC4zMyAoUHJvdGVjdGlvbiBvZiB0ZXN0IGluZm9ybWF0aW9uKSoKCi0gKipOZXcgZmVhdHVyZXMgbXVzdCBpbmNsdWRlIGNvcnJlc3BvbmRpbmcgdGVzdHMqKiBpbiBgdGVzdHMvYC4KLSAqKkJ1ZyBmaXhlcyBtdXN0IGluY2x1ZGUgYSByZWdyZXNzaW9uIHRlc3QqKiB0aGF0IHJlcHJvZHVjZXMgdGhlIGJ1ZyBiZWZvcmUgdGhlIGZpeC4KLSBSdW4gdGhlIGZ1bGwgdGVzdCBzdWl0ZSBsb2NhbGx5IGJlZm9yZSBvcGVuaW5nIGEgUFI6CiAgYGBgYmFzaAogIHV2IHJ1biBweXRlc3QgdGVzdHMvIC12CiAgYGBgCi0gVGVzdHMgcnVuIGF1dG9tYXRpY2FsbHkgaW4gQ0kgYWdhaW5zdCAqKlB5dGhvbiAzLjExLCAzLjEyLCBhbmQgMy4xMyoqIHZpYSBgdGVzdHMueW1sYCAoaXNzdWUgIzEwNiwgY29tcGxldGVkKS4KLSBUZXN0IGNvdmVyYWdlIG9mIHZhbGlkLCBpbnZhbGlkLCBvdmVyc2l6ZWQsIGFuZCBib3VuZGFyeSBpbnB1dHMgaXMgZXhwZWN0ZWQgZm9yIGFueSBjb2RlIHRvdWNoaW5nIGlucHV0IHZhbGlkYXRpb24gb3Igc2NvcmluZyBsb2dpYy4KCiMjIyA0LjEgVGVzdCBEYXRhIFBvbGljeSAoSVNPIDI3MDAxOjIwMjIgQS44LjMzKQoKQWxsIHRlc3QgZml4dHVyZXMgaW4gYHRlc3RzL2AgdXNlICoqc3ludGhldGljIFB5dGhvbiBzb3VyY2UgY29kZSBzYW1wbGVzKiogLS0tIG5vIHJlYWwgdXNlciBkYXRhLCBubyBwZXJzb25hbCBkYXRhLCBhbmQgbm8gcHJvZHVjdGlvbiByZXBvc2l0b3J5IGNvZGUuIE5vIHNlY3JldHMsIGNyZWRlbnRpYWxzLCBvciBzZW5zaXRpdmUgaW5mb3JtYXRpb24gYXJlIHByZXNlbnQgaW4gdGhlIHRlc3QgZGlyZWN0b3J5OyB0aGlzIGlzIGVuZm9yY2VkIGJ5IEdpdGxlYWtzIHNlY3JldCBzY2FubmluZyBvbiBldmVyeSBQUi4gSWYgcmVhbCBjb2RlIHNhbXBsZXMgYXJlIGV2ZXIgcHJvcG9zZWQgYXMgdGVzdCBmaXh0dXJlcyBpbiBhIGZ1dHVyZSBjb250cmlidXRpb24sIHRoZXkgbXVzdCBiZSByZXZpZXdlZCBmb3Igc2Vuc2l0aXZlIGNvbnRlbnQgYnkgdGhlIG1haW50YWluZXIgYmVmb3JlIHRoZSBQUiBpcyBtZXJnZWQuCgotLS0KCiMjIDUuIFNlY3VyaXR5Cgo+ICpOSVNUIFNTREYgUlYuMi4yIC0tLSBhZGRyZXNzIHZ1bG5lcmFiaWxpdGllcyoKPiAqSVNPIDI3MDAxOjIwMjI6IEEuOC44IChNYW5hZ2VtZW50IG9mIHRlY2huaWNhbCB2dWxuZXJhYmlsaXRpZXMpKgoKIyMjIDUuMSBSZXBvcnRpbmcgVnVsbmVyYWJpbGl0aWVzCgoqKkRvIG5vdCBvcGVuIHB1YmxpYyBHaXRIdWIgaXNzdWVzIGZvciBzZWN1cml0eSB2dWxuZXJhYmlsaXRpZXMuKiogRm9sbG93IHRoZSByZXNwb25zaWJsZSBkaXNjbG9zdXJlIHByb2Nlc3MgZGVmaW5lZCBpbiBgU0VDVVJJVFkubWRgLgoKIyMjIDUuMiBQcmUtUFIgU2VjdXJpdHkgQ2hlY2tzCgpSdW4gdGhlIGZvbGxvd2luZyBsb2NhbGx5IGJlZm9yZSBvcGVuaW5nIGEgUFIgdGhhdCB0b3VjaGVzIGRlcGVuZGVuY2llcyBvciBzZWN1cml0eS1zZW5zaXRpdmUgY29kZToKCmBgYGJhc2gKIyBEZXBlbmRlbmN5IHZ1bG5lcmFiaWxpdHkgc2Nhbgp1diBleHBvcnQgLS1mb3JtYXQgcmVxdWlyZW1lbnRzLXR4dCB8IHBpcC1hdWRpdCAtciAvZGV2L3N0ZGluCgojIExpbnQgZm9yIHNlY3VyaXR5IGFudGktcGF0dGVybnMKdXYgcnVuIHB5bGludCBzcmMvaG90c3BvdHRyaWFnZSAtLWZhaWwtdW5kZXI9OS4wCmBgYAoKQ0kgcnVucyBDb2RlUUwgKFNBU1QpLCBUcml2eSAoZGVwZW5kZW5jeSArIGZzIHNjYW4pLCBhbmQgR2l0bGVha3MgKHNlY3JldCBzY2FubmluZykgYXV0b21hdGljYWxseSBvbiBldmVyeSBQUiB2aWEgYHNlY3VyaXR5LnltbGAuCgotLS0KCiMjIDYuIFJlbGVhc2UgUHJvY2Vzcwo+ICpOSVNUIFNTREYgUFMuMy4xIC0tLSBhcmNoaXZlIGFuZCBwcm90ZWN0IGVhY2ggcmVsZWFzZSB2ZXJzaW9uKgoKT25seSBtYWludGFpbmVycyBtYXkgY3JlYXRlIHJlbGVhc2UgdGFncy4gVGhlIGZ1bGwgcmVsZWFzZSBwcm9jZXNzLCBwcmUtcmVsZWFzZSBnYXRlIGNoZWNrbGlzdCwgdmVyc2lvbmluZyBwb2xpY3ksIGFuZCBob3RmaXggcHJvY2VzcyBhcmUgZGVmaW5lZCBpbiAqKmBkb2NzL1JFTEVBU0VfUE9MSUNZLW1kYCoqLgoKS2V5IHBvaW50cyBmb3IgY29udHJpYnV0b3JzOgotIFZlcnNpb24gYnVtcHMgaGFwcGVuIGluIHRoZSByZWxlYXNlIFBSIC0tLSBkbyBub3QgYnVtcCBgdmVyc2lvbmAgaW4gYHB5cHJvamVjdC50b21sYCBpbiBmZWF0dXJlIFBScwotIGBDSEFOR0VMT0cubWRgIGlzIHVwZGF0ZWQgYXMgcGFydCBvZiB0aGUgcmVsZWFzZSBQUiAtLS0gYWRkIHlvdXIgY2hhbmdlcyB0byB0aGUgYFtVbnJlbGVhc2VkXWAgc2VjdGlvbiBpbiB5b3VyIGZlYXR1cmUgUFIgaWYgYXBwcm9wcmlhdGUKLSBBbGwgcmVsZWFzZSB0YWdzIGFyZSBTU0gtc2lnbmVkIChjb25maWd1cmVkIGluIFNlY3Rpb24gMS4zIGFib3ZlKQoKLS0tCgojIyA3LiBBY2Nlc3MgQ29udHJvbCBQb2xpY3kgKFVLIEN5YmVyIEVzc2VudGlhbHMgQWxpZ25tZW50KQoKPiAqVUsgQ3liZXIgRXNzZW50aWFsczogQWNjZXNzIENvbnRyb2wgLS0tIERvY3VtZW50ZWQgdXNlciBhY2Nlc3MgcmlnaHRzKgo+ICpJU08gMjcwMDE6MjAyMjogQS41LjE1LS01LjE4IChBY2Nlc3MgY29udHJvbCwgaWRlbnRpdHkgbWFuYWdlbWVudCkqCj4gKk5JU1QgU1AgODAwLTUzOiBBQy0yLCBBQy0zIChBY2NvdW50IG1hbmFnZW1lbnQsIGFjY2VzcyBlbmZvcmNlbWVudCkqCj4gKkNPQklUIDIwMTk6IERTU9A1IChNYW5hZ2UgU2VjdXJpdHkgU2VydmljZXMpKgoKIyMjIDcuMSBQcmluY2lwbGUgb2YgTGVhc3QgUHJpdmlsZWdlCgpBY2Nlc3MgdG8gcmVwb3NpdG9yeSBmdW5jdGlvbnMgaXMgZ3JhbnRlZCBvbiBhIGxlYXN0LXByaXZpbGVnZSBiYXNpcy4gRWFjaCByb2xlIGlzIGFzc2lnbmVkIG9ubHkgdGhlIHJpZ2h0cyBuZWNlc3NhcnkgdG8gcGVyZm9ybSBpdHMgZnVuY3Rpb24uCgp8IFJvbGUgfCBSaWdodHMgfCBDb250cm9sIHwKfC0tLS0tLXwtLS0tLS0tLXwtLS0tLS0tLS18CnwgTWFpbnRhaW5lciB8IE1lcmdlIHRvIGBtYWluYCwgcHVibGlzaCByZWxlYXNlcywgbWFuYWdlIGJyYW5jaCBwcm90ZWN0aW9uIHwgU1NILXNpZ25lZCBjb21taXRzICsgR2l0SHViIHJlcG8gYWRtaW4gfAp8IENvbnRyaWJ1dG9yIHwgT3BlbiBQUnMsIHB1c2ggdG8gZmVhdHVyZSBicmFuY2hlcyB8IEZvcmsgb3IgYnJhbmNoICsgU1NILXNpZ25lZCBjb21taXRzIHwKfCBSZWFkLW9ubHkgfCBWaWV3IGNvZGUsIG9wZW4gaXNzdWVzIHwgR2l0SHViIHB1YmxpYyBhY2Nlc3MgfAoKIyMjIDcuMiBCcmFuY2ggUHJvdGVjdGlvbiBSdWxlcwoKLSBgbWFpbmAgYnJhbmNoIGlzIHByb3RlY3RlZDogZGlyZWN0IHB1c2hlcyBhcmUgcHJvaGliaXRlZAotIEFsbCBjaGFuZ2VzIHRvIGBtYWluYCBtdXN0IGdvIHZpYSBQdWxsIFJlcXVlc3QKLSBBdCBsZWFzdCAxIGFwcHJvdmFsIHJlcXVpcmVkIChzZWxmLWFwcHJvdmFsIGRvY3VtZW50ZWQgZm9yIHNvbG8gbWFpbnRhaW5lciB3aXRoIHJhdGlvbmFsZSkKLSBTdGF0dXMgY2hlY2tzIChDSSwgc2VjdXJpdHkgc2NhbnMpIG11c3QgcGFzcyBiZWZvcmUgbWVyZ2UKLSBBbGwgY29tbWl0cyBtdXN0IGJlIFNTSC1zaWduZWQgKHNlZSBTZWN0aW9uIDEuMykKCiMjIyA3LjMgUmVsZWFzZSBSaWdodHMKCk9ubHkgdGhlIGRlc2lnbmF0ZWQgbWFpbnRhaW5lciAoYEBhdm5vdmlrb3ZgKSBtYXkgY3JlYXRlIHNpZ25lZCByZWxlYXNlIHRhZ3MgYW5kIHB1Ymxpc2ggR2l0SHViIFJlbGVhc2VzLiBSZWxlYXNlIHRhZ3MgbXVzdCBiZSBTU0gtc2lnbmVkIChlbmZvcmNlZCBieSBwb2xpY3k7IHNlZSBgZG9jcy9SRUxFQVNFX1BPTElDWS5tZGApLgoKIyMjIDcuNCBBY2Nlc3MgUmV2aWV3IENhZGVuY2UKCkFjY2VzcyByaWdodHMgYXJlIHJldmlld2VkIGF0IGxlYXN0IGFubnVhbGx5IG9yIHVwb24gYW55IG1haW50YWluZXIgY2hhbmdlLiBUaGUgcmV2aWV3IGlzIGNvbmR1Y3RlZCBieSBgQGF2bm92aWtvdmAgYW5kIGRvY3VtZW50ZWQgaW4gdGhlIHJlbGVhc2UgY2hhbmdlbG9nLgoKLS0tCgojIyA4LiBVc2Ugb2YgQUkKCkhvdHNwb3RUcmlhZ2UgaXMgYW4gQUktdG9vbGluZyBwcm9qZWN0IGFuZCB0aGUgbWFpbnRhaW5lciB1c2VzIEFJIGFzc2lzdGFuY2UgKGluY2x1ZGluZyBNQ1AtYmFzZWQgYWdlbnRzKSBpbiBkZXZlbG9wbWVudC4gQ29udHJpYnV0b3JzIGFyZSB3ZWxjb21lIHRvIHVzZSBBSSB0b29scywgc3ViamVjdCB0byB0aGUgZm9sbG93aW5nOgoKLSAqKllvdSBhcmUgcmVzcG9uc2libGUgZm9yIGFsbCBjb2RlIHlvdSBzdWJtaXQqKiwgcmVnYXJkbGVzcyBvZiBob3cgaXQgd2FzIGdlbmVyYXRlZC4gUmV2aWV3IEFJLWJ1aWx0IGNvZGUgY2FyZWZ1bGx5IGJlZm9yZSBjb21taXR0aW5nLgotICoqQUktZ2VuZXJhdGVkIGNvZGUgbXVzdCBtZWV0IGFsbCB0aGUgc2FtZSBzdGFuZGFyZHMqKiBhcyBodW1hbi13cml0dGVuIGNvZGU6IHRlc3RzLCBpbnB1dCB2YWxpZGF0aW9uLCBweWxpbnQgc2NvcmUsIHNlY3VyaXR5IHJldmlldy4KLSAqKkRvIG5vdCBzdWJtaXQgQUktZ2VuZXJhdGVkIGRlcGVuZGVuY3kgYWRkaXRpb25zKiogd2l0aG91dCBtYW51YWxseSBjb21wbGV0aW5nIHRoZSB2ZXR0aW5nIGNoZWNrbGlzdCBpbiBgZG9jcy9TRUNVUklUWV9SRVFVSVJFTUVOVFMubWRgIMKnNS4xLgotICoqRGlzY2xvc2UgQUkgYXNzaXN0YW5jZSBpbiB0aGUgUFIgZGVzY3JpcHRpb24qKiBpZiBhIHNpZ25pZmljYW50IHBvcnRpb24gb2YgdGhlIGltcGxlbWVudGF0aW9uIHdhcyBBSS1nZW5lcmF0ZWQuIFRoaXMgc3VwcG9ydHMgYXVkaXQgdHJhbnNwYXJlbmN5LgoKLS0tCgojIyA5LiBDb2RlIG9mIENvbmR1Y3QKClRoaXMgcHJvamVjdCBmb2xsb3dzIHRoZSBbQ29udHJpYnV0b3IgQ292ZW5hbnQgdjIuMV0oaHR0cHM6Ly93d3cuY29udHJpYnV0b3ItY292ZW5hbnQub3JnL3ZlcnNpb24vMi8xL2NvZGVfb2ZfY29uZHVjdC8pLgoKSW5zdGFuY2VzIG9mIHVuYWNjZXB0YWJsZSBiZWhhdmlvdXIgbWF5IGJlIHJlcG9ydGVkIHRvIHRoZSBtYWludGFpbmVyIGF0IHRoZSBlbWFpbCBhZGRyZXNzIGxpc3RlZCBpbiBgcHlwcm9qZWN0LnRvbWxgLgoKLS0tCgojIyBEb2N1bWVudCBDb250cm9sCgp8IEF0dHJpYnV0ZSB8IFZhbHVlIHwKfC0tLS0tLS0tLS0tfC0tLS0tLS18CnwgQ3JlYXRlZCB8IDIwMjYtMDUtMDkgfAp8IExhc3QgcmV2aWV3ZWQgfCAyMDI2LTA1LTA5IHwKfCBOZXh0IHJldmlldyB8IEF0IG5leHQgcmVsZWFzZSBtaWxlc3RvbmUgfAp8IEFwcHJvdmVkIGJ5IHwgQGF2bm92aWtvdiB8CnwgUmVsYXRlZCBkb2N1bWVudHMgfCBgU0VDVVJJVFkubWRgLCBgZG9jcy9TRUNVUklUWV9SRVFVSVJFTUVOVFMubWRgLCBgZG9jcy9SRUxFQVNFX1BPTElDWS5tZGAsIGBDSEFOR0VMT0cubWRgIHwK
+# Contributing to HotspotTriage
+
+> **NIST SSDF reference:** PO.1.1 — Implement a security policy for the software development lifecycle
+> *ISO 27001:2022: A.5.1 (Policies), A.8.32 (Change management), A.6.3 (Information security awareness)*
+> *COBIT 2019: APO01 (Manage the IT Management Framework), BAI06 (Manage IT Changes)*
+
+Thank you for your interest in HotspotTriage. This document defines the secure development lifecycle policy for all contributors.
+
+---
+
+## 1. Development Environment Setup
+
+### 1.1 Prerequisites
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| Python | 3.11 – 3.13 | Runtime (matches `requires-python` in `pyproject.toml`) |
+| [`uv`](https://github.com/astral-sh/uv) | Latest stable | Package manager, virtualenv, build |
+| Git | ≥ 2.34 | Version control (SSH signing support) |
+
+### 1.2 Install dependencies
+
+```bash
+git clone https://github.com/avnovikov/HotspotTriage.git
+cd HotspotTriage
+uv sync --all-extras --dev
+```
+
+This installs all runtime and development dependencies into an isolated virtualenv managed by `uv`, using hash-verified versions from `uv.lock`.
+
+### 1.3 SSH Commit and Tag Signing (required)
+
+All commits to this repository **must be SSH-signed**. This is enforced by the branch protection rule on `main` — unsigned commits will be rejected.
+
+**One-time workstation setup:**
+
+```bash
+# Use SSH for signing (no GPG keyring required)
+git config --global gpg.format ssh
+git config --global user.signingKey ~/.ssh/id_ed25519.pub   # replace with your key path
+git config --global commit.gpgSign true    # auto-sign all commits
+git config --global tag.gpgSign true       # auto-sign all tags
+```
+
+**GitHub setup:** Register your SSH key under **Settings → SSH and GPG keys** as a *Signing Key* (separate from your authentication key). GitHub will display a `Verified` badge on your signed commits.
+
+> *This two-layer signing policy (commits + tags) establishes an unbroken chain of custody from individual change to release, satisfying NIST SSDF PS.3.1 and ISO 27001:2022 A.8.32. See `docs/RELEASE_POLICY.md` §4.1 for the full signing rationale.*
+
+### 1.4 Pre-commit Hooks
+
+Pre-commit hooks are **planned** for a future milestone. Once available, setup will be:
+
+```bash
+uv run pre-commit install
+```
+
+Until then, run linting and security checks manually before opening a PR (see Sections 4 and 5).
+
+---
+
+## 2. Branching and Pull Request Policy
+
+> *NIST SSDF PW.6.1 — review and merge code changes*
+> *ISO 27001:2022: A.8.32 (Change management)*
+
+- **No direct pushes to `main`.** All changes must go through a feature branch and PR.
+- **Branch naming convention:**
+
+| Type | Pattern | Example |
+|------|---------|------------------------------------------------------|
+| Feature | `feature/issue-NNN-short-description` | `feature/issue-42-score-explainer` |
+| Bug fix | `fix/issue-NNN-short-description` | `fix/issue-99-path-injection` |
+| Release | `release/vX.Y.Z` | `release/v1.1.0` |
+| Hotfix | `hotfix/vX.Y.Z` | `hotfix/v1.0.1` |
+| Docs | `docs/issue-NNN-short-description` | `docs/issue-108-contributing` |
+
+- **Every PR must:**
+  - Reference the related issue (`Closes #NNN` or `Relates to #NNN` in the PR body)
+  - Have **at least one approval** from a maintainer before merge
+  - Pass all CI checks: `tests.yml` (pytest matrix, Python 3.11–3.13) and `security.yml` (CodeQL, Trivy, Gitleaks)
+  - Contain only SSH-signed commits — unsigned commits block merge via branch protection
+
+- **Squash or merge commits** are both acceptable; rebase is preferred for clean history on feature branches.
+
+---
+
+## 3. Secure Coding Standards
+
+> *NIST SSDF PW.1.1 — define security requirements; PW.4.1 — vet components*
+> *ISO 27001:2022: A.8.26 (Application security requirements), A.8.25 (Secure development lifecycle)*
+
+- **Follow OWASP Top 10** principles where applicable, particularly injection prevention, broken access control, and security misconfiguration.
+- **No hardcoded secrets or credentials** in source code, configuration files, or tests. Secret scanning (Gitleaks) runs on every PR and will block merge if secrets are detected.
+- **Input validation is required** for all user-facing or API-facing inputs. Use Pydantic models at trust boundaries. See `docs/SECURITY_REQUIREMENTS.md` §4 for full requirements and implementation evidence.
+- **New dependencies must pass the vetting checklist** in `docs/SECURITY_REQUIREMENTS.md` §5.1 before being added. Document vetting evidence in the PR body.
+- **`pylint` must score ≥ 9.0** across `src/hotspottriage/`:
+  ```bash
+  uv run pylint src/hotspottriage --fail-under=9.0
+  ```
+- **Path operations** must use the centralised `path_utils.resolve_local_repo_path()` utility — never raw string concatenation or `os.path.join` with untrusted input.
+
+---
+
+## 4. Testing
+
+> *NIST SSDF PW.7.2 — test the software to identify vulnerabilities*
+> *ISO 27001:2022: A.8.29 (Security testing in development and acceptance), A.8.33 (Protection of test information)*
+
+- **New features must include corresponding tests** in `tests/`.
+- **Bug fixes must include a regression test** that reproduces the bug before the fix.
+- Run the full test suite locally before opening a PR:
+  ```bash
+  uv run pytest tests/ -v
+  ```
+- Tests run automatically in CI against **Python 3.11, 3.12, and 3.13** via `tests.yml` (issue #106, completed).
+- Test coverage of valid, invalid, oversized, and boundary inputs is expected for any code touching input validation or scoring logic.
+
+### 4.1 Test Data Policy (ISO 27001:2022 A.8.33)
+
+All test fixtures in `tests/` use **synthetic Python source code samples** — no real user data, no personal data, and no production repository code. No secrets, credentials, or sensitive information are present in the test directory; this is enforced by Gitleaks secret scanning on every PR. If real code samples are ever proposed as test fixtures in a future contribution, they must be reviewed for sensitive content by the maintainer before the PR is merged.
+
+---
+
+## 5. Security
+
+> *NIST SSDF RV.2.2 — address vulnerabilities*
+> *ISO 27001:2022: A.8.8 (Management of technical vulnerabilities)*
+
+### 5.1 Reporting Vulnerabilities
+
+**Do not open public GitHub issues for security vulnerabilities.** Follow the responsible disclosure process defined in `SECURITY.md`.
+
+### 5.2 Pre-PR Security Checks
+
+Run the following locally before opening a PR that touches dependencies or security-sensitive code:
+
+```bash
+# Dependency vulnerability scan
+uv export --format requirements-txt | pip-audit -r /dev/stdin
+
+# Lint for security anti-patterns
+uv run pylint src/hotspottriage --fail-under=9.0
+```
+
+CI runs CodeQL (SAST), Trivy (dependency + fs scan), and Gitleaks (secret scanning) automatically on every PR via `security.yml`.
+
+---
+
+## 6. Release Process
+
+> *NIST SSDF PS.3.1 — archive and protect each release version*
+
+Only maintainers may create release tags. The full release process, pre-release gate checklist, versioning policy, and hotfix process are defined in **`docs/RELEASE_POLICY.md`**.
+
+Key points for contributors:
+- Version bumps happen in the release PR — do not bump `version` in `pyproject.toml` in feature PRs
+- `CHANGELOG.md` is updated as part of the release PR — add your changes to the `[Unreleased]` section in your feature PR if appropriate
+- All release tags are SSH-signed (configured in Section 1.3 above)
+
+---
+
+## 7. Access Control Policy (UK Cyber Essentials alignment)
+
+> *UK Cyber Essentials: Access Control — documented user access rights*
+> *ISO 27001:2022: A.5.15–5.18 (Access control, identity management)*
+> *NIST SP 800-53: AC-2, AC-3 (Account management, access enforcement)*
+> *COBIT 2019: DSS05 (Manage Security Services)*
+
+### 7.1 Principle of least privilege
+
+Access to repository functions is granted on a least-privilege basis. Each role is assigned only the rights necessary to perform its function.
+
+| Role | Rights | Controls |
+|------|--------|----------|
+| Maintainer | Merge to `main`, publish releases, manage branch protection | SSH-signed commits and GitHub repo admin |
+| Contributor | Open PRs, push to feature branches | Fork or branch + SSH-signed commits |
+| Read-only | View code, open issues | GitHub public access |
+
+### 7.2 Branch protection rules
+
+- The `main` branch is protected: direct pushes are prohibited.
+- All changes to `main` must go through a Pull Request.
+- At least one approval is required (self-approval is documented for solo maintainer with rationale).
+- Status checks (CI, security scans) must pass before merge.
+- All commits must be SSH-signed (see Section 1.3).
+
+### 7.3 Release rights
+
+Only the designated maintainer (`@avnovikov`) may create signed release tags and publish GitHub Releases. Release tags must be SSH-signed (enforced by policy; see `docs/RELEASE_POLICY.md`).
+
+### 7.4 Access review cadence
+
+Access rights are reviewed at least annually or upon any maintainer change. The review is conducted by `@avnovikov` and documented in the release changelog.
+
+| Regulation / standard | Control | Requirement |
+|------------------------|---------|---------------|
+| UK Cyber Essentials | Access Control | Documented user access rights |
+| UK Cyber Essentials Plus | Access Control | Verified access control implementation |
+| ISO 27001:2022 | A.5.15–5.18 | Access control, identity management |
+| NIST SP 800-53 | AC-2, AC-3 | Account management, access enforcement |
+| COBIT 2019 | DSS05 | Manage Security Services |
+
+---
+
+## 8. Use of AI
+
+HotspotTriage is an AI-tooling project and the maintainer uses AI assistance (including MCP-based agents) in development. Contributors are welcome to use AI tools, subject to the following:
+
+- **You are responsible for all code you submit**, regardless of how it was generated. Review AI-generated code carefully before committing.
+- **AI-generated code must meet all the same standards** as human-written code: tests, input validation, pylint score, security review.
+- **Do not submit AI-generated dependency additions** without manually completing the vetting checklist in `docs/SECURITY_REQUIREMENTS.md` §5.1.
+- **Disclose AI assistance in the PR description** if a significant portion of the implementation was AI-generated. This supports audit transparency.
+
+---
+
+## 9. Code of Conduct
+
+This project follows the [Contributor Covenant v2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
+
+Instances of unacceptable behaviour may be reported to the maintainer at the email address listed in `pyproject.toml`.
+
+---
+
+## Document Control
+
+| Attribute | Value |
+|-----------|-------|
+| Created | 2026-05-09 |
+| Last reviewed | 2026-05-09 |
+| Next review | At next release milestone |
+| Approved by | @avnovikov |
+| Related documents | `SECURITY.md`, `docs/SECURITY_REQUIREMENTS.md`, `docs/RELEASE_POLICY.md`, `CHANGELOG.md` |

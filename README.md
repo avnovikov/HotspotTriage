@@ -23,23 +23,15 @@ Designed for engineers and coding agents who want precise, actionable metrics to
 
 ## The Problem
 
-Even with real breakthroughs like Claude Opus 4.5 and GPT‑5.3‑Codex — frontier models that pushed agentic coding, planning, and code quality forward in late 2025 and early 2026 — the core problems remain:
-
-Coding agents fall short: they regularly introduce duplicated, hard-to-maintain, and smell-prone code into real codebases, even when it passes basic tests.
-
-Running only the most expensive models on every change wastes tokens and slows teams down, without guaranteeing better engineering outcomes.
-
-Human reviewers cannot keep up with every diff in fast-moving repositories, so quality issues still slip through. And even top-tier models are not yet reliable, end‑to‑end code reviewers: they lack full architectural context, can misinterpret nuanced requirements, and often miss performance, maintainability, and security concerns that still require static analysis and focused human review.
-
-We need a mechanism to automatically identify code problems and route refactoring and expensive models to relevant areas, not everywhere.
+Code agents are fast but blind. They lack understanding about which parts of a codebase are risky, so they introduce duplication, maintainability debt, and code smells even when tests go green. Teams compensate by using their most powerful (and expensive) models on everything, or relying on human reviewers who cannot review every diff. The result: quality problems accumulate in the areas that matter most, undetected.
 
 ## 💡 The Solution
 
-HotspotTriage makes the overlap visible per file or function, so you can prioritize reviews, make safer edits, and use stronger models where risk is highest. Coding agents can automatically determine which model to use, whether code should be refactored before changes, whether changes improved the code, and whether they were worth it. After a few iterations, your coding agents will start paying attention to the numbers, and over time, general code quality will improve automagically.
+HotspotTriage makes the "code risk score" visible at the function level, enabling you to rank reviews and apply compute power only where it matters. By integrating directly into your agentic workflow, it allows models to self-assess: should this code be refactored first? Which model is needed for this task? Did this change improve the code? Your agents shift from ignorance to being data-informed, making code quality a first-class citizen in their decisions.
 
-HotspotTriage's composite score isn't fixed — it's fully customizable through normalization coefficients that let you dial in what matters most right now. Want to prioritize code smells over raw complexity? Crank up the Pylint heuristics weight. Obsessed with duplication? Boost DeepCSIM's block similarity factor. As your team's priorities shift — maybe code smells during cleanup season, or churn during a big refactor — you simply adjust the sliders in the config, and your agents adapt instantly.
+HotspotTriage's composite code risk score isn't fixed — it's fully tunable via config coefficients. Prioritize smells over complexity? Increase Pylint weight. Focus on duplication? Dial up DeepCSIM similarity. As team priorities evolve with cleanup sprints or big refactors, tweak the sliders and your agents adapt immediately.
 
-This puts engineers in control: the metric evolves alongside your codebase's real pain points, ensuring agents focus on where humans see the biggest risks — whether that's eliminating duplication patterns, taming cyclomatic complexity spikes, or catching maintainability red flags before they spread.
+Engineers stay in control: the metric adapts with your real pain points, ensuring agents target duplication patterns, complexity spikes, and maintainability red flags exactly where humans see the biggest risks.
 
 ---
 
@@ -49,10 +41,9 @@ This puts engineers in control: the metric evolves alongside your codebase's rea
 
 ## Key Benefits
 
-- **MCP server**: expose analysis, cache lifecycle, and config scaffolding to Cursor, Claude Code, and other MCP clients (FastMCP).
-- **CLI**: table, JSON, or CSV output for CI and local exploration (`hotspottriage <repo>`).
-- **Block mode**: function/method rows with cached churn (`git log -L`), optional similarity, and interpretable risk bands for agent routing.
-- **Layered YAML config**: global, project, and local overrides (Serena-inspired layering); `hotspottriage init` scaffolds templates.
+- **MCP server**: plug HotspotTriage directly into Cursor, Claude Code, or any MCP client — agents get live risk scores without leaving their workflow.
+- **CLI**: table, JSON, or CSV output — drop it into CI pipelines or run it locally with a single command (`hotspottriage <repo>`).
+- **Block mode**: scores at the function/method level — not just per file — so agents know *exactly* which block to target, not just which file.
 
 ## Quick Start
 
