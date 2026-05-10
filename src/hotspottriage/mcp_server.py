@@ -12,10 +12,8 @@ import argparse
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
-import hashlib
 import json
 import logging
-import math
 import subprocess
 import sys
 import threading
@@ -34,8 +32,24 @@ from hotspottriage.dashboard.server import DashboardServer
 from hotspottriage.dashboard.stats import StatsCollector
 from hotspottriage import discovery, filtering, explain as _explain, output as _output, stats
 from hotspottriage import revision_cache as _rev_cache
+from hotspottriage.mcp_block_row_utils import (
+    block_metric_row_repo_file as _block_metric_row_repo_file,
+    is_block_row_for_delta as _is_block_row_for_delta,
+    metric_triplet as _metric_triplet,
+    non_synthetic_block_rows as _non_synthetic_block_rows,
+    normal_block_stat_count as _normal_block_stat_count,
+    rows_equal_raw as _rows_equal_raw,
+)
+from hotspottriage.mcp_config_fingerprint import config_fingerprint as _config_fingerprint
 from hotspottriage.mcp_errors import mcp_classify_exception as _mcp_classify_exception
 from hotspottriage.mcp_errors import mcp_tool_error as _mcp_tool_error
+from hotspottriage.mcp_filter_paths import (
+    effective_mcp_filter_patterns as _effective_mcp_filter_patterns,
+    is_literal_filter_path as _is_literal_filter_path,
+    normalize_filter_path as _normalize_filter_path,
+)
+from hotspottriage.mcp_git import git_live_head_and_branch as _git_live_head_and_branch
+from hotspottriage.mcp_git import git_short_object_name as _git_short_object_name
 from hotspottriage.mcp_target import resolve_mcp_target as _resolve_mcp_target_impl
 from hotspottriage.path_utils import resolve_local_repo_path
 from hotspottriage.username_privacy import UsernameRedactingFormatter
@@ -225,43 +239,6 @@ def _parse_mcp_dashboard_argv() -> argparse.Namespace:
     args, rest = parser.parse_known_args()
     sys.argv = [sys.argv[0], *rest]
     return args
-
-
-def _is_block_row_for_delta(row: stats.Statistic) -> bool:
-    p = str(row.path)
-    if "::" not in p:
-        return False
-    if p.split("::", 1)[0].startswith("__"):
-        return False
-    return str(row.score_band).lower() != "aggregate"
-
-
-def _metric_triplet(
-    before: int | float | None, after: int | float | None
-) -> dict[str, int | float | None]:
-    if before is None and after is None:
-        return {"before": None, "after": None, "delta": None}
-    if before is None:
-        return {"before": None, "after": after, "delta": None}
-    if after is None:
-        return {"before": before, "after": None, "delta": None}
-    delta = after - before
-    return {"before": before, "after": after, "delta": delta}
-
-
-def _rows_equal_raw(a: stats.Statistic, b: stats.Statistic) -> bool:
-    for name in ("cyclomatic", "sloc", "halstead", "churn", "smell_count"):
-        if getattr(a, name) != getattr(b, name):
-            return False
-    for name in ("churn_per_sloc", "decayed_churn", "decayed_churn_per_sloc"):
-        if not math.isclose(
-            float(getattr(a, name)),
-            float(getattr(b, name)),
-            rel_tol=0.0,
-            abs_tol=1e-6,
-        ):
-            return False
-    return True
 
 
 def _build_block_delta_report(
@@ -951,19 +928,6 @@ def _build_analyze_config(
     return cfg
 
 
-def _is_literal_filter_path(pattern: str) -> bool:
-    """Return True when *pattern* looks like a concrete path, not a glob."""
-    token = pattern.strip()
-    if not token or token.startswith("!"):
-        return False
-    return not any(ch in token for ch in "*?[]{}")
-
-
-def _normalize_filter_path(path: str) -> str:
-    """Normalize a filter path to POSIX relative form for exact matching."""
-    return filtering.normalize_filter_pattern(path)
-
-
 def _build_repo_keep_predicate(
     repo: Path,
     cfg: dict[str, Any],
@@ -992,35 +956,6 @@ def _build_repo_keep_predicate(
         ignore_directories=cfg["ignore_directories"],
         respect_gitignore=cfg["respect_gitignore"],
     )
-
-
-def _effective_mcp_filter_patterns(cfg: dict[str, Any]) -> list[str]:
-    """Return the filter token list actually used by :func:`_build_repo_keep_predicate`."""
-    raw_patterns = [p.strip() for p in cfg.get("filter", []) if p and str(p).strip()]
-    use_literal_list = len(raw_patterns) > 1 and all(
-        _is_literal_filter_path(p) for p in raw_patterns
-    )
-    if use_literal_list:
-        return list(raw_patterns)
-    patterns = list(raw_patterns)
-    if not cfg.get("no_default_filter", False):
-        df = cfg.get("default_filter")
-        if isinstance(df, str) and df.strip():
-            patterns.append(df.strip())
-    return patterns
-
-
-def _normal_block_stat_count(rows: list[stats.Statistic]) -> int:
-    """Count non-synthetic block rows (exclude aggregate paths whose file starts with ``__``)."""
-    return sum(
-        1
-        for r in rows
-        if not str(r.path).split("::", 1)[0].startswith("__")
-    )
-
-
-def _non_synthetic_block_rows(rows: list[stats.Statistic]) -> list[stats.Statistic]:
-    return [r for r in rows if not str(r.path).split("::", 1)[0].startswith("__")]
 
 
 def _build_mcp_analyze_summary(rows: list[stats.Statistic]) -> dict[str, Any]:
@@ -1057,52 +992,6 @@ def _build_mcp_analyze_summary(rows: list[stats.Statistic]) -> dict[str, Any]:
         "max_score": {"path": max_sc.path, "value": round(float(max_sc.score), 4)},
         "mean_score": round(total_score / n, 4),
     }
-
-
-def _config_fingerprint(cfg: dict[str, Any]) -> str:
-    """Stable digest of the merged analyze config (for comparing runs)."""
-    payload = json.dumps(cfg, sort_keys=True, separators=(",", ":"), default=str)
-    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"
-
-
-def _git_short_object_name(repo: Path, full_sha: str) -> str | None:
-    token = full_sha.strip()
-    if not token:
-        return None
-    proc = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--short", f"{token}^{{commit}}"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        return None
-    lines = proc.stdout.strip().splitlines()
-    return lines[0].strip() if lines else None
-
-
-def _git_live_head_and_branch(repo: Path) -> tuple[str | None, str | None]:
-    """Return ``(short HEAD sha, branch name or ``detached``)`` for a local repo."""
-    proc = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        return None, None
-    short_head = (proc.stdout.strip().splitlines() or [""])[0].strip() or None
-    br = subprocess.run(
-        ["git", "-C", str(repo), "branch", "--show-current"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    branch = (br.stdout.strip().splitlines() or [""])[0].strip()
-    if not branch:
-        branch = "detached"
-    return short_head, branch
 
 
 def _initialize_repository(
@@ -1191,12 +1080,6 @@ def _publish_block_metrics_to_dashboard(
         [r.as_dict() for r in rows],
         analysis_repo=analysis_repo,
     )
-
-
-def _block_metric_row_repo_file(path: str) -> str:
-    """Repo-relative file path for a block metric row (strip ``::symbol``)."""
-    file_key = path.split("::", 1)[0] if "::" in path else path
-    return file_key.replace("\\", "/")
 
 
 def _publish_manager_rows_to_dashboard(
