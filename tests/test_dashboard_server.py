@@ -12,7 +12,9 @@ from fastapi.testclient import TestClient
 from hotspottriage import config as _project_config
 from hotspottriage import score as _score_mod
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
-from hotspottriage.dashboard.server import DashboardServer, _find_free_port, _slim_cache_job_result
+from hotspottriage.dashboard.cache_http import slim_cache_job_result
+from hotspottriage.dashboard.cache_jobs import find_free_port
+from hotspottriage.dashboard.server import DashboardServer
 from hotspottriage.dashboard.stats import StatsCollector
 from hotspottriage.username_privacy import redact_usernames_in_text
 
@@ -126,8 +128,13 @@ def _high_raw_block_row(path: str = "x.py::f") -> dict:
 
 
 def test_find_free_port_returns_in_range():
-    port = _find_free_port("127.0.0.1", 9300, span=3)
+    port = find_free_port("127.0.0.1", 9300, span=3)
     assert 9300 <= port <= 9302
+
+
+def test_find_free_port_rejects_all_interfaces_host():
+    with pytest.raises(ValueError, match="all network interfaces"):
+        find_free_port("0.0.0.0", 9300, span=3)
 
 
 def test_find_free_port_raises_when_range_busy():
@@ -140,7 +147,7 @@ def test_find_free_port_raises_when_range_busy():
             s.listen(1)
             sockets.append(s)
         try:
-            _find_free_port("127.0.0.1", 9400, span=2)
+            find_free_port("127.0.0.1", 9400, span=2)
             assert False, "expected OSError when no port is available"
         except OSError:
             pass
@@ -275,7 +282,7 @@ def test_slim_cache_job_result_omits_row_payloads():
         },
         "classes": {"count": 3, "results": [{"file": "f.py"}] * 3},
     }
-    slim = _slim_cache_job_result(heavy)
+    slim = slim_cache_job_result(heavy)
     assert "results" not in slim.get("blocks", {})
     assert "results" not in slim.get("classes", {})
     assert slim["blocks"]["count"] == 2
@@ -300,11 +307,11 @@ def test_cache_status_endpoint(monkeypatch, tmp_path):
     (cache_dir / "blocks.pkl").write_bytes(b"abc")
 
     monkeypatch.setattr(
-        "hotspottriage.dashboard.server._cache.get_metadata",
+        "hotspottriage.dashboard.block_metrics_store._cache.get_metadata",
         lambda _repo: {"entry_count": 7},
     )
     monkeypatch.setattr(
-        "hotspottriage.dashboard.server._cache.load_block_results",
+        "hotspottriage.dashboard.block_metrics_store._cache.load_block_results",
         lambda _repo: None,
     )
     resp = client.post("/api/cache/status", json={"target": str(repo)})
@@ -338,11 +345,11 @@ def test_cache_status_hydrates_heatmap_rows_when_cache_exists(monkeypatch, tmp_p
     (cache_dir / "blocks.pkl").write_bytes(b"abc")
 
     monkeypatch.setattr(
-        "hotspottriage.dashboard.server._cache.get_metadata",
+        "hotspottriage.dashboard.block_metrics_store._cache.get_metadata",
         lambda _repo: {"entry_count": 2},
     )
     monkeypatch.setattr(
-        "hotspottriage.dashboard.server._cache.load_block_results",
+        "hotspottriage.dashboard.block_metrics_store._cache.load_block_results",
         lambda _repo: [
             _high_raw_block_row("x.py::f"),
             _high_raw_block_row("y.py::g"),

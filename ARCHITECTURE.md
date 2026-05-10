@@ -154,9 +154,23 @@ The same patch file is merged into **CLI analyze** and **MCP local analyze**,
 so heatmap / dashboard tuning and terminal scores share one source of truth.
 
 `DashboardServer.publish_latest_block_metrics(..., analysis_repo=PATH)` records
-the analyzed checkout; `_derive_block_rows`, lazy `block_narrative`, and
-cache-job `config_overrides` then call `load_analyze_config_for_local_repo` on
-that path so dashboard explanations use the same weights as MCP/CLI.
+the analyzed checkout on `block_store`; row derivation, lazy `block_narrative`,
+and cache-job `config_overrides` then call `load_analyze_config_for_local_repo`
+on that path so dashboard explanations use the same weights as MCP/CLI.
+
+`DashboardServer` lives in `dashboard/server.py`, which mounts static assets,
+includes `dashboard/routes/pages.py` for HTML, and the `dashboard/routes/api/`
+package (`build_dashboard_api_router` in ``__init__.py``, split across
+``health_config.py``, ``block_metrics.py``, ``cache.py``, ``collector_stats.py``,
+``log_buffer.py``) for JSON under `/api`. Heatmap matrix JSON is in
+`dashboard/heatmap_matrix.py`, histograms in
+`dashboard/distribution_histogram.py`, block narrative payload in
+`dashboard/block_narrative_payload.py`, and SSE JSON ticks in `dashboard/sse_json.py`; cache
+request parsing and slimmed job payloads in `dashboard/cache_http.py`; threaded
+cache generation jobs in `dashboard/cache_jobs.py`. Persisted UI state is
+`dashboard/local_state.py` (`DashboardLocalState`); merged YAML overlay is
+`dashboard/config_patch_store.py` (`ConfigPatchStore`); in-memory block rows are
+`dashboard/block_metrics_store.py` (`BlockMetricsStore`).
 
 ---
 
@@ -180,9 +194,10 @@ blob SHA needed for staleness detection. No separate churn cache.
 `cache.py` exposes: `cache_path_for`, `save_block_results`, `load_block_results`,
 `get_metadata`, `age_seconds`.
 
-### 5.2 In-Memory: `_block_metrics_rows`
+### 5.2 In-Memory: `BlockMetricsStore` (heatmap / histogram rows)
 
-Live list of dict-ified `Statistic` rows, held by `DashboardServer`. Populated by:
+Live list of dict-ified `Statistic` rows, held by `DashboardServer.block_store`.
+Populated by:
 
 - MCP `analyze` → `_publish_block_metrics_to_dashboard`
 - Cache job completion → `publish_latest_block_metrics`
@@ -190,7 +205,7 @@ Live list of dict-ified `Statistic` rows, held by `DashboardServer`. Populated b
   cache exists and in-memory rows are empty (synchronous, sub-second)
 
 Consumed by `GET /api/stats/heatmap` and `GET /api/stats/distribution`.
-Protected by `_block_metrics_lock`.
+Protected by an internal lock on the store.
 
 ### 5.4 Dashboard State — `dashboard_state.json`
 
@@ -258,7 +273,7 @@ Git allows only **one** linked worktree to hold a given branch; `git checkout ma
 
 `_publish_block_metrics_to_dashboard`: when `granularity == "block"` and a
 `DashboardServer` is running, pushes all `Statistic.as_dict()` rows to
-`_block_metrics_rows`. Disk persistence is handled by `build_block_stats`
+`DashboardServer.block_store`. Disk persistence is handled by `build_block_stats`
 directly. The MCP tool calls `_publish_block_metrics_to_dashboard` with **full**
 (unlimited) results.
 
@@ -270,19 +285,19 @@ directly. The MCP tool calls `_publish_block_metrics_to_dashboard` with **full**
 
 | Attribute                   | Purpose |
 |-----------------------------|---------|
-| `_base_snapshot`            | Deep copy of `to_dashboard_snapshot(...)` at construction |
+| `_config_patch`             | `ConfigPatchStore`: base snapshot + `dashboard_config_patch.yml` merge/validate |
+| `_local_state`              | `DashboardLocalState`: `dashboard_state.json` |
+| `block_store`               | `BlockMetricsStore`: in-memory scored block rows for heatmap / histograms |
 | `_stats`                    | `StatsCollector` (wired but not actively updated by MCP tools) |
 | `_log_handler`              | `MemoryLogHandler` ring buffer |
 | `_host` / `_port`           | Bind address + chosen free port |
 | `_started_at`               | `time.monotonic()` for uptime |
 | `_cache_jobs` + lock        | Async cache job state |
-| `_state_file` + lock        | `dashboard_state.json` |
-| `_config_patch_path` + lock | `dashboard_config_patch.yml` |
-| `_block_metrics_rows` + lock | Heatmap + histogram source |
+| `_patch_lock`               | Serializes YAML patch read/write in route handlers |
 | `_app`                      | FastAPI app |
 | `_thread` / `_server`       | Uvicorn daemon thread + server handle |
 
-All shared mutable state protected by dedicated `threading.Lock` instances.
+Locks also live inside `_local_state` and `block_store` for their own data.
 
 ### 7.2 API Endpoints
 
@@ -295,7 +310,7 @@ All shared mutable state protected by dedicated `threading.Lock` instances.
 | GET    | `/api/stats/distribution`  | Histogram buckets for a named metric |
 | GET    | `/api/cache/context`       | Read persisted dashboard state |
 | POST   | `/api/cache/context`       | Save dashboard state (target, filter, score) |
-| POST   | `/api/cache/status`        | Check `blocks.pkl` existence, entries, size; if cache exists and `_block_metrics_rows` is empty, load rows directly (synchronous, fast) |
+| POST   | `/api/cache/status`        | Check `blocks.pkl` existence, entries, size; if cache exists and in-memory block rows are empty, load rows directly (synchronous, fast) |
 | POST   | `/api/cache/generate`      | Spawn background cache job |
 | GET    | `/api/cache/jobs/{job_id}` | Poll cache job progress |
 | GET    | `/api/stats`               | `StatsCollector` snapshot |
@@ -307,14 +322,14 @@ All shared mutable state protected by dedicated `threading.Lock` instances.
 
 ### 7.3 Heatmap Data Flow
 
-1. Rows land in `_block_metrics_rows` via one of:
+1. Rows land in `block_store` via one of:
    - MCP `analyze` → `_publish_block_metrics_to_dashboard`
    - Cache job completion → `publish_latest_block_metrics`
    - `POST /api/cache/status` → `cache.load_block_results(repo)` loads
      `blocks.pkl` directly (if cache exists and in-memory rows are empty).
      Synchronous pickle load, sub-second.
 
-2. `_build_heatmap_rows` selects score + burden columns, splits
+2. `heatmap_matrix.build_heatmap_rows` selects score + burden columns, splits
    `path::symbol` into `file` + `method`, sorts by file max score
    then method score, applies limit.
 
@@ -423,8 +438,8 @@ defaults-plus-args unless the client passes overrides.
 | Resource               | Lock                         | Accessed from |
 |------------------------|------------------------------|---------------|
 | `_cache_jobs`          | `_cache_jobs_lock`           | HTTP handlers, background cache threads |
-| `_block_metrics_rows`  | `_block_metrics_lock`        | HTTP handlers, MCP publish, cache job callback |
-| `dashboard_state.json` | `_state_lock`                | HTTP handlers (context, status, generate) |
+| `block_store` rows     | `BlockMetricsStore` internal lock | HTTP handlers, MCP publish, cache job callback |
+| `dashboard_state.json` | `DashboardLocalState` lock   | HTTP handlers (context, status, generate) |
 | `dashboard_config_patch.yml` | `_patch_lock`          | HTTP handlers (get/patch config) |
 | `MemoryLogHandler`     | Internal `_lock`             | Logger threads, HTTP handlers |
 | `StatsCollector`       | Internal `_lock`             | HTTP handlers, SSE stream |
