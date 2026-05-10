@@ -222,7 +222,25 @@ keys are rejected the same way as other config files).
 
 ---
 
-## 6. MCP Server (`mcp_server.py`)
+## 6. MCP Server (`mcp_server.py` and `mcp/`)
+
+`mcp_server.py` owns the **FastMCP** process: `main`, tool registration, lifespan,
+and globals (dashboard instance, block cache managers, default target). Logic
+that does not need FastMCP lives in the **`hotspottriage.mcp`** package
+(`src/hotspottriage/mcp/`).
+
+### 6.0 `mcp/` helper modules
+
+| Module | Role |
+|--------|------|
+| `mcp/errors.py` | `mcp_tool_error`, `mcp_classify_exception` — structured JSON error payloads and mapping from exceptions to `(code, message, details)` |
+| `mcp/target.py` | `resolve_mcp_target` — non-empty `target` or `--default-target`, else `ValueError` |
+| `mcp/git.py` | `git_short_object_name`, `git_live_head_and_branch` — short SHAs and branch labels for MCP `analyze` **metadata** |
+| `mcp/filter_paths.py` | Literal multi-file OR vs glob AND semantics for `filter` tokens (`is_literal_filter_path`, `normalize_filter_path`, `effective_mcp_filter_patterns`) |
+| `mcp/block_row_utils.py` | Block-row helpers for revision deltas, `include_summary`, and dashboard metric keys (`is_block_row_for_delta`, `metric_triplet`, `rows_equal_raw`, `normal_block_stat_count`, `non_synthetic_block_rows`, `block_metric_row_repo_file`) |
+| `mcp/config_fingerprint.py` | `config_fingerprint` — stable `sha256:` digest of merged analyze config for **metadata** |
+
+`mcp_server` imports these with private aliases (`_mcp_tool_error`, `_resolve_mcp_target`, …) so existing tool code and tests keep a single module object to patch.
 
 ### 6.1 Lifecycle
 
@@ -241,7 +259,7 @@ Remaining argv is restored for the MCP runtime.
 
 `--default-target` sets `_mcp_default_target`. MCP tools that take a repo **`target`**
 (`analyze`, `generate_cache`, `cache_status`, `clear_cache`; project-scoped
-`init_config`) resolve an empty or whitespace **`target`** via `_resolve_mcp_target`.
+`init_config`) resolve an empty or whitespace **`target`** via `_resolve_mcp_target` in `mcp_server.py` (delegates to `mcp.target.resolve_mcp_target`).
 
 Repo **`scripts/run_hotspottriage_mcp.sh`** uses **`#!/bin/sh`**, discovers the
 HotspotTriage checkout from the script path, prepends **`.venv/bin`** and standard
@@ -458,6 +476,8 @@ synchronously. Background cache jobs run in separate daemon threads.
 | `hotspottriage start-mcp-server` | `cli.py` → `mcp_server.py:main` | FastMCP server on stdio + optional dashboard (Serena-style) |
 | `hotspottriage-mcp`    | `mcp_server.py:main`   | Same as `start-mcp-server` (direct console script alias) |
 | `hotspottriage-cache`  | `cache_generator.py:main` | Comprehensive cache generation |
+
+Split MCP helpers (errors, target resolution, git metadata, filter tokens, block-row utilities, config fingerprint) live under **`hotspottriage.mcp`** (`src/hotspottriage/mcp/`); see **§6.0**.
 
 All registered as `[project.scripts]` in `pyproject.toml`.
 
