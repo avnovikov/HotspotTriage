@@ -133,8 +133,18 @@ def test_find_free_port_returns_in_range():
 
 
 def test_find_free_port_rejects_all_interfaces_host():
-    with pytest.raises(ValueError, match="all network interfaces"):
+    with pytest.raises(ValueError, match="loopback-only"):
         find_free_port("0.0.0.0", 9300, span=3)
+
+
+def test_find_free_port_rejects_non_loopback_host():
+    with pytest.raises(ValueError, match="loopback-only"):
+        find_free_port("10.0.0.1", 9300, span=3)
+
+
+def test_find_free_port_accepts_localhost_alias():
+    port = find_free_port("localhost", 9310, span=3)
+    assert 9310 <= port <= 9312
 
 
 def test_find_free_port_raises_when_range_busy():
