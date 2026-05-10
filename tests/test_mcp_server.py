@@ -838,6 +838,45 @@ def test_analyze_include_summary_risk_counts_and_sums_sane(test_repo: Path) -> N
     assert 0.0 <= s["mean_score"] <= 1.0
 
 
+def test_analyze_include_summary_with_before_after_shas(rev_pair_repo: Path) -> None:
+    """Summary is included when using before_sha+after_sha cached-only diff mode."""
+    lines = subprocess.check_output(
+        ["git", "-C", str(rev_pair_repo), "rev-list", "--max-count=2", "--reverse", "HEAD"],
+        text=True,
+    ).splitlines()
+    sha_old, sha_new = lines[0], lines[1]
+    subprocess.run(
+        ["git", "-C", str(rev_pair_repo), "checkout", sha_old],
+        check=True,
+        capture_output=True,
+    )
+    mcp_server.analyze(str(rev_pair_repo), filter="a.py", similarity=False, compact=False)
+    subprocess.run(
+        ["git", "-C", str(rev_pair_repo), "checkout", sha_new],
+        check=True,
+        capture_output=True,
+    )
+    mcp_server.analyze(str(rev_pair_repo), filter="a.py", similarity=False, compact=False)
+    r = mcp_server.analyze(
+        str(rev_pair_repo),
+        before_sha=sha_old,
+        after_sha=sha_new,
+        filter="a.py",
+        similarity=False,
+        compact=True,
+        include_summary=True,
+    )
+    data = json.loads(r)
+    assert "error" not in data
+    assert "summary" in data
+    s = data["summary"]
+    assert s["block_count"] >= 1
+    assert "high_risk_count" in s
+    assert "critical_risk_count" in s
+    assert "mean_score" in s
+    assert 0.0 <= s["mean_score"] <= 1.0
+
+
 def test_analyze_before_sha_includes_deltas(rev_pair_repo: Path) -> None:
     lines = subprocess.check_output(
         ["git", "-C", str(rev_pair_repo), "rev-list", "--max-count=2", "--reverse", "HEAD"],
