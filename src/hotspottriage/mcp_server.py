@@ -22,20 +22,29 @@ from typing import Any
 
 from fastmcp import FastMCP
 
-from hotspottriage import churn as _churn
 from hotspottriage import cache as _cache
 from hotspottriage import cache_generator as _cache_gen
 from hotspottriage import config as _config
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.server import DashboardServer
 from hotspottriage.dashboard.stats import StatsCollector
-from hotspottriage import discovery, explain as _explain, output as _output, stats
+from hotspottriage import discovery, output as _output, stats
 from hotspottriage import revision_cache as _rev_cache
+from hotspottriage.mcp.analyze_config import (
+    build_analyze_config as _build_analyze_config,
+    effective_similarity_enabled_for_mcp_analyze as _effective_similarity_enabled_for_mcp_analyze,
+)
+from hotspottriage.mcp.analyze_pipeline import analyze_repository
+from hotspottriage.mcp.analyze_summary import build_mcp_analyze_summary
+from hotspottriage.mcp.block_delta_report import (
+    build_block_delta_report as _build_block_delta_report,
+)
 from hotspottriage.mcp.block_row_utils import (
     block_metric_row_repo_file as _block_metric_row_repo_file,
-    non_synthetic_block_rows as _non_synthetic_block_rows,
     normal_block_stat_count as _normal_block_stat_count,
 )
+from hotspottriage.mcp.cache_warmup import initialize_repository_cache
+from hotspottriage.mcp.compact_score_rows import compact_score_rows
 from hotspottriage.mcp.config_fingerprint import config_fingerprint as _config_fingerprint
 from hotspottriage.mcp.errors import mcp_classify_exception as _mcp_classify_exception
 from hotspottriage.mcp.errors import mcp_tool_error as _mcp_tool_error
@@ -44,13 +53,6 @@ from hotspottriage.mcp.filter_paths import (
 )
 from hotspottriage.mcp.git import git_live_head_and_branch as _git_live_head_and_branch
 from hotspottriage.mcp.git import git_short_object_name as _git_short_object_name
-from hotspottriage.mcp.analyze_config import (
-    build_analyze_config as _build_analyze_config,
-    effective_similarity_enabled_for_mcp_analyze as _effective_similarity_enabled_for_mcp_analyze,
-)
-from hotspottriage.mcp.block_delta_report import (
-    build_block_delta_report as _build_block_delta_report,
-)
 from hotspottriage.mcp.repo_filter import build_repo_keep_predicate as _build_repo_keep_predicate
 from hotspottriage.mcp.target import resolve_mcp_target as _resolve_mcp_target_impl
 from hotspottriage.path_utils import resolve_local_repo_path
@@ -244,8 +246,11 @@ def _format_block_analysis_payload(
     _publish_block_metrics_to_dashboard(analysis_root, results_full, cfg)
     results = stats.sort_and_limit(results_full, by=cfg["sort"], limit=cfg["limit"])
 
-    cache_info = _initialize_repository(
-        analysis_root, cfg, progress_callback=progress_callback
+    cache_info = initialize_repository_cache(
+        analysis_root,
+        cfg,
+        get_cache_manager=_get_cache_manager,
+        progress_callback=progress_callback,
     )
     synthetic_block_rows = [
         r.as_dict()
@@ -257,7 +262,7 @@ def _format_block_analysis_payload(
     )
 
     if compact:
-        results_list = _mcp_compact_score_rows(
+        results_list = compact_score_rows(
             results, granularity="block", merged_config=cfg
         )
     else:
@@ -294,7 +299,7 @@ def _format_block_analysis_payload(
         "cache": cache_info,
     }
     if include_summary:
-        out["summary"] = _build_mcp_analyze_summary(results_full)
+        out["summary"] = build_mcp_analyze_summary(results_full)
     if deltas is not None:
         out["deltas"] = deltas
     if head_sha is not None:
@@ -394,9 +399,10 @@ def run_cached_block_analysis_dict(
             include_summary=include_summary,
         )
 
-    results_full = _analyze_repository(
+    results_full = analyze_repository(
         analysis_root,
         cfg,
+        get_cache_manager=_get_cache_manager,
         apply_limit=False,
         progress_callback=progress_callback,
     )
@@ -775,108 +781,6 @@ def init_config(target: str = "", is_global: bool = False) -> str:
         return _mcp_tool_error(code, err_msg, details=det)
 
 
-def _build_mcp_analyze_summary(rows: list[stats.Statistic]) -> dict[str, Any]:
-    """Aggregate metrics over the full (pre-``limit``) block list for MCP ``include_summary``."""
-    blocks = _non_synthetic_block_rows(rows)
-    n = len(blocks)
-    if n == 0:
-        return {
-            "block_count": 0,
-            "high_risk_count": 0,
-            "critical_risk_count": 0,
-            "sum_cyclomatic": 0,
-            "sum_sloc": 0,
-            "max_cyclomatic": None,
-            "max_score": None,
-            "mean_score": 0.0,
-        }
-    high_risk_count = sum(1 for r in blocks if str(r.score_band).lower() == "high")
-    critical_risk_count = sum(
-        1 for r in blocks if str(r.score_band).lower() == "critical"
-    )
-    sum_cyclomatic = sum(int(r.cyclomatic) for r in blocks)
-    sum_sloc = sum(int(r.sloc) for r in blocks)
-    max_cyc = max(blocks, key=lambda r: int(r.cyclomatic))
-    max_sc = max(blocks, key=lambda r: float(r.score))
-    total_score = sum(float(r.score) for r in blocks)
-    return {
-        "block_count": n,
-        "high_risk_count": high_risk_count,
-        "critical_risk_count": critical_risk_count,
-        "sum_cyclomatic": sum_cyclomatic,
-        "sum_sloc": sum_sloc,
-        "max_cyclomatic": {"path": max_cyc.path, "value": int(max_cyc.cyclomatic)},
-        "max_score": {"path": max_sc.path, "value": round(float(max_sc.score), 4)},
-        "mean_score": round(total_score / n, 4),
-    }
-
-
-def _initialize_repository(
-    target: str,
-    cfg: dict[str, Any],
-    progress_callback: Callable[[str, int, int], None] | None = None,
-) -> dict[str, Any]:
-    """Initialize repository cache with all metrics (blocks and churn).
-
-    Caches block-level metrics for fast subsequent analysis. Returns cache
-    statistics but not results.
-
-    Returns: {"cache_file": str, "entries": int, "size_bytes": int}
-    """
-    _config.validate(cfg)
-    with discovery.resolve_target(target) as repo:
-        keep = _build_repo_keep_predicate(repo, cfg)
-        files = [f for f in discovery.list_tracked_files(repo) if keep(f)]
-        score_metrics = list(cfg["score_metrics"])
-
-        # Build block-level cache
-        mgr = _get_cache_manager(repo)
-        stats.build_block_stats(
-            repo, files, score_metrics,
-            since=cfg["since"], until=cfg["until"],
-            workers=cfg.get("block_workers"),
-            decay_half_life=cfg.get("decay_half_life"),
-            smell_weight=float(cfg.get("smell_weight", 0.0)),
-            progress_callback=progress_callback,
-            merged_config=cfg,
-            cache_manager=mgr,
-            **stats.block_similarity_kwargs_from_config(cfg),
-        )
-        mgr.flush()
-
-        return _cache.block_cache_stats(repo)
-
-
-def _mcp_compact_score_rows(
-    rows: list[stats.Statistic], *, granularity: str, merged_config: dict[str, Any]
-) -> list[dict[str, Any]]:
-    """One dict per row: file, symbol, score, band, model, driver, and a short agent rationale."""
-    out: list[dict[str, Any]] = []
-    for r in rows:
-        p = r.path
-        if granularity == "block" and "::" in p:
-            file_path, fn = p.split("::", 1)
-        else:
-            file_path, fn = p, p
-        score_band = str(r.score_band)
-        out.append(
-            {
-                "file": file_path,
-                "function": fn,
-                "score": float(r.score),
-                "risk_band": score_band,
-                "proposed_model": _output.proposed_model_for_band(
-                    score_band, merged_config
-                ),
-                "score_driver": r.score_driver,
-                "rationale": _explain.compact_agent_rationale(
-                    r, final_weights=r.score_final_weights
-                ),
-            }
-        )
-    return out
-
-
 def _publish_block_metrics_to_dashboard(
     target: str,
     rows: list[stats.Statistic],
@@ -943,61 +847,6 @@ def _publish_manager_rows_to_dashboard(
                 dash.publish_latest_block_metrics(out, analysis_repo=repo)
     except Exception:
         logger.debug("Publishing block metrics to dashboard skipped", exc_info=True)
-
-
-def _analyze_repository(
-    target: str,
-    cfg: dict[str, Any],
-    *,
-    apply_limit: bool = True,
-    progress_callback: Callable[[str, int, int], None] | None = None,
-) -> list[stats.Statistic]:
-    """Run the full analysis pipeline.
-
-    Mirrors the CLI flow from cli.py, using the same filtering and metrics computation.
-    """
-    _config.validate(cfg)
-    with discovery.resolve_target(target) as repo:
-        keep = _build_repo_keep_predicate(repo, cfg)
-        files = [f for f in discovery.list_tracked_files(repo) if keep(f)]
-        score_metrics = list(cfg["score_metrics"])
-
-        # Compute metrics
-        decay_half_life = cfg.get("decay_half_life")
-        smell_weight = float(cfg.get("smell_weight", 0.0))
-        mgr = _get_cache_manager(repo)
-        if cfg["granularity"] == "block":
-            results = stats.build_block_stats(
-                repo, files, score_metrics,
-                since=cfg["since"], until=cfg["until"],
-                workers=cfg.get("block_workers"),
-                decay_half_life=decay_half_life,
-                smell_weight=smell_weight,
-                progress_callback=progress_callback,
-                merged_config=cfg,
-                cache_manager=mgr,
-                **stats.block_similarity_kwargs_from_config(cfg),
-            )
-        else:
-            churn = _churn.compute_churn(
-                repo, since=cfg["since"], until=cfg["until"]
-            )
-            results = stats.build_stats(
-                repo,
-                files,
-                churn,
-                score_metrics,
-                decay_half_life=decay_half_life,
-                smell_weight=smell_weight,
-                merged_config=cfg,
-            )
-            if cfg["directories"]:
-                results = stats.aggregate_by_directory(
-                    results, score_metrics, smell_weight=smell_weight
-                )
-
-        lim = cfg["limit"] if apply_limit else None
-        return stats.sort_and_limit(results, by=cfg["sort"], limit=lim)
 
 
 def main() -> None:

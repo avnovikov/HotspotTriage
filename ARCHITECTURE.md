@@ -242,6 +242,10 @@ that does not need FastMCP lives in the **`hotspottriage.mcp`** package
 | `mcp/repo_filter.py` | `build_repo_keep_predicate` — MCP multi-file literal OR vs glob AND, then `filtering.make_tracked_path_predicate` |
 | `mcp/analyze_config.py` | `build_analyze_config`, `effective_similarity_enabled_for_mcp_analyze` — merge tool args into analyze cfg (local repos use `load_analyze_config_for_local_repo`) |
 | `mcp/block_delta_report.py` | `build_block_delta_report` — `before_sha` / `after_sha` block-level metric deltas |
+| `mcp/compact_score_rows.py` | `compact_score_rows` — compact MCP ``analyze`` rows (file, function, score, band, model, driver, rationale) |
+| `mcp/analyze_summary.py` | `build_mcp_analyze_summary` — aggregate counts and extrema for ``include_summary`` |
+| `mcp/cache_warmup.py` | `initialize_repository_cache` — warm ``blocks.pkl`` via injected ``get_cache_manager`` |
+| `mcp/analyze_pipeline.py` | `analyze_repository` — file- or block-level pipeline (same as CLI), with injected cache manager |
 
 `mcp_server` imports these with private aliases (`_mcp_tool_error`, `_resolve_mcp_target`, …) so existing tool code and tests keep a single module object to patch.
 
