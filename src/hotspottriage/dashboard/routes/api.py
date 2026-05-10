@@ -94,8 +94,7 @@ def build_dashboard_api_router(dash: Any) -> APIRouter:
                 status_code=400,
                 detail=f"limit must be <= {HEATMAP_MAX_LIMIT}",
             )
-        with dash._block_metrics_lock:
-            raw_rows = list(dash._block_metrics_rows)
+        raw_rows = dash.block_store.read_rows()
         rows = build_heatmap_rows(raw_rows, limit=limit)
         column_maxima = heatmap_column_maxima(rows, columns=HEATMAP_SCORE_COLUMNS)
         return {
@@ -114,8 +113,7 @@ def build_dashboard_api_router(dash: Any) -> APIRouter:
                 status_code=400,
                 detail="path query parameter is required",
             )
-        with dash._block_metrics_lock:
-            blob = list(dash._block_metrics_rows)
+        blob = dash.block_store.read_rows()
         for row in blob:
             if str(row.get("path", "")) == raw_path:
                 stat = _stats_mod.statistic_from_complete_dict(row)
@@ -169,8 +167,7 @@ def build_dashboard_api_router(dash: Any) -> APIRouter:
             return {"metric": "", "buckets": [], "counts": []}
         if name not in DISTRIBUTION_METRICS:
             return {"metric": name, "buckets": [], "counts": []}
-        with dash._block_metrics_lock:
-            rows = list(dash._block_metrics_rows)
+        rows = dash.block_store.read_rows()
         values: list[float] = []
         for row in rows:
             if not isinstance(row, dict):

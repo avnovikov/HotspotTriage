@@ -300,11 +300,11 @@ def test_cache_status_endpoint(monkeypatch, tmp_path):
     (cache_dir / "blocks.pkl").write_bytes(b"abc")
 
     monkeypatch.setattr(
-        "hotspottriage.dashboard.server._cache.get_metadata",
+        "hotspottriage.dashboard.block_metrics_store._cache.get_metadata",
         lambda _repo: {"entry_count": 7},
     )
     monkeypatch.setattr(
-        "hotspottriage.dashboard.server._cache.load_block_results",
+        "hotspottriage.dashboard.block_metrics_store._cache.load_block_results",
         lambda _repo: None,
     )
     resp = client.post("/api/cache/status", json={"target": str(repo)})
@@ -338,11 +338,11 @@ def test_cache_status_hydrates_heatmap_rows_when_cache_exists(monkeypatch, tmp_p
     (cache_dir / "blocks.pkl").write_bytes(b"abc")
 
     monkeypatch.setattr(
-        "hotspottriage.dashboard.server._cache.get_metadata",
+        "hotspottriage.dashboard.block_metrics_store._cache.get_metadata",
         lambda _repo: {"entry_count": 2},
     )
     monkeypatch.setattr(
-        "hotspottriage.dashboard.server._cache.load_block_results",
+        "hotspottriage.dashboard.block_metrics_store._cache.load_block_results",
         lambda _repo: [
             _high_raw_block_row("x.py::f"),
             _high_raw_block_row("y.py::g"),
