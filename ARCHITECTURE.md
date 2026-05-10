@@ -158,6 +158,13 @@ the analyzed checkout; `_derive_block_rows`, lazy `block_narrative`, and
 cache-job `config_overrides` then call `load_analyze_config_for_local_repo` on
 that path so dashboard explanations use the same weights as MCP/CLI.
 
+`DashboardServer` lives in `dashboard/server.py`, which mounts static assets,
+includes `dashboard/routes/pages.py` for HTML, and `dashboard/routes/api.py`
+(`build_dashboard_api_router`) for JSON under `/api`. Heatmap matrix and
+histogram helpers for those endpoints are in `dashboard/stats_api.py`; cache
+request parsing and slimmed job payloads in `dashboard/cache_http.py`; threaded
+cache generation jobs in `dashboard/cache_jobs.py`.
+
 ---
 
 ## 5. Caching Layers
