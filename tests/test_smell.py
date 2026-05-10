@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -369,3 +370,93 @@ def test_collect_repo_smell_findings_runs_per_tracked_file(tmp_path, monkeypatch
     assert rows == []
     assert len(paths) == 1
     assert paths[0].name == "mod.py"
+
+
+def test_function_defs_by_qualname_matches_nested_class_method():
+    src = "class A:\n    class B:\n        def m(self):\n            return 1\n"
+    d = smell.function_defs_by_qualname(src)
+    assert "A.B.m" in d
+
+
+def test_maybe_trivial_wrapper_fires_on_high_churn_per_sloc():
+    from hotspottriage import config as _config
+    from hotspottriage.blocks import Block
+
+    src = "def wrap(x):\n    return deep(x)\n"
+    mod = ast.parse(src)
+    assert isinstance(mod.body[0], ast.FunctionDef)
+    f = smell.maybe_trivial_wrapper_block_finding(
+        file_path="/tmp/x.py",
+        block=Block("wrap", 1, 2),
+        metrics={"sloc": 2, "churn_per_sloc": 6.0},
+        pylint_block_findings=[],
+        merged_config=dict(_config.DEFAULTS),
+        func_node=mod.body[0],
+    )
+    assert f is not None
+    assert f["smell"] == "trivial_wrapper"
+
+
+def test_maybe_trivial_wrapper_skips_low_churn_without_unused():
+    from hotspottriage import config as _config
+    from hotspottriage.blocks import Block
+
+    src = "def wrap(x):\n    return deep(x)\n"
+    mod = ast.parse(src)
+    assert (
+        smell.maybe_trivial_wrapper_block_finding(
+            file_path="/tmp/x.py",
+            block=Block("wrap", 1, 2),
+            metrics={"sloc": 2, "churn_per_sloc": 1.0},
+            pylint_block_findings=[],
+            merged_config=dict(_config.DEFAULTS),
+            func_node=mod.body[0],
+        )
+        is None
+    )
+
+
+def test_maybe_trivial_wrapper_fires_with_unused_parameters_even_if_low_churn():
+    from hotspottriage import config as _config
+    from hotspottriage.blocks import Block
+
+    src = "def wrap(x, y):\n    return deep(x)\n"
+    mod = ast.parse(src)
+    raw = [{"smell": "unused_parameters", "line": 1, "message": "unused y"}]
+    f = smell.maybe_trivial_wrapper_block_finding(
+        file_path="/tmp/x.py",
+        block=Block("wrap", 1, 2),
+        metrics={"sloc": 3, "churn_per_sloc": 0.5},
+        pylint_block_findings=raw,
+        merged_config=dict(_config.DEFAULTS),
+        func_node=mod.body[0],
+    )
+    assert f is not None
+
+
+def test_maybe_trivial_wrapper_skips_property_decorator():
+    from hotspottriage import config as _config
+    from hotspottriage.blocks import Block
+
+    src = (
+        "class A:\n"
+        "    @property\n"
+        "    def x(self):\n"
+        "        return self._x\n"
+    )
+    mod = ast.parse(src)
+    cls = mod.body[0]
+    assert isinstance(cls, ast.ClassDef)
+    meth = cls.body[0]
+    assert isinstance(meth, ast.FunctionDef)
+    assert (
+        smell.maybe_trivial_wrapper_block_finding(
+            file_path="/tmp/x.py",
+            block=Block("A.x", 3, 4),
+            metrics={"sloc": 1, "churn_per_sloc": 99.0},
+            pylint_block_findings=[],
+            merged_config=dict(_config.DEFAULTS),
+            func_node=meth,
+        )
+        is None
+    )

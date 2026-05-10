@@ -458,6 +458,18 @@ def test_validate_rejects_invalid_smell_threshold():
         _config.validate(cfg)
 
 
+def test_validate_rejects_invalid_min_sloc_for_ratio():
+    cfg = {**_config.DEFAULTS, "min_sloc_for_ratio": 0}
+    with pytest.raises(ValueError, match="min_sloc_for_ratio must be an int"):
+        _config.validate(cfg)
+
+
+def test_validate_rejects_negative_trivial_wrapper_min_churn():
+    cfg = {**_config.DEFAULTS, "smell_trivial_wrapper_min_churn_per_sloc": -0.1}
+    with pytest.raises(ValueError, match="smell_trivial_wrapper_min_churn_per_sloc"):
+        _config.validate(cfg)
+
+
 def test_validate_rejects_invalid_comment_ratio_threshold():
     cfg = {**_config.DEFAULTS, "smell_max_comment_ratio": 0}
     with pytest.raises(ValueError, match="smell_max_comment_ratio must be a positive number"):

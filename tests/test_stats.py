@@ -7,6 +7,7 @@ from hotspottriage import cache as _cache
 from hotspottriage.config import DEFAULTS
 from hotspottriage.stats import (
     Statistic,
+    _ratio,
     aggregate_by_directory,
     build_block_stats,
     build_stats,
@@ -32,6 +33,12 @@ def _stat(path: str, **overrides) -> Statistic:
     return Statistic(path=path, **base)
 
 
+def test_churn_per_sloc_ratio_respects_min_sloc_floor():
+    assert _ratio(30, 4, min_sloc_for_ratio=6) == pytest.approx(5.0)
+    assert _ratio(30, 10, min_sloc_for_ratio=6) == pytest.approx(3.0)
+    assert _ratio(10, 0, min_sloc_for_ratio=6) == 0.0
+
+
 def test_churn_per_sloc_is_ratio(tmp_path: Path):
     repo = build_repo(tmp_path / "r")
     files = ["a.py", "b.py", "c/d.py"]
@@ -40,7 +47,8 @@ def test_churn_per_sloc_is_ratio(tmp_path: Path):
     stats = build_stats(repo, files, fake_churn, score_metrics=["churn_per_sloc"])
     by = {s.path: s for s in stats}
     assert by["a.py"].sloc > 0
-    assert by["a.py"].churn_per_sloc == pytest.approx(30 / by["a.py"].sloc)
+    denom = max(int(by["a.py"].sloc), int(DEFAULTS["min_sloc_for_ratio"]))
+    assert by["a.py"].churn_per_sloc == pytest.approx(30 / denom)
 
 
 def test_churn_per_sloc_zero_when_sloc_zero():

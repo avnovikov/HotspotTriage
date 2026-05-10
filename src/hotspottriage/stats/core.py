@@ -11,6 +11,7 @@ from statistics import mean, pstdev
 from typing import Any, Iterable
 
 from hotspottriage import complexity as _complexity
+from hotspottriage.config import DEFAULTS as _DEFAULTS
 from hotspottriage.score_metrics import SORT_KEYS
 from hotspottriage.statistic_row import Statistic
 
@@ -29,8 +30,17 @@ def block_similarity_kwargs_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _ratio(churn: float | int, sloc: int) -> float:
-    return float(churn) / sloc if sloc > 0 else 0.0
+def _ratio(churn: float | int, sloc: int, *, min_sloc_for_ratio: int) -> float:
+    """Churn per SLOC with optional denominator floor (``min_sloc_for_ratio``).
+
+    When ``sloc`` is positive, the divisor is ``max(sloc, min_sloc_for_ratio)`` so
+    very small blocks do not explode ``churn / sloc``. ``sloc == 0`` yields ``0.0``.
+    """
+    s = int(sloc)
+    if s <= 0:
+        return 0.0
+    denom = max(s, int(min_sloc_for_ratio))
+    return float(churn) / float(denom)
 
 
 def _score(
@@ -133,6 +143,8 @@ def build_stats(
 
     current_time = int(datetime.now().timestamp())
     timestamps = _churn.get_file_timestamps(repo, files_list)
+    cfg = merged_config if merged_config is not None else _DEFAULTS
+    min_sloc = int(cfg.get("min_sloc_for_ratio", _DEFAULTS["min_sloc_for_ratio"]))
 
     pending_metrics: list[dict[str, Any]] = []
     pending_meta: list[tuple[str, dict[str, int]]] = []
@@ -141,7 +153,7 @@ def build_stats(
         smell_summary = _smell.summarize_smells(raw_smells)
         m: dict[str, Any] = dict(_complexity.compute_all(repo / rel))
         m["churn"] = churn.get(rel, 0)
-        m["churn_per_sloc"] = _ratio(int(m["churn"]), int(m["sloc"]))
+        m["churn_per_sloc"] = _ratio(int(m["churn"]), int(m["sloc"]), min_sloc_for_ratio=min_sloc)
         n_smells = len(raw_smells)
         m["smell_count"] = float(n_smells)
         m["smell_severity"] = (
@@ -156,7 +168,9 @@ def build_stats(
             if decay_half_life
             else m["churn"]
         )
-        m["decayed_churn_per_sloc"] = _ratio(m["decayed_churn"], int(m["sloc"]))
+        m["decayed_churn_per_sloc"] = _ratio(
+            m["decayed_churn"], int(m["sloc"]), min_sloc_for_ratio=min_sloc
+        )
 
         m["similarity_score"] = 0.0
         pending_metrics.append(m)
@@ -271,10 +285,11 @@ def aggregate_by_directory(
                 s.smell_burden * sc
             )
 
+    min_sloc = int(_DEFAULTS.get("min_sloc_for_ratio", 1))
     out: list[Statistic] = []
     for d, m in sums.items():
-        cps = _ratio(m["churn"], m["sloc"])
-        dcps = _ratio(m["decayed_churn"], m["sloc"])
+        cps = _ratio(m["churn"], m["sloc"], min_sloc_for_ratio=min_sloc)
+        dcps = _ratio(m["decayed_churn"], m["sloc"], min_sloc_for_ratio=min_sloc)
         tot_smell = int(m["smell_count"])
         smell_sev = float(m["weighted_smell_sev"]) / max(1, tot_smell)
         smell_bur = float(m["weighted_smell_bur"]) / max(1, tot_smell)
