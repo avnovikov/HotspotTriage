@@ -31,15 +31,19 @@ from hotspottriage import revision_cache as _rev_cache
 from hotspottriage.mcp.analyze_args import resolve_analyze_inputs
 from hotspottriage.mcp.analyze_metadata import build_analyze_metadata
 from hotspottriage.mcp.analyze_orchestration import run_live_analysis, run_snapshot_compare
+from hotspottriage.mcp.analyze_request import AnalyzeRequest
 from hotspottriage.mcp.analyze_summary import build_mcp_analyze_summary
 from hotspottriage.mcp.block_result_serialization import block_analysis_results_as_dicts
-from hotspottriage.mcp.block_row_utils import (
-    block_metric_row_repo_file as _block_metric_row_repo_file,
-    synthetic_block_row_dicts as _synthetic_block_row_dicts,
-)
+from hotspottriage.mcp.block_row_utils import synthetic_block_row_dicts as _synthetic_block_row_dicts
 from hotspottriage.mcp.cache_warmup import initialize_repository_cache
+from hotspottriage.mcp.dashboard_publish import (
+    publish_block_metrics_to_dashboard,
+    publish_manager_rows_to_dashboard,
+)
 from hotspottriage.mcp.errors import mcp_classify_exception as _mcp_classify_exception
 from hotspottriage.mcp.errors import mcp_tool_error as _mcp_tool_error
+from hotspottriage.mcp.init_paths import paths_written_as_str_list
+from hotspottriage.mcp.local_target import local_repo_path_or_error
 from hotspottriage.mcp.repo_filter import build_repo_keep_predicate as _build_repo_keep_predicate
 from hotspottriage.mcp.target import resolve_mcp_target as _resolve_mcp_target_impl
 from hotspottriage.path_utils import resolve_local_repo_path
@@ -67,6 +71,11 @@ _dashboard_log_handler.setFormatter(
 )
 if _dashboard_log_handler not in logging.getLogger().handlers:
     logging.getLogger().addHandler(_dashboard_log_handler)
+
+
+def _get_dashboard_instance() -> DashboardServer | None:
+    """Return the live dashboard instance (or ``None`` if disabled)."""
+    return _dashboard_server_instance
 
 
 def _get_cache_manager(repo: Path) -> _cache.BlockCacheManager:
@@ -230,7 +239,12 @@ def _format_block_analysis_payload(
     include_summary: bool = False,
 ) -> dict[str, Any]:
     """Publish + limit + cache + optional compact rows (shared MCP analyze path)."""
-    _publish_block_metrics_to_dashboard(analysis_root, results_full, cfg)
+    publish_block_metrics_to_dashboard(
+        analysis_root,
+        results_full,
+        cfg,
+        get_dashboard_instance=_get_dashboard_instance,
+    )
     results = stats.sort_and_limit(results_full, by=cfg["sort"], limit=cfg["limit"])
 
     cache_info = initialize_repository_cache(
@@ -239,9 +253,12 @@ def _format_block_analysis_payload(
         get_cache_manager=_get_cache_manager,
         progress_callback=progress_callback,
     )
-    _publish_manager_rows_to_dashboard(
+    publish_manager_rows_to_dashboard(
         analysis_root,
         cfg,
+        get_dashboard_instance=_get_dashboard_instance,
+        get_cache_manager=_get_cache_manager,
+        build_keep_predicate=_build_repo_keep_predicate,
         synthetic_block_rows=_synthetic_block_row_dicts(results_full),
     )
 
@@ -269,6 +286,61 @@ def _format_block_analysis_payload(
     if head_sha is not None:
         out["head_sha"] = head_sha
     return out
+
+
+def _run_cached_block_analysis_impl(req: AnalyzeRequest) -> dict[str, Any]:
+    """Run cache-backed block analysis from a typed :class:`AnalyzeRequest`."""
+    inputs = resolve_analyze_inputs(
+        req.target,
+        path_filter=req.path_filter,
+        score_metrics=req.score_metrics,
+        limit=req.limit,
+        since=req.since,
+        until=req.until,
+        respect_gitignore=req.respect_gitignore,
+        ignore_dir=req.ignore_dir,
+        similarity=req.similarity,
+        compact=req.compact,
+        sort=req.sort,
+        config_overrides=req.config_overrides,
+        before_sha=req.before_sha,
+        after_sha=req.after_sha,
+        include_summary=req.include_summary,
+    )
+
+    if inputs.before_sha and inputs.after_sha:
+        after_rows, deltas, after_resolved = run_snapshot_compare(inputs)
+        return _format_block_analysis_payload(
+            str(inputs.local_repo),
+            inputs.cfg,
+            after_rows,
+            compact=inputs.compact,
+            progress_callback=req.progress_callback,
+            deltas=deltas,
+            head_sha=after_resolved,
+            git_repo=inputs.local_repo,
+            snapshot_commit_full=after_resolved,
+            include_summary=inputs.include_summary,
+        )
+
+    results_full, head_sha_val, deltas = run_live_analysis(
+        inputs,
+        get_cache_manager=_get_cache_manager,
+        progress_callback=req.progress_callback,
+    )
+
+    return _format_block_analysis_payload(
+        inputs.analysis_root,
+        inputs.cfg,
+        results_full,
+        compact=inputs.compact,
+        progress_callback=req.progress_callback,
+        deltas=deltas,
+        head_sha=head_sha_val,
+        git_repo=inputs.local_repo,
+        snapshot_commit_full=None,
+        include_summary=inputs.include_summary,
+    )
 
 
 def run_cached_block_analysis_dict(
@@ -299,9 +371,9 @@ def run_cached_block_analysis_dict(
     (``revisions.pkl``).  ``before_sha`` / ``after_sha`` compare cached snapshots
     only — HotspotTriage never checks out another revision.
     """
-    inputs = resolve_analyze_inputs(
+    req = AnalyzeRequest.from_tool_kwargs(
         target,
-        path_filter=filter,
+        filter=filter,
         score_metrics=score_metrics,
         limit=limit,
         since=since,
@@ -311,45 +383,13 @@ def run_cached_block_analysis_dict(
         similarity=similarity,
         compact=compact,
         sort=sort,
+        progress_callback=progress_callback,
         config_overrides=config_overrides,
         before_sha=before_sha,
         after_sha=after_sha,
         include_summary=include_summary,
     )
-
-    if inputs.before_sha and inputs.after_sha:
-        after_rows, deltas, after_resolved = run_snapshot_compare(inputs)
-        return _format_block_analysis_payload(
-            str(inputs.local_repo),
-            inputs.cfg,
-            after_rows,
-            compact=inputs.compact,
-            progress_callback=progress_callback,
-            deltas=deltas,
-            head_sha=after_resolved,
-            git_repo=inputs.local_repo,
-            snapshot_commit_full=after_resolved,
-            include_summary=inputs.include_summary,
-        )
-
-    results_full, head_sha_val, deltas = run_live_analysis(
-        inputs,
-        get_cache_manager=_get_cache_manager,
-        progress_callback=progress_callback,
-    )
-
-    return _format_block_analysis_payload(
-        inputs.analysis_root,
-        inputs.cfg,
-        results_full,
-        compact=inputs.compact,
-        progress_callback=progress_callback,
-        deltas=deltas,
-        head_sha=head_sha_val,
-        git_repo=inputs.local_repo,
-        snapshot_commit_full=None,
-        include_summary=inputs.include_summary,
-    )
+    return _run_cached_block_analysis_impl(req)
 
 
 @mcp.tool()
@@ -441,7 +481,7 @@ def analyze(
     except ValueError as e:
         return _mcp_tool_error("INVALID_TARGET", str(e))
     try:
-        response = run_cached_block_analysis_dict(
+        req = AnalyzeRequest.from_tool_kwargs(
             resolved,
             filter=filter,
             score_metrics=score_metrics,
@@ -457,6 +497,7 @@ def analyze(
             after_sha=after_sha,
             include_summary=include_summary,
         )
+        response = _run_cached_block_analysis_impl(req)
         return json.dumps(response, indent=2)
     except Exception as e:
         logger.exception("Cache-backed analysis failed")
@@ -476,13 +517,16 @@ def cache_status(target: str = "") -> str:
     """
     try:
         raw = _resolve_mcp_target(target).strip()
-        if discovery.is_git_url(raw):
-            return _mcp_tool_error(
-                "INVALID_TARGET",
-                "cache_status requires a local repository path, not a remote URL",
-                details={"tool": "cache_status", "reason": "remote_url_not_supported"},
-            )
-        repo_path = resolve_local_repo_path(raw)
+        repo_or_err = local_repo_path_or_error(
+            raw,
+            tool="cache_status",
+            remote_message=(
+                "cache_status requires a local repository path, not a remote URL"
+            ),
+        )
+        if isinstance(repo_or_err, str):
+            return repo_or_err
+        repo_path = repo_or_err
         cache_dir = _cache.cache_path_for(repo_path)
 
         if not cache_dir.exists():
@@ -535,13 +579,16 @@ def clear_cache(target: str = "") -> str:
     """
     try:
         raw = _resolve_mcp_target(target).strip()
-        if discovery.is_git_url(raw):
-            return _mcp_tool_error(
-                "INVALID_TARGET",
-                "clear_cache requires a local repository path, not a remote URL",
-                details={"tool": "clear_cache", "reason": "remote_url_not_supported"},
-            )
-        repo_path = resolve_local_repo_path(raw)
+        repo_or_err = local_repo_path_or_error(
+            raw,
+            tool="clear_cache",
+            remote_message=(
+                "clear_cache requires a local repository path, not a remote URL"
+            ),
+        )
+        if isinstance(repo_or_err, str):
+            return repo_or_err
+        repo_path = repo_or_err
         cache_dir = _cache.cache_path_for(repo_path)
 
         if not cache_dir.exists():
@@ -633,8 +680,7 @@ def init_config(target: str = "", is_global: bool = False) -> str:
     try:
         if is_global:
             written = _config.init_config(scope="global")
-            # init_config currently returns a single Path for global scope.
-            files = [str(written)] if isinstance(written, Path) else [str(f) for f in written]
+            files = paths_written_as_str_list(written)
             return json.dumps({
                 "status": "success",
                 "message": f"Initialized global config",
@@ -644,10 +690,19 @@ def init_config(target: str = "", is_global: bool = False) -> str:
             t = (target or "").strip()
             if not t:
                 t = (_mcp_default_target or ".").strip()
-            repo_path = resolve_local_repo_path(t)
+            repo_or_err = local_repo_path_or_error(
+                t,
+                tool="init_config",
+                remote_message=(
+                    "init_config (project scope) requires a local repository path, "
+                    "not a remote URL"
+                ),
+            )
+            if isinstance(repo_or_err, str):
+                return repo_or_err
+            repo_path = repo_or_err
             written = _config.init_config(scope="project", target=repo_path)
-            # Project scope returns a single Path, convert to list
-            files = [str(written)] if isinstance(written, Path) else [str(f) for f in written]
+            files = paths_written_as_str_list(written)
             return json.dumps({
                 "status": "success",
                 "message": f"Initialized project config in {repo_path / _config.PROJECT_CONFIG_DIRNAME}",
@@ -658,74 +713,6 @@ def init_config(target: str = "", is_global: bool = False) -> str:
         logger.exception("Config init failed")
         code, err_msg, det = _mcp_classify_exception(e)
         return _mcp_tool_error(code, err_msg, details=det)
-
-
-def _publish_block_metrics_to_dashboard(
-    target: str,
-    rows: list[stats.Statistic],
-    cfg: dict[str, Any],
-) -> None:
-    """Push raw block rows to the dashboard for heatmap/histogram endpoints."""
-    if cfg.get("granularity") != "block":
-        return
-    dash = _dashboard_server_instance
-    if dash is None:
-        return
-    analysis_repo: Path | None = None
-    if not discovery.is_git_url(target):
-        p = Path(target).expanduser().resolve()
-        if p.is_dir():
-            analysis_repo = p
-    dash.publish_latest_block_metrics(
-        [r.as_dict() for r in rows],
-        analysis_repo=analysis_repo,
-    )
-
-
-def _publish_manager_rows_to_dashboard(
-    target: str,
-    cfg: dict[str, Any],
-    *,
-    synthetic_block_rows: list[dict[str, Any]] | None = None,
-) -> None:
-    """Push cache-manager rows to the dashboard, scoped to *cfg* filters.
-
-    Scoped block runs only replace cache entries for targeted files; older rows
-    for other files remain in the manager. Publishing ``get_all_rows()`` without
-    filtering would overwrite the dashboard and look like the filter was ignored.
-    Synthetic rows (paths whose file segment starts with ``__``, e.g. similarity
-    aggregate) are not persisted in the block cache; pass them via
-    *synthetic_block_rows* so the dashboard stays aligned with the analysis run.
-    Manager rows are filtered only with *keep* so stray synthetic keys in the
-    pickle cannot override a similarity-disabled run.
-    """
-    dash = _dashboard_server_instance
-    if dash is None:
-        return
-    try:
-        with discovery.resolve_target(target) as repo:
-            mgr = _get_cache_manager(repo)
-            rows = mgr.get_all_rows()
-            keep = _build_repo_keep_predicate(repo, cfg)
-            merged: dict[str, dict[str, Any]] = {}
-            for r in rows:
-                if not isinstance(r, dict):
-                    continue
-                p = r.get("path")
-                if not isinstance(p, str):
-                    continue
-                fk = _block_metric_row_repo_file(p)
-                if keep(fk):
-                    merged[p] = r
-            if synthetic_block_rows:
-                for row in synthetic_block_rows:
-                    if isinstance(row, dict) and isinstance(row.get("path"), str):
-                        merged[str(row["path"])] = row
-            out = list(merged.values())
-            if out:
-                dash.publish_latest_block_metrics(out, analysis_repo=repo)
-    except Exception:
-        logger.debug("Publishing block metrics to dashboard skipped", exc_info=True)
 
 
 def main() -> None:

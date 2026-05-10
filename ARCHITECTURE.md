@@ -247,8 +247,13 @@ that does not need FastMCP lives in the **`hotspottriage.mcp`** package
 | `mcp/cache_warmup.py` | `initialize_repository_cache` — warm ``blocks.pkl`` via injected ``get_cache_manager`` |
 | `mcp/analyze_pipeline.py` | `analyze_repository` — file- or block-level pipeline (same as CLI), with injected cache manager |
 | `mcp/analyze_args.py` | `AnalyzeInputs` dataclass + `resolve_analyze_inputs` — validate/normalize MCP `analyze` tool arguments (SHA constraints, target resolution, config build) |
+| `mcp/analyze_orchestration.py` | `run_snapshot_compare`, `run_live_analysis` — snapshot-only compare vs live analysis + optional delta |
+| `mcp/analyze_request.py` | `AnalyzeRequest` — value object for MCP analyze / ``run_cached_block_analysis_dict`` parameters (`filter` → ``path_filter``) |
 | `mcp/analyze_metadata.py` | `build_analyze_metadata` — MCP analyze ``metadata`` (git labels, timestamps, filter list, row counts, ``config_fingerprint``) |
 | `mcp/block_result_serialization.py` | `block_analysis_results_as_dicts` — compact vs full JSON rows for limited block results |
+| `mcp/dashboard_publish.py` | `publish_block_metrics_to_dashboard`, `publish_manager_rows_to_dashboard` — dashboard metric publish (injected dashboard + cache manager + keep predicate) |
+| `mcp/local_target.py` | `local_repo_path_or_error` — reject remote git URLs for tools that require a local checkout |
+| `mcp/init_paths.py` | `paths_written_as_str_list` — normalize ``init_config`` written-path return values |
 
 `mcp_server` imports these with private aliases (`_mcp_tool_error`, `_resolve_mcp_target`, …) so existing tool code and tests keep a single module object to patch.
 
