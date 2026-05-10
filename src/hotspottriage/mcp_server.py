@@ -13,7 +13,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import json
 import logging
-import subprocess
 import sys
 import threading
 from collections.abc import Callable
@@ -30,15 +29,9 @@ from hotspottriage.dashboard.server import DashboardServer
 from hotspottriage.dashboard.stats import StatsCollector
 from hotspottriage import discovery, output as _output, stats
 from hotspottriage import revision_cache as _rev_cache
-from hotspottriage.mcp.analyze_config import (
-    build_analyze_config as _build_analyze_config,
-    effective_similarity_enabled_for_mcp_analyze as _effective_similarity_enabled_for_mcp_analyze,
-)
-from hotspottriage.mcp.analyze_pipeline import analyze_repository
+from hotspottriage.mcp.analyze_args import resolve_analyze_inputs
+from hotspottriage.mcp.analyze_orchestration import run_live_analysis, run_snapshot_compare
 from hotspottriage.mcp.analyze_summary import build_mcp_analyze_summary
-from hotspottriage.mcp.block_delta_report import (
-    build_block_delta_report as _build_block_delta_report,
-)
 from hotspottriage.mcp.block_row_utils import (
     block_metric_row_repo_file as _block_metric_row_repo_file,
     normal_block_stat_count as _normal_block_stat_count,
@@ -335,104 +328,56 @@ def run_cached_block_analysis_dict(
     (``revisions.pkl``).  ``before_sha`` / ``after_sha`` compare cached snapshots
     only — HotspotTriage never checks out another revision.
     """
-    after_t = after_sha.strip() if isinstance(after_sha, str) else ""
-    before_t = before_sha.strip() if isinstance(before_sha, str) else ""
-    after_sha = after_t or None
-    before_sha = before_t or None
-
-    if after_sha and not before_sha:
-        raise ValueError("after_sha requires before_sha")
-
-    if (before_sha or after_sha) and discovery.is_git_url(target):
-        raise ValueError(
-            "before_sha and after_sha require a local git repository path, "
-            "not a remote URL"
-        )
-
-    if discovery.is_git_url(target):
-        config_target = target.strip()
-        analysis_root = config_target
-        local_repo: Path | None = None
-    else:
-        config_target = str(resolve_local_repo_path(target))
-        analysis_root = config_target
-        local_repo = Path(config_target)
-
-    cfg = _build_analyze_config(
-        config_target,
+    inputs = resolve_analyze_inputs(
+        target,
         path_filter=filter,
         score_metrics=score_metrics,
-        granularity="block",
         limit=limit,
-        directories=False,
-        sort=sort,
         since=since,
         until=until,
         respect_gitignore=respect_gitignore,
         ignore_dir=ignore_dir,
+        similarity=similarity,
+        compact=compact,
+        sort=sort,
         config_overrides=config_overrides,
-    )
-    cfg["similarity_enabled"] = _effective_similarity_enabled_for_mcp_analyze(
-        similarity, filter
+        before_sha=before_sha,
+        after_sha=after_sha,
+        include_summary=include_summary,
     )
 
-    if before_sha and after_sha:
-        assert local_repo is not None
-        mgr = _rev_cache.RevisionCacheManager(local_repo)
-        try:
-            after_rows = mgr.get_snapshot_statistics(after_sha)
-            before_rows = mgr.get_snapshot_statistics(before_sha)
-        except _rev_cache.SnapshotNotFoundError as e:
-            raise ValueError(str(e)) from e
-        deltas = _build_block_delta_report(after_rows, before_rows)
-        after_resolved = _rev_cache.resolve_commit_sha(local_repo, after_sha)
+    if inputs.before_sha and inputs.after_sha:
+        after_rows, deltas, after_resolved = run_snapshot_compare(inputs)
         return _format_block_analysis_payload(
-            str(local_repo),
-            cfg,
+            str(inputs.local_repo),
+            inputs.cfg,
             after_rows,
-            compact=compact,
+            compact=inputs.compact,
             progress_callback=progress_callback,
             deltas=deltas,
             head_sha=after_resolved,
-            git_repo=local_repo,
+            git_repo=inputs.local_repo,
             snapshot_commit_full=after_resolved,
-            include_summary=include_summary,
+            include_summary=inputs.include_summary,
         )
 
-    results_full = analyze_repository(
-        analysis_root,
-        cfg,
+    results_full, head_sha_val, deltas = run_live_analysis(
+        inputs,
         get_cache_manager=_get_cache_manager,
-        apply_limit=False,
         progress_callback=progress_callback,
     )
-    head_sha_val: str | None = None
-    if local_repo is not None:
-        head_sha_val = _rev_cache.RevisionCacheManager(local_repo).record_snapshot(
-            results_full
-        )
-
-    deltas: dict[str, Any] | None = None
-    if before_sha:
-        assert local_repo is not None
-        mgr = _rev_cache.RevisionCacheManager(local_repo)
-        try:
-            before_rows = mgr.get_snapshot_statistics(before_sha)
-        except _rev_cache.SnapshotNotFoundError as e:
-            raise ValueError(str(e)) from e
-        deltas = _build_block_delta_report(results_full, before_rows)
 
     return _format_block_analysis_payload(
-        analysis_root,
-        cfg,
+        inputs.analysis_root,
+        inputs.cfg,
         results_full,
-        compact=compact,
+        compact=inputs.compact,
         progress_callback=progress_callback,
         deltas=deltas,
         head_sha=head_sha_val,
-        git_repo=local_repo,
+        git_repo=inputs.local_repo,
         snapshot_commit_full=None,
-        include_summary=include_summary,
+        include_summary=inputs.include_summary,
     )
 
 

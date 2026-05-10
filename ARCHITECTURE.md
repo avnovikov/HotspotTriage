@@ -246,6 +246,8 @@ that does not need FastMCP lives in the **`hotspottriage.mcp`** package
 | `mcp/analyze_summary.py` | `build_mcp_analyze_summary` — aggregate counts and extrema for ``include_summary`` |
 | `mcp/cache_warmup.py` | `initialize_repository_cache` — warm ``blocks.pkl`` via injected ``get_cache_manager`` |
 | `mcp/analyze_pipeline.py` | `analyze_repository` — file- or block-level pipeline (same as CLI), with injected cache manager |
+| `mcp/analyze_args.py` | `AnalyzeInputs` dataclass + `resolve_analyze_inputs` — validate/normalize MCP `analyze` tool arguments (SHA constraints, target resolution, config build) |
+| `mcp/analyze_orchestration.py` | `run_snapshot_compare`, `run_live_analysis` — high-level analyze paths (snapshot-only compare vs live analysis + optional delta) |
 
 `mcp_server` imports these with private aliases (`_mcp_tool_error`, `_resolve_mcp_target`, …) so existing tool code and tests keep a single module object to patch.
 
