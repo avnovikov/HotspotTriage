@@ -75,6 +75,13 @@ DEFAULTS: dict[str, Any] = {
     "smell_data_class_min_attributes": 8,
     "smell_middle_man_max_avg_method_sloc": 2.0,
     "smell_speculative_generality_min_hits": 1,
+    # Minimum SLOC used as denominator for churn_per_sloc / decayed_churn_per_sloc
+    # (actual sloc is unchanged). Reduces tiny-function ratio spikes; set to 1 to
+    # match legacy churn / raw sloc for sloc >= 1.
+    "min_sloc_for_ratio": 6,
+    # Block-only heuristic: single-return delegation wrappers (see smell.py).
+    "smell_trivial_wrapper_max_sloc": 4,
+    "smell_trivial_wrapper_min_churn_per_sloc": 5.0,
     # Smell severity (0–1) for weighted burden: rule id → weight (overrides category).
     "smell_default_weight": 0.4,
     "smell_category_weights": {
@@ -100,6 +107,7 @@ DEFAULTS: dict[str, Any] = {
         "speculative_generality": 0.55,
         "excessive_comments": 0.25,
         "large_comment_block": 0.3,
+        "trivial_wrapper": 0.45,
     },
     # null = auto (TTY stderr), true/false = force on/off
     "progress": None,
@@ -454,6 +462,7 @@ _SMELL_POSITIVE_INT_CONFIG_KEYS: tuple[str, ...] = (
     "smell_max_comment_block_lines",
     "smell_data_class_min_attributes",
     "smell_speculative_generality_min_hits",
+    "smell_trivial_wrapper_max_sloc",
 )
 
 
@@ -600,6 +609,24 @@ def _validate_smell_positive_int_thresholds(config: dict[str, Any]) -> None:
             raise ValueError(f"{key} must be a positive int; got {value!r}")
 
 
+def _validate_min_sloc_for_ratio(config: dict[str, Any]) -> None:
+    v = config.get("min_sloc_for_ratio")
+    if not isinstance(v, int) or v < 1:
+        raise ValueError(
+            f"min_sloc_for_ratio must be an int >= 1 (use 1 for legacy ratio denominator); "
+            f"got {v!r}"
+        )
+
+
+def _validate_trivial_wrapper_thresholds(config: dict[str, Any]) -> None:
+    mn = config.get("smell_trivial_wrapper_min_churn_per_sloc")
+    if not isinstance(mn, (int, float)) or float(mn) < 0.0:
+        raise ValueError(
+            "smell_trivial_wrapper_min_churn_per_sloc must be a non-negative number; "
+            f"got {mn!r}"
+        )
+
+
 def _validate_smell_comment_ratio_and_middle_man(config: dict[str, Any]) -> None:
     comment_ratio = config.get("smell_max_comment_ratio")
     if not isinstance(comment_ratio, (int, float)) or comment_ratio <= 0:
@@ -687,6 +714,8 @@ def validate(config: dict[str, Any]) -> None:
     _validate_smell_category_weights(config)
     _validate_smell_rule_weights(config)
     _validate_smell_positive_int_thresholds(config)
+    _validate_min_sloc_for_ratio(config)
+    _validate_trivial_wrapper_thresholds(config)
     _validate_smell_comment_ratio_and_middle_man(config)
     _validate_progress_flag(config)
     _validate_similarity_metric_vs_granularity(config, score_metrics)

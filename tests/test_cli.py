@@ -36,8 +36,9 @@ def test_cli_json_emits_all_metrics_including_per_sloc(tmp_path: Path):
         for col in ("path", *METRIC_COLS):
             assert col in row
         if row["sloc"] > 0:
-            assert row["churn_per_sloc"] == row["churn"] / row["sloc"]
-            assert row["decayed_churn_per_sloc"] == row["decayed_churn"] / row["sloc"]
+            d = max(int(row["sloc"]), int(DEFAULTS["min_sloc_for_ratio"]))
+            assert row["churn_per_sloc"] == row["churn"] / d
+            assert row["decayed_churn_per_sloc"] == row["decayed_churn"] / d
         # Default score = decayed_churn_per_sloc × cyclomatic.
         assert row["score"] == row["decayed_churn_per_sloc"] * row["cyclomatic"]
 
@@ -151,7 +152,8 @@ def test_cli_directories_aggregates(tmp_path: Path):
     assert {row["path"] for row in rows} == {"c"}
     row = rows[0]
     if row["sloc"] > 0:
-        assert row["churn_per_sloc"] == row["churn"] / row["sloc"]
+        d = max(int(row["sloc"]), int(DEFAULTS["min_sloc_for_ratio"]))
+        assert row["churn_per_sloc"] == row["churn"] / d
 
 
 def test_cli_filter_excludes(tmp_path: Path):

@@ -347,11 +347,23 @@ def analyze(
     Args:
         target: Path to a local git repo or remote git URL. Empty uses ``--default-target``
             from ``hotspottriage start-mcp-server`` if set.
-        filter: Comma-separated filters, matched against repo-relative POSIX paths.
-            Globs use AND semantics ('!' negates). Example: ``*dashboard/*.py``
-            only matches root-level ``<name>dashboard/<file>.py`` paths, while
-            ``**/dashboard/*.py`` matches dashboard directories at any depth.
-            Multiple literal file paths are treated as an include list.
+        filter: Comma-separated tokens, matched against repo-relative POSIX paths
+            (forward slashes; no leading ``./``). Behaviour depends on the tokens:
+
+            **Literal path list (OR):** When there are **two or more** tokens and **every**
+            token is a concrete path (no ``* ? [ ] { }`` glob characters), a file is kept
+            if it equals **any** token after normalisation — OR semantics.
+
+            **Glob mode (AND):** Otherwise (a single token, any token contains glob
+            characters, or a mix of literals and globs), tokens use gitignore-style
+            matching and a file must satisfy **all** patterns (``!`` negates one
+            pattern). The implicit ``default_filter`` is appended unless disabled in
+            config. Example: ``**/dashboard/*.py`` matches dashboard dirs at any depth;
+            ``src/**,!**/test_*`` includes ``src`` but excludes ``test_*`` paths.
+
+            **CLI / cache-generator note:** The ``hotspottriage`` CLI and
+            ``generate_cache`` always use glob AND mode; the OR shortcut exists only
+            for this MCP ``analyze`` path (``_build_repo_keep_predicate``).
         score_metrics: Comma-separated metrics for scoring (default: churn_per_sloc,cyclomatic)
         limit: Maximum number of block rows returned
         sort: 'score' (default) or 'file'
@@ -360,10 +372,11 @@ def analyze(
         respect_gitignore: Apply .gitignore rules (default: true)
         ignore_dir: Comma-separated directory prefixes to skip
         similarity: DeepCSIM similarity per block (default: true)
-        compact: When true (default), each row includes ``function``, ``score``,
-            ``risk_band``, ``proposed_model``, ``score_driver``, and ``rationale``
-            (short natural-language summary for agents). Use ``compact=false`` for
-            full metrics, ``score_explanation``, and multi-line ``score_narrative``.
+        compact: When true (default), each row includes ``file``, ``function``,
+            ``score``, ``risk_band``, ``proposed_model``, ``score_driver``, and
+            ``rationale`` (short natural-language summary for agents). Use
+            ``compact=false`` for full metrics, ``score_explanation``, and
+            multi-line ``score_narrative``.
 
     Returns:
         JSON object with ``results`` and ``cache`` keys, or ``{"error": ...}``
@@ -502,7 +515,9 @@ def generate_cache(
 
     Args:
         target: Path to a local git repo. Empty uses ``--default-target`` if set.
-        filter: Comma-separated glob patterns
+        filter: Comma-separated gitignore-style patterns (AND with each other and the
+            default filter; ``!`` negates). No MCP literal-path OR shortcut — same as
+            the ``hotspottriage-cache`` CLI.
         score_metrics: Metrics to compute score from (default: churn_per_sloc,cyclomatic)
 
     Returns:
@@ -713,17 +728,18 @@ def _initialize_repository(
 def _mcp_compact_score_rows(
     rows: list[stats.Statistic], *, granularity: str, merged_config: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """One dict per row: symbol, score, band, model, driver, and a short agent rationale."""
+    """One dict per row: file, symbol, score, band, model, driver, and a short agent rationale."""
     out: list[dict[str, Any]] = []
     for r in rows:
         p = r.path
         if granularity == "block" and "::" in p:
-            fn = p.split("::", 1)[1]
+            file_path, fn = p.split("::", 1)
         else:
-            fn = p
+            file_path, fn = p, p
         score_band = str(r.score_band)
         out.append(
             {
+                "file": file_path,
                 "function": fn,
                 "score": float(r.score),
                 "risk_band": score_band,

@@ -10,6 +10,10 @@
 - **Compact rows:** Only **`function`**, **`score`**, **`risk_band`**, **`proposed_model`**, **`score_driver`**, and **`rationale`**—no embedded **`score_explanation`** or long narrative in each compact row.
 - **No `raw` in explanations:** **`score_explanation`** list items never expose a **`raw`** object (normalized inputs and weights only). Persisted rows with legacy **`raw`** are sanitized when deserialized.
 
+### MCP `analyze` `filter` (literal OR vs glob AND)
+
+Comma-separated `filter` on MCP **`analyze`**: if there are **two or more** tokens and **every** token is a **literal path** (no `* ? [ ] { }`), paths are matched with **OR** (include if the file equals any token). Otherwise tokens are gitignore-style **AND** globs (`!` negates). The **`hotspottriage`** / **`hotspottriage-cache`** CLIs always use **AND** globs only. Details: [docs/agent-hotspottriage-score-check.md](docs/agent-hotspottriage-score-check.md).
+
 ### HotspotTriage MCP vs CLI analyze config
 
 CLI analyze without `--no-config` uses the same stack as MCP local `analyze` (`use_global=False`, project YAML, `dashboard_config_patch.yml`, then CLI flags or MCP tool args). Repository tests pass `--no-config` so a developer `~/.hotspottriage/config.yml` cannot change assertions.

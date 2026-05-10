@@ -5,6 +5,7 @@ explicit set of smell-oriented rules and returns normalized smell records.
 """
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import re
@@ -43,6 +44,8 @@ PYLINT_CODES: tuple[str, ...] = (
 
 # Pylint codes whose primary location is the class line; map to blocks via `scope`.
 _CLASS_SCOPED_PYLINT_CODES: frozenset[str] = frozenset({"R0902", "R0903", "R0904"})
+
+_AST_FUNC_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 SMELL_BY_CODE: dict[str, str] = {
     "R0915": "long_method",
@@ -381,6 +384,129 @@ def resolve_smell_severity(finding: dict[str, Any], res_cfg: dict[str, Any]) -> 
 def _attach_severities(findings: list[dict[str, Any]], res_cfg: dict[str, Any]) -> None:
     for item in findings:
         item["severity"] = resolve_smell_severity(item, res_cfg)
+
+
+def function_defs_by_qualname(src: str) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Map qualified function names (same convention as :mod:`hotspottriage.blocks`) to AST nodes."""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return {}
+    out: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+
+    def walk(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, _AST_FUNC_NODES):
+                qname = f"{prefix}{child.name}"
+                out[qname] = child
+                walk(child, prefix=f"{qname}.")
+            elif isinstance(child, ast.ClassDef):
+                walk(child, prefix=f"{prefix}{child.name}.")
+
+    walk(tree, "")
+    return out
+
+
+def _decorator_tail_name(dec: ast.expr) -> str:
+    if isinstance(dec, ast.Call):
+        return _decorator_tail_name(dec.func)
+    if isinstance(dec, ast.Name):
+        return dec.id
+    if isinstance(dec, ast.Attribute):
+        parts: list[str] = []
+        cur: ast.expr = dec
+        while isinstance(cur, ast.Attribute):
+            parts.append(cur.attr)
+            cur = cur.value
+        if isinstance(cur, ast.Name):
+            parts.append(cur.id)
+        return ".".join(reversed(parts)) if parts else ""
+    return ""
+
+
+def _has_skip_trivial_wrapper_decorators(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    skip_tails = frozenset({"property", "cached_property", "overload"})
+    for dec in func.decorator_list:
+        tail = _decorator_tail_name(dec).split(".")[-1]
+        if tail in skip_tails:
+            return True
+    return False
+
+
+def _body_without_docstring(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.stmt]:
+    body = list(func.body)
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        return body[1:]
+    return body
+
+
+def _is_single_return_call_wrapper(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """True when the body is effectively one ``return <call>(...)`` (or ``return await <call>``)."""
+    stmts = _body_without_docstring(func)
+    if len(stmts) != 1:
+        return False
+    st0 = stmts[0]
+    if not isinstance(st0, ast.Return) or st0.value is None:
+        return False
+    val: ast.expr = st0.value
+    if isinstance(func, ast.AsyncFunctionDef) and isinstance(val, ast.Await):
+        val = val.value
+    return isinstance(val, ast.Call)
+
+
+def maybe_trivial_wrapper_block_finding(
+    *,
+    file_path: str,
+    block: _blocks.Block,
+    metrics: dict[str, Any],
+    pylint_block_findings: list[dict[str, Any]],
+    merged_config: dict[str, Any],
+    func_node: ast.FunctionDef | ast.AsyncFunctionDef | None,
+) -> dict[str, Any] | None:
+    """Optional synthetic ``trivial_wrapper`` finding for one block (block pipeline only).
+
+    Requires a trivial single-return-call AST shape, small ``sloc``, and either high
+    ``churn_per_sloc`` or an ``unused_parameters`` smell already attached to the block.
+    """
+    if func_node is None:
+        return None
+    max_sloc = int(
+        merged_config.get(
+            "smell_trivial_wrapper_max_sloc",
+            _config.DEFAULTS["smell_trivial_wrapper_max_sloc"],
+        )
+    )
+    min_cps = float(
+        merged_config.get(
+            "smell_trivial_wrapper_min_churn_per_sloc",
+            _config.DEFAULTS["smell_trivial_wrapper_min_churn_per_sloc"],
+        )
+    )
+    sloc = int(metrics.get("sloc") or 0)
+    if sloc > max_sloc:
+        return None
+    if _has_skip_trivial_wrapper_decorators(func_node):
+        return None
+    if not _is_single_return_call_wrapper(func_node):
+        return None
+    has_unused = any(str(x.get("smell")) == "unused_parameters" for x in pylint_block_findings)
+    cps = float(metrics.get("churn_per_sloc") or 0.0)
+    if not (has_unused or cps >= min_cps):
+        return None
+    return {
+        "file": file_path,
+        "line": int(block.start),
+        "smell": "trivial_wrapper",
+        "message": (
+            f"Small single-return delegation wrapper (sloc={sloc}, "
+            f"churn/SLOC={cps:.2f})"
+        ),
+    }
 
 
 def summarize_smells(findings: Iterable[dict[str, Any]]) -> dict[str, int]:

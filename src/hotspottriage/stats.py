@@ -7,8 +7,9 @@ later without rerunning. For **file** rows, ``score`` is the product of
 0–1 risk aggregate from :mod:`hotspottriage.score`; otherwise the product recipe
 applies. ``score_band`` and ``score_subscores`` are set for block aggregated runs.
 
-`churn_per_sloc` is derived: `churn / sloc` — instability normalized by file
-size, so a small, frequently-rewritten file outranks a big, rarely-touched one.
+`churn_per_sloc` is derived as ``churn / max(sloc, min_sloc_for_ratio)`` when
+``sloc > 0`` (see ``min_sloc_for_ratio`` in config), so tiny files do not explode
+per-line churn; instability is still normalized by size for larger blocks.
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ from hotspottriage import blocks as _blocks
 from hotspottriage import cache as _cache
 from hotspottriage import complexity as _complexity
 from hotspottriage import explain as _explain
+from hotspottriage.config import DEFAULTS as _DEFAULTS
 from hotspottriage import score as _risk_score
 from hotspottriage.score_metrics import SCORE_METRICS, SORT_KEYS
 from hotspottriage.statistic_row import Statistic
@@ -60,8 +62,17 @@ def block_similarity_kwargs_from_config(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _ratio(churn: float | int, sloc: int) -> float:
-    return float(churn) / sloc if sloc > 0 else 0.0
+def _ratio(churn: float | int, sloc: int, *, min_sloc_for_ratio: int) -> float:
+    """Churn per SLOC with optional denominator floor (``min_sloc_for_ratio``).
+
+    When ``sloc`` is positive, the divisor is ``max(sloc, min_sloc_for_ratio)``.
+    ``sloc == 0`` yields ``0.0``.
+    """
+    s = int(sloc)
+    if s <= 0:
+        return 0.0
+    denom = max(s, int(min_sloc_for_ratio))
+    return float(churn) / float(denom)
 
 
 def _score(
@@ -164,6 +175,8 @@ def build_stats(
 
     current_time = int(datetime.now().timestamp())
     timestamps = _churn.get_file_timestamps(repo, files_list)
+    cfg = merged_config if merged_config is not None else _DEFAULTS
+    min_sloc = int(cfg.get("min_sloc_for_ratio", _DEFAULTS["min_sloc_for_ratio"]))
 
     pending_metrics: list[dict[str, Any]] = []
     pending_meta: list[tuple[str, dict[str, int]]] = []
@@ -172,7 +185,7 @@ def build_stats(
         smell_summary = _smell.summarize_smells(raw_smells)
         m: dict[str, Any] = dict(_complexity.compute_all(repo / rel))
         m["churn"] = churn.get(rel, 0)
-        m["churn_per_sloc"] = _ratio(int(m["churn"]), int(m["sloc"]))
+        m["churn_per_sloc"] = _ratio(int(m["churn"]), int(m["sloc"]), min_sloc_for_ratio=min_sloc)
         n_smells = len(raw_smells)
         m["smell_count"] = float(n_smells)
         m["smell_severity"] = (
@@ -187,7 +200,9 @@ def build_stats(
             if decay_half_life
             else m["churn"]
         )
-        m["decayed_churn_per_sloc"] = _ratio(m["decayed_churn"], int(m["sloc"]))
+        m["decayed_churn_per_sloc"] = _ratio(
+            m["decayed_churn"], int(m["sloc"]), min_sloc_for_ratio=min_sloc
+        )
 
         m["similarity_score"] = 0.0
         pending_metrics.append(m)
@@ -375,23 +390,46 @@ def _assemble_block_metrics(
         src = file_sources[rel]
         file_mi = file_metrics[rel]["maintainability"]
         age_seconds = ctx.current_time - ctx.timestamps.get(rel, ctx.current_time)
+        min_sloc = int(
+            (ctx.merged_config or {}).get(
+                "min_sloc_for_ratio", _DEFAULTS["min_sloc_for_ratio"]
+            )
+        )
+        func_by_name = _smell.function_defs_by_qualname(src)
+        smell_res_cfg = _smell.smell_resolution_cfg(ctx.merged_config)
 
         for b in file_blocks[rel]:
             snippet = _complexity.slice_block(src, b.start, b.end)
             m: dict[str, Any] = dict(_complexity.compute_for_source(snippet))
             m["maintainability"] = file_mi
             m["churn"] = churns.get((rel, b.start, b.end), 0)
-            m["churn_per_sloc"] = _ratio(int(m["churn"]), int(m["sloc"]))
+            m["churn_per_sloc"] = _ratio(
+                int(m["churn"]), int(m["sloc"]), min_sloc_for_ratio=min_sloc
+            )
             m["decayed_churn"] = (
                 _decayed_value(m["churn"], age_seconds, decay_half_life)
                 if decay_half_life
                 else m["churn"]
             )
-            m["decayed_churn_per_sloc"] = _ratio(m["decayed_churn"], int(m["sloc"]))
+            m["decayed_churn_per_sloc"] = _ratio(
+                m["decayed_churn"], int(m["sloc"]), min_sloc_for_ratio=min_sloc
+            )
 
             block_raw = [
                 s for s in file_smells.get(rel, []) if _smell.finding_applies_to_block(s, b)
             ]
+            merged_for_smell = ctx.merged_config if ctx.merged_config else _DEFAULTS
+            tw = _smell.maybe_trivial_wrapper_block_finding(
+                file_path=str(ctx.repo / rel),
+                block=b,
+                metrics=m,
+                pylint_block_findings=block_raw,
+                merged_config=merged_for_smell,
+                func_node=func_by_name.get(b.name),
+            )
+            if tw is not None:
+                tw["severity"] = _smell.resolve_smell_severity(tw, smell_res_cfg)
+                block_raw.append(tw)
             block_summary = _smell.summarize_smells(block_raw)
             n_blk = len(block_raw)
             m["smell_count"] = float(n_blk)
@@ -877,10 +915,11 @@ def aggregate_by_directory(
                 s.smell_burden * sc
             )
 
+    min_sloc = int(_DEFAULTS.get("min_sloc_for_ratio", 1))
     out: list[Statistic] = []
     for d, m in sums.items():
-        cps = _ratio(m["churn"], m["sloc"])
-        dcps = _ratio(m["decayed_churn"], m["sloc"])
+        cps = _ratio(m["churn"], m["sloc"], min_sloc_for_ratio=min_sloc)
+        dcps = _ratio(m["decayed_churn"], m["sloc"], min_sloc_for_ratio=min_sloc)
         tot_smell = int(m["smell_count"])
         smell_sev = float(m["weighted_smell_sev"]) / max(1, tot_smell)
         smell_bur = float(m["weighted_smell_bur"]) / max(1, tot_smell)
