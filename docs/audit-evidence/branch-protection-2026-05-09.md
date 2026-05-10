@@ -47,7 +47,7 @@ branch up to date with `main`.
 This is the only bypass actor. AI agents (Cursor, etc.) authenticate with the
 owner's `gh` token and therefore inherit the same bypass capability **on
 GitHub's side** — that capability is restricted on the **agent side** by the
-local rule [`no-pr-merge-without-explicit-ok`](../../.cursor/skills/no-pr-merge-without-explicit-ok/SKILL.md):
+local Cursor skill `no-pr-merge-without-explicit-ok` (typically under `~/.cursor/skills/` on the workstation; not vendored in this repository):
 agents may open PRs but must not merge or close issues by merging without
 explicit per-conversation permission from the user.
 

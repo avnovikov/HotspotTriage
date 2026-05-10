@@ -92,7 +92,7 @@ claude mcp add hotspottriage -- ./scripts/run_hotspottriage_mcp.sh \
 |-----|----------------|
 | [docs/INSTALL.md](docs/INSTALL.md) | Full install guide: all options, MCP server flags, Cursor/Claude Code configs, troubleshooting |
 | [docs/agent-hotspottriage-score-check.md](docs/agent-hotspottriage-score-check.md) | MCP score check before editing hotspots (agent workflow) |
-| [ARCHITECTRE.md](ARCHITECTRE.md) | Pipeline, caching, dashboard, MCP wiring, module map |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Pipeline, caching, dashboard, MCP wiring, module map |
 | [SCORES.md](SCORES.md) | Metrics, normalization, composite score, risk bands |
 | [CONTRIBUTING.md](CONTRIBUTING.md#13-ssh-commit-and-tag-signing-required) | SSH-signed commits and tags setup (one-time workstation config) |
 | [SUPPORT.md](SUPPORT.md) | Support policy, supported versions, EOL process (UK PSTI / EU CRA) |
