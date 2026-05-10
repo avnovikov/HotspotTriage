@@ -6,7 +6,12 @@ import json
 import pytest
 
 from hotspottriage.config import DEFAULTS
-from hotspottriage.output import display_headers, render_json, statistic_to_output_dict
+from hotspottriage.output import (
+    display_headers,
+    proposed_model_for_band,
+    render_json,
+    statistic_to_output_dict,
+)
 from hotspottriage.stats import Statistic
 
 
@@ -72,3 +77,24 @@ def test_norm_similarity_score_is_raw_over_100():
     s = _minimal_stat(similarity_score=50.0)
     d = statistic_to_output_dict(s, DEFAULTS)
     assert d["norm_similarity_score"] == pytest.approx(0.5)
+
+
+def test_proposed_model_for_band_is_case_insensitive_for_lookup():
+    cfg = {
+        **DEFAULTS,
+        "proposed_models": {
+            "low": "L",
+            "medium": "M",
+            "high": "H",
+            "critical": "C",
+        },
+    }
+    assert proposed_model_for_band("high", cfg) == "H"
+    assert proposed_model_for_band("High", cfg) == "H"
+
+
+def test_statistic_to_output_dict_adds_proposed_model_and_rationale_keys():
+    s = _minimal_stat()
+    d = statistic_to_output_dict(s, DEFAULTS)
+    assert "proposed_model" in d and isinstance(d["proposed_model"], str)
+    assert "rationale" in d and isinstance(d["rationale"], str)

@@ -13,6 +13,29 @@ These behaviors are **enforced in tests**; keep them when changing MCP, `explain
 3. **Similarity default vs `filter`.** When **`similarity`** is omitted on MCP **`analyze`**, DeepCSIM is **off** if **`filter`** is set (scoped runs), **on** for whole-repo runs. Pass **`similarity=true`** explicitly for clone detection on a filtered path.
 4. **No `raw` in `score_explanation`.** Wherever **`score_explanation`** appears (MCP full **`analyze`**, CLI **`--blocks`** JSON/CSV, dashboard payloads, `Statistic` rebuilt from dicts), each explanation object must **not** include a **`raw`** field. Use **`normalized`** (and burdens / weights) only. Legacy cache or hand-built dicts that still carry **`raw`** are stripped when statistics are loaded from dicts (`sanitize_score_explanation_entries`).
 5. **`include_summary` default.** With **`include_summary=false`** (the default), MCP **`analyze`** must **not** include a **`summary`** key. With **`include_summary=true`**, **`summary`** aggregates use the **full** pre-**`limit`** block set so **`limit`** only trims **`results`**, not the overview.
+6. **Structured MCP tool errors.** On failure, affected tools return JSON with a top-level **`error`** object **`{"code", "message", "details"}`** (not a plain string). Branch on **`error.code`**; treat **`message`** as human-readable only. Success payloads are unchanged (e.g. **`analyze`** with **`metadata`** / **`results`**, **`cache_status`** with **`status`**: **`ok`** / **`empty`**, **`init_config`** with **`status`**: **`success`**).
+
+## MCP tool errors (structured envelope)
+
+When an MCP tool in `mcp_server.py` fails, the response is a JSON object:
+
+```json
+{
+  "error": {
+    "code": "SNAPSHOT_NOT_FOUND",
+    "message": "…",
+    "details": {}
+  }
+}
+```
+
+- **`code`**: stable category for agents (prefer this over parsing **`message`**).
+- **`message`**: end-user / log text; wording may evolve.
+- **`details`**: optional context (paths, **`errno`**, git **`returncode`**, tool name, etc.); always an object, often `{}`.
+
+**Tools that use this shape on failure:** **`analyze`**, **`generate_cache`**, **`cache_status`**, **`clear_cache`**, **`init_config`**, and the cache-backed path behind **`analyze`** (same envelope from **`_run_analyze_cached`**). **`cache_status`** / **`clear_cache`** still use **`status`** for non-error outcomes (**`ok`**, **`empty`**, **`success`**).
+
+**Typical `code` values (non-exhaustive):** **`INVALID_TARGET`** (empty target without **`--default-target`**, remote URL where a local path is required), **`TARGET_NOT_FOUND`** (path not a repo / not found), **`INVALID_FILTER`**, **`CONFIG_VALIDATION`** (includes config init **`FileExistsError`** “already exists”), **`GIT_ERROR`**, **`CACHE_ERROR`**, **`INTERNAL`**, **`INVALID_ARGUMENT`** (e.g. **`after_sha`** without **`before_sha`**), **`SNAPSHOT_NOT_FOUND`** (revision snapshot never recorded for that SHA at that repo).
 
 ## MCP `analyze` `filter` parameter (paths and globs)
 
@@ -68,8 +91,9 @@ Alternatively, **`analyze(target, before_sha=H1, …)`** (only `before_sha`)
 runs a **live** analysis at the current `HEAD`, records it, and adds **`deltas`**
 vs the cached `H1` snapshot.
 
-If a SHA was never recorded at that repo path, the tool returns an error
-mentioning **no cached snapshot** (run **`analyze`** at that commit first).
+If a SHA was never recorded at that repo path, the tool returns a structured
+error with **`code`**: **`SNAPSHOT_NOT_FOUND`** and a **`message`** mentioning
+**no cached snapshot** (run **`analyze`** at that commit first).
 
 ## Workflow
 
