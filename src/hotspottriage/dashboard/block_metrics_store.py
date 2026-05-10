@@ -117,7 +117,8 @@ class BlockMetricsStore:
             has_rows = bool(self._rows)
         if not has_rows:
             try:
-                from hotspottriage.mcp_server import _get_cache_manager
+                # Lazy import avoids import-time cycle with mcp_server (which imports DashboardServer).
+                from hotspottriage.mcp_server import _get_cache_manager  # noqa: PLC0415
 
                 mgr = _get_cache_manager(repo)
                 live_rows = mgr.get_all_rows()

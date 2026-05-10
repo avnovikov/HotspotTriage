@@ -18,22 +18,33 @@ logger = logging.getLogger(__name__)
 class CacheGenerationHost(Protocol):
     """Narrow surface used by :func:`run_cache_generation_job` (avoids importing ``DashboardServer``)."""
 
-    def _analysis_config_overrides(self, *, target: str | None) -> dict[str, Any]: ...
+    def _analysis_config_overrides(self, *, target: str | None) -> dict[str, Any]:
+        """Implementations provide MCP/cache-layer config overrides for a target repo."""
+        pass
 
     def publish_latest_block_metrics(
         self,
         rows: list[dict[str, Any]],
         *,
         analysis_repo: Path | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Implementations push scored block rows for heatmap and histograms."""
+        pass
 
 
 def find_free_port(host: str, base: int, *, span: int = 20) -> int:
+    """Bind-probe successive TCP ports on *host* (must not be all-interfaces)."""
+    normalized = str(host).strip()
+    if not normalized or normalized in {"0.0.0.0", "::", "*"}:
+        raise ValueError(
+            "refusing to probe ports on all network interfaces; "
+            "use a specific host such as 127.0.0.1"
+        )
     for port in range(base, base + span):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
-                s.bind((host, port))
+                s.bind((normalized, port))
             except OSError:
                 continue
             return port
@@ -145,8 +156,8 @@ def enqueue_cache_generation_job(
     jobs: dict[str, CacheJob],
     jobs_lock: threading.Lock,
 ) -> str:
-    # Local import avoids circular dependency with mcp_server consumers.
-    from hotspottriage import cache_generator as _cache_generator
+    # Local import avoids import-time cycle with cache_generator / mcp_server consumers.
+    from hotspottriage import cache_generator as _cache_generator  # noqa: PLC0415
 
     job_id = str(uuid.uuid4())
     job = CacheJob(

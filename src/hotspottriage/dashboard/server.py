@@ -208,8 +208,3 @@ class DashboardServer:
         self._thread.start()
         if self._open_on_start:
             self._open_browser()
-
-
-# Backward-compatible names for tests and tooling.
-_find_free_port = find_free_port
-_slim_cache_job_result = slim_cache_job_result
