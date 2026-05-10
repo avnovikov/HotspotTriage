@@ -14,13 +14,16 @@ reject any non-`init` string).
 from __future__ import annotations
 
 import argparse
+import json
+import logging
 import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from hotspottriage import churn as _churn
+from hotspottriage import cache as _block_cache
 from hotspottriage import config as _config
-from hotspottriage import discovery, filtering, explain, output, progress_report, stats
+from hotspottriage import discovery, filtering, output, progress_report, stats
+from hotspottriage.revision_cache import RevisionCacheManager
 from hotspottriage import score_metrics as _score_metrics
 
 
@@ -37,10 +40,10 @@ def _build_analyze_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="hotspottriage",
         description=(
-            "Rank Python code by a composite score. Default: one row per tracked "
-            ".py file (sloc, cyclomatic, halstead, maintainability, churn). "
-            "Use --blocks (or --granularity block) for one row per function/method. "
-            "Score = product of the metrics passed to -s. "
+            "Rank Python code at block granularity: one row per function/method "
+            "(sloc, cyclomatic, halstead, maintainability, churn, smells, similarity). "
+            "First run is slower (per-block git churn); results are cached under "
+            ".hotspottriage/cache/. "
             "Use `hotspottriage init --global|--project` to scaffold a config file."
         ),
     )
@@ -69,7 +72,10 @@ def _build_analyze_parser() -> argparse.ArgumentParser:
         "--score",
         default=None,
         help=(
-            "comma-separated metrics whose product becomes the score. "
+            "comma-separated score_metrics list (config + sorting); with the default "
+            "score_aggregation recipe the composite 0–1 score uses all burdens — "
+            "see score_aggregation in project.yml. When aggregation is disabled, "
+            "the row score is the product of these metrics. "
             f"Choose from: {', '.join(_score_metrics.SCORE_METRICS)}. "
             f"Default: {','.join(_config.DEFAULTS['score_metrics'])}"
         ),
@@ -80,30 +86,12 @@ def _build_analyze_parser() -> argparse.ArgumentParser:
     p.add_argument("-u", "--until", default=None)
     p.add_argument("--sort", choices=_score_metrics.SORT_KEYS, default=None)
     p.add_argument(
-        "-d",
-        "--directories",
-        action="store_true",
-        default=None,
-    )
-    p.add_argument(
-        "--granularity",
-        choices=("file", "block"),
-        default=None,
-        help=(
-            "file: one row per Python file (default). "
-            "block: one row per function/method (slow on first run; cached). "
-            "DeepCSIM similarity runs by default; use --no-similarity to skip."
-        ),
-    )
-    p.add_argument(
         "-B",
         "--blocks",
         action="store_true",
         default=None,
         help=(
-            "per-function/method statistics (same as --granularity block); "
-            "omit --granularity when using this shorthand. "
-            "DeepCSIM similarity is on by default; use --no-similarity to disable."
+            "no-op: retained for scripts; the CLI always runs block-level analysis."
         ),
     )
     p.add_argument(
@@ -244,15 +232,13 @@ def _resolve_config(args: argparse.Namespace, target_path: Path | None) -> dict:
         merged["progress"] = True
     if getattr(args, "no_progress", None):
         merged["progress"] = False
-    if getattr(args, "blocks", None):
-        if getattr(args, "granularity", None) == "file":
-            raise ValueError("cannot combine --blocks with --granularity file")
-        if getattr(args, "granularity", None) is None:
-            merged["granularity"] = "block"
     if getattr(args, "similarity", None):
         merged["similarity_enabled"] = True
     if getattr(args, "no_similarity", None):
         merged["similarity_enabled"] = False
+    # CLI always runs the block pipeline (per-function/method rows). File-level
+    # analysis remains available via the library and other surfaces.
+    merged["granularity"] = "block"
     _config.validate(merged)
     return merged
 
@@ -295,71 +281,63 @@ def main(argv: list[str] | None = None) -> int:
             smell_weight = float(cfg.get("smell_weight", 0.0))
             
             show_progress = _want_progress(cfg)
-            churn = None
-            if cfg["granularity"] != "block":
-                churn = _churn.compute_churn(
-                    repo, since=cfg["since"], until=cfg["until"]
-                )
 
             def _run_analysis(
                 progress_cb: Callable[[str, int, int], None] | None,
             ) -> list[stats.Statistic]:
-                if cfg["granularity"] == "block":
-                    return stats.build_block_stats(
-                        repo,
-                        files,
-                        score_metrics,
-                        since=cfg["since"],
-                        until=cfg["until"],
-                        workers=cfg["block_workers"],
-                        decay_half_life=decay_half_life,
-                        smell_weight=smell_weight,
-                        progress_callback=progress_cb,
-                        merged_config=cfg,
-                        **stats.block_similarity_kwargs_from_config(cfg),
-                    )
-                assert churn is not None
-                built = stats.build_stats(
+                return stats.build_block_stats(
                     repo,
                     files,
-                    churn,
                     score_metrics,
+                    since=cfg["since"],
+                    until=cfg["until"],
+                    workers=cfg["block_workers"],
                     decay_half_life=decay_half_life,
                     smell_weight=smell_weight,
                     progress_callback=progress_cb,
                     merged_config=cfg,
+                    **stats.block_similarity_kwargs_from_config(cfg),
                 )
-                if cfg["directories"]:
-                    return stats.aggregate_by_directory(
-                        built, score_metrics, smell_weight=smell_weight
-                    )
-                return built
 
             if show_progress:
                 with progress_report.progress_runner(
                     True, description="Analyzing repository…"
                 ) as cb:
-                    results = _run_analysis(cb)
+                    results_full = _run_analysis(cb)
             else:
-                results = _run_analysis(None)
+                results_full = _run_analysis(None)
             results = stats.sort_and_limit(
-                results, by=cfg["sort"], limit=cfg["limit"]
+                results_full, by=cfg["sort"], limit=cfg["limit"]
             )
-            print(output.render(results, cfg["format"], cfg))
-            if cfg["granularity"] == "block":
-                pm_raw = cfg.get("proposed_models")
-                pm = pm_raw if isinstance(pm_raw, dict) else {}
+            if cfg["format"] == "json":
+                payload: dict[str, object] = {
+                    "results": [
+                        output.statistic_to_output_dict(s, cfg) for s in results
+                    ],
+                    "cache": _block_cache.block_cache_stats(repo),
+                }
+                try:
+                    payload["head_sha"] = RevisionCacheManager(repo).record_snapshot(
+                        results_full
+                    )
+                except Exception:
+                    logging.getLogger(__name__).debug(
+                        "CLI JSON: revision snapshot not recorded",
+                        exc_info=True,
+                    )
+                print(json.dumps(payload))
+            else:
+                print(output.render(results, cfg["format"], cfg))
+            # JSON is a single object on stdout (``results`` + ``cache`` + optional ``head_sha``);
+            # extra stdout after that breaks json.loads.
+            if cfg["format"] != "json":
                 for s in results:
                     if not s.score_subscores:
                         continue
                     band = str(s.score_band).lower()
                     if band not in ("high", "critical"):
                         continue
-                    rec = pm.get(s.score_band)
-                    rec_s = rec if isinstance(rec, str) else None
-                    narrative = explain.explain_score(
-                        s, recommended_action=rec_s, final_weights=s.score_final_weights
-                    )
+                    narrative = output.score_narrative_text(s, cfg)
                     if narrative:
                         print()
                         print(narrative)

@@ -97,6 +97,20 @@ def load_block_results(repo: Path) -> list[dict] | None:
     return _read_versioned_pickle(cache_path_for(repo) / _CACHE_FILE)
 
 
+def block_cache_stats(repo: Path) -> dict[str, Any]:
+    """On-disk ``blocks.pkl`` location and size (MCP ``analyze`` ``cache`` shape)."""
+    cache_dir = cache_path_for(repo)
+    cache_file = cache_dir / _CACHE_FILE
+    size_bytes = cache_file.stat().st_size if cache_file.exists() else 0
+    rows = load_block_results(repo)
+    entries = len(rows) if rows else 0
+    return {
+        "cache_file": str(cache_file),
+        "entries": entries,
+        "size_bytes": size_bytes,
+    }
+
+
 def get_metadata(repo: Path) -> dict[str, int | str] | None:
     """Get cache metadata (generated_at, entry_count, version)."""
     return timestamps.load_metadata_simple(cache_path_for(repo))
