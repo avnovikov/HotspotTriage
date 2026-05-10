@@ -12,6 +12,7 @@ These behaviors are **enforced in tests**; keep them when changing MCP, `explain
 2. **Compact row shape.** With **`compact=true`**, each result row is only: **`file`**, **`function`**, **`score`**, **`risk_band`**, **`proposed_model`**, **`score_driver`**, **`rationale`**. There is **no** per-row **`score_explanation`**, **`score_narrative`**, or full metric dict in that mode.
 3. **Similarity default vs `filter`.** When **`similarity`** is omitted on MCP **`analyze`**, DeepCSIM is **off** if **`filter`** is set (scoped runs), **on** for whole-repo runs. Pass **`similarity=true`** explicitly for clone detection on a filtered path.
 4. **No `raw` in `score_explanation`.** Wherever **`score_explanation`** appears (MCP full **`analyze`**, CLI **`--blocks`** JSON/CSV, dashboard payloads, `Statistic` rebuilt from dicts), each explanation object must **not** include a **`raw`** field. Use **`normalized`** (and burdens / weights) only. Legacy cache or hand-built dicts that still carry **`raw`** are stripped when statistics are loaded from dicts (`sanitize_score_explanation_entries`).
+5. **`include_summary` default.** With **`include_summary=false`** (the default), MCP **`analyze`** must **not** include a **`summary`** key. With **`include_summary=true`**, **`summary`** aggregates use the **full** pre-**`limit`** block set so **`limit`** only trims **`results`**, not the overview.
 
 ## MCP `analyze` `filter` parameter (paths and globs)
 
@@ -38,6 +39,17 @@ rules), **`row_count`** (non-aggregate block rows before the response
 merged config for the run). **`results`** and **`cache`** shapes are unchanged;
 **`head_sha`** and **`deltas`** remain optional sibling keys as in the section
 below.
+
+## MCP `analyze` optional `include_summary`
+
+When **`include_summary=true`**, the response adds a top-level **`summary`**
+object with **`block_count`**, **`high_risk_count`**, **`critical_risk_count`**,
+**`sum_cyclomatic`**, **`sum_sloc`**, **`max_cyclomatic`** and **`max_score`**
+(each ``{"path": "file.py::symbol", "value": …}``, or ``null`` when there are no
+blocks), and **`mean_score`**. Aggregates are computed from the **full**
+pre-**`limit`** block set so a small **`limit`** on **`results`** does not shrink
+the overview. Default **`include_summary=false`** omits **`summary`** so
+existing callers see no change.
 
 ## MCP `analyze` revision snapshots (`head_sha`, `before_sha`, `after_sha`)
 
