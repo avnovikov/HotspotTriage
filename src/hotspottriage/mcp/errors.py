@@ -100,8 +100,9 @@ _VALUE_ERROR_RULES: tuple[
     (_ve_invalid_argument_after_sha, "INVALID_ARGUMENT", {}),
     (_ve_invalid_target_sha_remote, "INVALID_TARGET", {"reason": "revision_snapshot_requires_local_repo"}),
     (_ve_target_not_found_path, "TARGET_NOT_FOUND", {}),
-    (_ve_config_validation, "CONFIG_VALIDATION", {}),
+    # Before config markers: ``ignore_directories`` messages contain the substring ``directories``.
     (_ve_invalid_filter, "INVALID_FILTER", {}),
+    (_ve_config_validation, "CONFIG_VALIDATION", {}),
 )
 
 
