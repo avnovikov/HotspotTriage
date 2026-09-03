@@ -9,6 +9,10 @@ This project adheres to [Semantic Versioning](https://semver.org/) and [Keep a C
 
 ## [Unreleased]
 
+### Added
+- Reuse an existing local dashboard for the same project directory instead of
+  binding another port or opening another browser (#206).
+
 ### Fixed
 - Block cache (`blocks.pkl`) never stores rows for paths matching the repo
   `.gitignore` (save/load/`BlockCacheManager`); dashboard heatmap stays clean (#204).
