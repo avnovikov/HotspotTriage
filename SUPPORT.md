@@ -16,8 +16,8 @@ HotspotTriage is an open-source developer tool. This document defines the suppor
 
 | Version | Support Status | EOL Date |
 |---------|---------------|----------|
-| Latest release (`0.1.x`) | ✅ Fully supported — all security and bug fixes | — |
-| Previous minor | ⚠️ Security fixes only | 90 days after next minor release |
+| Latest release (`0.2.x`) | ✅ Fully supported — all security and bug fixes | — |
+| Previous minor (`0.1.x`) | ⚠️ Security fixes only | 90 days after 0.2.0 release |
 | Older versions | ❌ Not supported | Passed |
 
 Only the **latest published release** on [GitHub Releases](https://github.com/avnovikov/HotspotTriage/releases) is fully supported at any given time.

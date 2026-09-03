@@ -17,7 +17,8 @@ This document is the public-facing policy layer. Detailed control statements, fr
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x | Yes |
+| 0.2.x | Yes |
+| 0.1.x | Security fixes only (see [`SUPPORT.md`](SUPPORT.md)) |
 
 For the full support and end-of-life policy, see [`SUPPORT.md`](SUPPORT.md).
 
