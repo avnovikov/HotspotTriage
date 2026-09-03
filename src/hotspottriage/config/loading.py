@@ -17,6 +17,9 @@ from .defaults import (
     PROJECT_LOCAL_CONFIG_FILENAME,
 )
 
+# Accepted in YAML for one release; resolved into decay_half_life_hours.
+_LEGACY_CONFIG_KEYS = frozenset({"decay_half_life"})
+
 
 def _read_yaml(path: Path) -> dict[str, Any]:
     """Load a YAML file as a dict. Empty files return {}.
@@ -57,11 +60,35 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
 
 
 def _reject_unknown_keys(data: dict[str, Any], path: Path) -> None:
-    unknown = sorted(set(data) - set(DEFAULTS))
+    unknown = sorted(set(data) - set(DEFAULTS) - _LEGACY_CONFIG_KEYS)
     assert not unknown, (
         f"unknown config key(s) in {path}: {unknown} "
-        f"(valid keys: {sorted(DEFAULTS)})"
+        f"(valid keys: {sorted(set(DEFAULTS) | _LEGACY_CONFIG_KEYS)})"
     )
+
+
+def resolve_decay_half_life_seconds(config: dict[str, Any]) -> int | None:
+    """Return decay half-life in seconds for churn math, or ``None`` to disable.
+
+    Uses ``decay_half_life_hours`` (hours → seconds). Call
+    :func:`_migrate_legacy_decay_half_life` during load so legacy seconds keys
+    are converted first.
+    """
+    hours = config.get("decay_half_life_hours")
+    if hours is None:
+        return None
+    return max(1, int(round(float(hours) * 3600.0)))
+
+
+def _migrate_legacy_decay_half_life(merged: dict[str, Any]) -> None:
+    """Convert legacy ``decay_half_life`` (seconds) into ``decay_half_life_hours``."""
+    if "decay_half_life" not in merged:
+        return
+    legacy = merged.pop("decay_half_life")
+    if legacy is None:
+        merged["decay_half_life_hours"] = None
+        return
+    merged["decay_half_life_hours"] = float(legacy) / 3600.0
 
 
 def discover_config_paths(
@@ -121,6 +148,7 @@ def load_config(
         layer = _read_yaml(path)
         _reject_unknown_keys(layer, path)
         merged = _deep_merge(merged, layer)
+    _migrate_legacy_decay_half_life(merged)
     return merged
 
 
@@ -131,8 +159,8 @@ def merge_dashboard_config_patch(
 
     Same file and semantics as :func:`hotspottriage.mcp.analyze_config.build_analyze_config` for a
     local target: dashboard UI / heatmap tuning for ``metric_normalization``,
-    ``score_aggregation``, and ``proposed_models``. Missing or empty files are
-    a no-op. Returns a new dict; *cfg* is not mutated.
+    ``score_aggregation``, ``proposed_models``, and ``decay_half_life_hours``.
+    Missing or empty files are a no-op. Returns a new dict; *cfg* is not mutated.
     """
     patch_path = (
         Path(repo).resolve()
@@ -145,7 +173,9 @@ def merge_dashboard_config_patch(
     if not layer:
         return deepcopy(cfg)
     _reject_unknown_keys(layer, patch_path)
-    return _deep_merge(cfg, layer)
+    out = _deep_merge(cfg, layer)
+    _migrate_legacy_decay_half_life(out)
+    return out
 
 
 def load_analyze_config_for_local_repo(
@@ -214,7 +244,7 @@ def to_dashboard_snapshot(
         "score_aggregation": deepcopy(merged_config.get("score_aggregation")),
         "metric_normalization": deepcopy(merged_config.get("metric_normalization")),
         "similarity_enabled": merged_config.get("similarity_enabled"),
-        "decay_half_life": merged_config.get("decay_half_life"),
+        "decay_half_life_hours": merged_config.get("decay_half_life_hours"),
         "dashboard": deepcopy(merged_config.get("dashboard") or {}),
         "proposed_models": deepcopy(merged_config.get("proposed_models") or {}),
     }

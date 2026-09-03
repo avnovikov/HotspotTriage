@@ -652,20 +652,46 @@ function renderConfigMeta(cfg) {
   const meta = $("configMetaPanel");
   const project = cfg.project || {};
   const dashboard = cfg.dashboard || {};
-  const lines = [
-    ["Project Path", project.path_display || project.path],
-    ["Granularity", cfg.granularity],
-    ["Decay Half-life", cfg.decay_half_life],
-    ["Similarity Enabled", cfg.similarity_enabled],
-    [
-      "Dashboard default_target",
-      dashboard.default_target_display || dashboard.default_target,
-    ],
-    ["Version", cfg.version],
-  ];
-  meta.innerHTML = lines
-    .map(([k, v]) => `<div><strong>${k}</strong>: ${pretty(v)}</div>`)
-    .join("");
+  const hours =
+    cfg.decay_half_life_hours === null || cfg.decay_half_life_hours === undefined
+      ? ""
+      : cfg.decay_half_life_hours;
+  meta.innerHTML = `
+    <div><strong>Project Path</strong>: ${pretty(project.path_display || project.path)}</div>
+    <div><strong>Granularity</strong>: ${pretty(cfg.granularity)}</div>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:0.4rem;">
+      <label for="decayHalfLifeHoursInput"><strong>Decay half-life (hours)</strong></label>
+      <input id="decayHalfLifeHoursInput" type="number" min="0.01" step="any" value="${escapeAttr(String(hours))}" style="width:6rem;" title="Churn exponential decay half-life in hours; leave empty and save null via Clear to disable" />
+      <button id="decayHalfLifeClearBtn" type="button" class="muted">Disable</button>
+    </div>
+    <div><strong>Similarity Enabled</strong>: ${pretty(cfg.similarity_enabled)}</div>
+    <div><strong>Dashboard default_target</strong>: ${pretty(dashboard.default_target_display || dashboard.default_target)}</div>
+    <div><strong>Version</strong>: ${pretty(cfg.version)}</div>
+  `;
+  const clearBtn = $("decayHalfLifeClearBtn");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      const inp = $("decayHalfLifeHoursInput");
+      if (inp) inp.value = "";
+      state.editorDecayHours = null;
+    });
+  }
+  const inp = $("decayHalfLifeHoursInput");
+  if (inp) {
+    state.editorDecayHours =
+      cfg.decay_half_life_hours === null || cfg.decay_half_life_hours === undefined
+        ? null
+        : cfg.decay_half_life_hours;
+    inp.addEventListener("change", () => {
+      const raw = String(inp.value || "").trim();
+      if (!raw) {
+        state.editorDecayHours = null;
+        return;
+      }
+      const n = Number(raw);
+      state.editorDecayHours = Number.isFinite(n) ? n : state.editorDecayHours;
+    });
+  }
 }
 
 let normResizeTimer = null;

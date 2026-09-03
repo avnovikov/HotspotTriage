@@ -293,7 +293,7 @@ Decayed churn uses exponential half-life:
 
 Default half-life:
 
-`decay_half_life = 2,592,000` seconds (30 days)
+`decay_half_life_hours = 1` (one hour; converted to seconds as `hours × 3600` for the decay formula)
 
 Notes:
 

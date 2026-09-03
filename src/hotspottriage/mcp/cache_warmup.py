@@ -35,7 +35,7 @@ def initialize_repository_cache(
                 since=cfg["since"],
                 until=cfg["until"],
                 workers=cfg.get("block_workers"),
-                decay_half_life=cfg.get("decay_half_life"),
+                decay_half_life=ht_config.resolve_decay_half_life_seconds(cfg),
             ),
             runtime=stats.BlockStatsRuntime(
                 smell_weight=float(cfg.get("smell_weight", 0.0)),

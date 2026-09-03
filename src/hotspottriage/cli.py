@@ -277,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
             files = [f for f in discovery.list_tracked_files(repo) if keep(f)]
             score_metrics = list(cfg["score_metrics"])
 
-            decay_half_life = cfg.get("decay_half_life")
+            decay_half_life = _config.resolve_decay_half_life_seconds(cfg)
             smell_weight = float(cfg.get("smell_weight", 0.0))
             
             show_progress = _want_progress(cfg)

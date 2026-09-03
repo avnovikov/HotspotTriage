@@ -94,10 +94,26 @@ def _validate_gitignore_and_ignore_directories(config: dict[str, Any]) -> None:
 
 
 def _validate_decay_half_life_and_smell_weight(config: dict[str, Any]) -> None:
-    decay_hl = config.get("decay_half_life")
-    if decay_hl is not None and (not isinstance(decay_hl, int) or decay_hl < 1):
+    decay_h = config.get("decay_half_life_hours")
+    if decay_h is not None:
+        if isinstance(decay_h, bool) or not isinstance(decay_h, (int, float)):
+            raise ValueError(
+                "decay_half_life_hours must be null or a positive number (hours); "
+                f"got {decay_h!r}"
+            )
+        if float(decay_h) <= 0:
+            raise ValueError(
+                "decay_half_life_hours must be null or a positive number (hours); "
+                f"got {decay_h!r}"
+            )
+    # Legacy seconds key (pre-hours); accepted only for migration via resolve helper.
+    decay_sec = config.get("decay_half_life")
+    if decay_sec is not None and (
+        not isinstance(decay_sec, int) or isinstance(decay_sec, bool) or decay_sec < 1
+    ):
         raise ValueError(
-            f"decay_half_life must be null or a positive int (seconds); got {decay_hl!r}"
+            "legacy decay_half_life must be null or a positive int (seconds); "
+            f"got {decay_sec!r}"
         )
     smell_weight = config.get("smell_weight")
     if not isinstance(smell_weight, (int, float)) or smell_weight < 0:

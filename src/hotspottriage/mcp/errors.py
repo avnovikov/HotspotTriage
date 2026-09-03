@@ -75,6 +75,7 @@ def _ve_config_validation(low: str) -> bool:
         "metric_normalization",
         "score_aggregation",
         "directories",
+        "decay_half_life_hours",
         "decay_half_life",
         "block_workers",
         "smell_weight",

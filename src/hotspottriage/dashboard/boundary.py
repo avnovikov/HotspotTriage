@@ -36,3 +36,4 @@ class DashboardConfigPatchBody(BaseModel):
     metric_normalization: dict[str, Any] | None = None
     score_aggregation: dict[str, Any] | None = None
     proposed_models: dict[str, Any] | None = None
+    decay_half_life_hours: float | int | None = None
