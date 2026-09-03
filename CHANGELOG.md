@@ -9,7 +9,14 @@ This project adheres to [Semantic Versioning](https://semver.org/) and [Keep a C
 
 ## [Unreleased]
 
+### Security
+- Bump lockfile / constraints to clear open Dependabot alerts on `mcp`, `starlette`,
+  `cryptography`, `pyjwt`, `joserfc`, `python-multipart`, `pydantic-settings`, and
+  `idna` (#202).
+
 ### Fixed
+- Dashboard route existence test uses OpenAPI paths (compatible with Starlette/FastAPI
+  included-router changes after the security upgrades).
 - Rename architecture doc `ARCHITECTRE.md` → `ARCHITECTURE.md` (typo; #147).
 - Correct `README.md` links from `docs/screenshots/README.md` (paths must reach the repo root).
 - Replace broken in-repo hyperlink to `.cursor` skills in branch-protection audit evidence with a workstation-local path description (#147).

@@ -506,7 +506,9 @@ def test_stream_endpoints_exist():
     client = TestClient(srv.app)
     assert client.get("/dashboard/").status_code == 200
     assert client.get("/dashboard/scores").status_code == 200
-    paths = {r.path for r in srv.app.router.routes}
+    # FastAPI/Starlette 1.x+ may wrap included routers without a top-level `.path`;
+    # OpenAPI is the stable contract for registered HTTP paths.
+    paths = set(client.get("/openapi.json").json().get("paths", {}))
     assert "/api/logs/stream" in paths
     assert "/api/stats/stream" in paths
     assert "/api/config/patch" in paths
