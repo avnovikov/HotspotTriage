@@ -203,6 +203,47 @@ def is_ignored_by_gitignore(repo: Path, rel_posix: str) -> bool:
     return bool(last_ignored)
 
 
+def block_row_repo_file(path: str) -> str:
+    """Repo-relative file segment of a block ``path`` (``file.py::symbol`` → ``file.py``)."""
+    p = str(path).replace("\\", "/").strip()
+    if "::" in p:
+        return p.split("::", 1)[0]
+    return p
+
+
+def filter_block_rows_excluding_gitignore(
+    repo: Path,
+    rows: list[dict],
+    *,
+    respect_gitignore: bool = True,
+) -> list[dict]:
+    """Drop block-cache dict rows whose file path is gitignored.
+
+    Synthetic rows (file segment starting with ``__``) are kept. When
+    ``respect_gitignore`` is False, *rows* is returned unchanged (shallow copy
+    of the list). Used at cache **save/load** so ignored paths never stay in
+    ``blocks.pkl``.
+    """
+    if not respect_gitignore:
+        return list(rows)
+    kept: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw_path = row.get("path")
+        if raw_path is None:
+            kept.append(row)
+            continue
+        file_rel = block_row_repo_file(str(raw_path))
+        if file_rel.startswith("__"):
+            kept.append(row)
+            continue
+        if file_rel and is_ignored_by_gitignore(repo, file_rel):
+            continue
+        kept.append(row)
+    return kept
+
+
 def make_tracked_path_predicate(
     repo: Path,
     *,

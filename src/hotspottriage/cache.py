@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from hotspottriage import timestamps
+from hotspottriage.filtering import filter_block_rows_excluding_gitignore
 from hotspottriage.path_utils import sanitize_log_value
 
 logger = logging.getLogger(__name__)
@@ -85,16 +86,42 @@ def _read_versioned_pickle(path: Path) -> list[dict] | None:
     return None
 
 
-def save_block_results(repo: Path, rows: list[dict]) -> None:
-    """Persist full block metric rows to disk (atomic write, versioned envelope)."""
+def save_block_results(
+    repo: Path,
+    rows: list[dict],
+    *,
+    respect_gitignore: bool = True,
+) -> None:
+    """Persist full block metric rows to disk (atomic write, versioned envelope).
+
+    By default, rows whose file path matches the repo ``.gitignore`` (nested
+    gitignores / ``info/exclude``) are **not** written — they must not enter
+    the on-disk cache used by the dashboard heatmap and MCP.
+    """
+    filtered = filter_block_rows_excluding_gitignore(
+        repo, rows, respect_gitignore=respect_gitignore
+    )
     results_file = cache_path_for(repo) / _CACHE_FILE
-    _write_versioned_pickle(results_file, rows)
-    _save_metadata(cache_path_for(repo), len(rows))
+    _write_versioned_pickle(results_file, filtered)
+    _save_metadata(cache_path_for(repo), len(filtered))
 
 
-def load_block_results(repo: Path) -> list[dict] | None:
-    """Load persisted block metric rows, or ``None`` if unavailable."""
-    return _read_versioned_pickle(cache_path_for(repo) / _CACHE_FILE)
+def load_block_results(
+    repo: Path,
+    *,
+    respect_gitignore: bool = True,
+) -> list[dict] | None:
+    """Load persisted block metric rows, or ``None`` if unavailable.
+
+    Gitignored paths are stripped on load (default) so older caches cannot
+    resurrect ignored files into the dashboard / analyzers.
+    """
+    rows = _read_versioned_pickle(cache_path_for(repo) / _CACHE_FILE)
+    if rows is None:
+        return None
+    return filter_block_rows_excluding_gitignore(
+        repo, rows, respect_gitignore=respect_gitignore
+    )
 
 
 def block_cache_stats(repo: Path) -> dict[str, Any]:
@@ -201,7 +228,15 @@ class BlockCacheManager:
 
     def _save_to_disk_unlocked(self) -> None:
         """Write current state to disk (caller must hold ``_lock``)."""
-        rows = list(self._rows.values())
+        rows = filter_block_rows_excluding_gitignore(
+            self._repo, list(self._rows.values()), respect_gitignore=True
+        )
+        # Keep memory aligned with what we persist.
+        self._rows = {
+            str(r["path"]): r
+            for r in rows
+            if isinstance(r, dict) and "path" in r
+        }
         _write_versioned_pickle(self._flush_path(), rows)
         _save_metadata(cache_path_for(self._repo), len(rows))
 
@@ -229,7 +264,12 @@ class BlockCacheManager:
 
         Rows for files **not** in *targeted_files* are preserved (scoped-run
         semantics, same as the old ``build_block_stats`` merge logic).
+        Incoming and preserved rows that match ``.gitignore`` are dropped so
+        ignored paths never remain in the block cache.
         """
+        filtered_in = filter_block_rows_excluding_gitignore(
+            self._repo, rows, respect_gitignore=True
+        )
         with self._lock:
             if targeted_files is not None:
                 keys_to_remove = [
@@ -239,14 +279,29 @@ class BlockCacheManager:
                 ]
                 for k in keys_to_remove:
                     del self._rows[k]
-            for row in rows:
+            for row in filtered_in:
                 if isinstance(row, dict) and "path" in row:
                     self._rows[row["path"]] = row
+            # Scrub any preserved entries that are now gitignored.
+            scrubbed = filter_block_rows_excluding_gitignore(
+                self._repo, list(self._rows.values()), respect_gitignore=True
+            )
+            self._rows = {
+                str(r["path"]): r
+                for r in scrubbed
+                if isinstance(r, dict) and "path" in r
+            }
             self._modified = True
             self._generation += 1
 
     def put_row(self, row: dict[str, Any]) -> None:
         """Insert or update a single row (thread-safe)."""
+        filtered = filter_block_rows_excluding_gitignore(
+            self._repo, [row], respect_gitignore=True
+        )
+        if not filtered:
+            return
+        row = filtered[0]
         path = row.get("path")
         if path is None:
             return

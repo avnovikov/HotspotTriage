@@ -72,4 +72,5 @@ def persist_block_cache(payload: BlockPersistPayload) -> None:
             rel, _ = path.split("::", 1)
             if rel not in targeted_files:
                 preserved.append(row)
+        # Gitignore scrub happens inside save_block_results (default on).
         _cache.save_block_results(payload.repo, [*preserved, *cache_rows])
