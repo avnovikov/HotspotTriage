@@ -9,6 +9,12 @@ This project adheres to [Semantic Versioning](https://semver.org/) and [Keep a C
 
 ## [Unreleased]
 
+### Changed
+- Churn decay half-life is configured as **`decay_half_life_hours`** (default **1** hour)
+  instead of `decay_half_life` in seconds / 30-day default (#208). Editable on the
+  dashboard Config page and via `/api/config/patch`. Legacy `decay_half_life`
+  (seconds) in YAML is migrated to hours on load.
+
 ### Added
 - Reuse an existing local dashboard for the same project directory instead of
   binding another port or opening another browser (#206).

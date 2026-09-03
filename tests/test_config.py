@@ -470,6 +470,33 @@ def test_to_dashboard_snapshot_shape():
     assert "score_metrics" in snap and isinstance(snap["score_metrics"], list)
     assert "dashboard" in snap and snap["dashboard"]["base_port"] == 9123
     assert "proposed_models" in snap and isinstance(snap["proposed_models"], dict)
+    assert snap["decay_half_life_hours"] == 1
+
+
+def test_resolve_decay_half_life_seconds_default_one_hour():
+    assert _config.resolve_decay_half_life_seconds(dict(_config.DEFAULTS)) == 3600
+
+
+def test_resolve_decay_half_life_seconds_null_disables():
+    cfg = {**_config.DEFAULTS, "decay_half_life_hours": None}
+    assert _config.resolve_decay_half_life_seconds(cfg) is None
+
+
+def test_legacy_decay_half_life_seconds_migrates_to_hours(tmp_path: Path):
+    repo = tmp_path / "r"
+    cfg_dir = repo / ".hotspottriage"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "project.yml").write_text("decay_half_life: 7200\n", encoding="utf-8")
+    cfg = _config.load_config(repo, use_global=False)
+    assert cfg["decay_half_life_hours"] == pytest.approx(2.0)
+    assert "decay_half_life" not in cfg
+    assert _config.resolve_decay_half_life_seconds(cfg) == 7200
+
+
+def test_validate_rejects_non_positive_decay_half_life_hours():
+    cfg = {**_config.DEFAULTS, "decay_half_life_hours": 0}
+    with pytest.raises(ValueError, match="decay_half_life_hours"):
+        _config.validate(cfg)
 
 
 def test_apply_mcp_dashboard_cli_overrides():

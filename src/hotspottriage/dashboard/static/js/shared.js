@@ -10,6 +10,7 @@ const state = {
   editorMN: null,
   editorSA: null,
   editorPM: null,
+  editorDecayHours: undefined,
   baselineMN: null,
   baselineSA: null,
   baselinePM: null,
@@ -215,6 +216,10 @@ async function loadConfigFull() {
     state.editorMN = clone(cfg.metric_normalization || {});
     state.editorSA = clone(cfg.score_aggregation || {});
     state.editorPM = clone(cfg.proposed_models || {});
+    state.editorDecayHours =
+      cfg.decay_half_life_hours === null || cfg.decay_half_life_hours === undefined
+        ? null
+        : cfg.decay_half_life_hours;
     state.baselineMN = clone(cfg.metric_normalization || {});
     state.baselineSA = clone(cfg.score_aggregation || {});
     state.baselinePM = clone(cfg.proposed_models || {});
@@ -238,14 +243,30 @@ async function saveConfigPatch() {
   const status = $("configSaveStatus");
   if (status) status.textContent = "";
   try {
+    const decayInp = $("decayHalfLifeHoursInput");
+    if (decayInp) {
+      const raw = String(decayInp.value || "").trim();
+      if (!raw) {
+        state.editorDecayHours = null;
+      } else {
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n <= 0) {
+          if (status) status.textContent = "decay half-life hours must be a positive number";
+          return;
+        }
+        state.editorDecayHours = n;
+      }
+    }
+    const payload = {
+      metric_normalization: state.editorMN,
+      score_aggregation: state.editorSA,
+      proposed_models: state.editorPM,
+      decay_half_life_hours: state.editorDecayHours,
+    };
     const res = await fetch("/api/config/patch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        metric_normalization: state.editorMN,
-        score_aggregation: state.editorSA,
-        proposed_models: state.editorPM,
-      }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {

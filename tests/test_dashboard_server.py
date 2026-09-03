@@ -630,6 +630,19 @@ def test_config_patch_persists_and_merges_get(tmp_path):
     assert patch_path.exists()
 
 
+def test_config_patch_decay_half_life_hours(tmp_path):
+    patch_path = tmp_path / ".hotspottriage" / "dashboard_config_patch.yml"
+    srv = _server(config_patch_path=patch_path)
+    client = TestClient(srv.app)
+    assert client.get("/api/config").json()["decay_half_life_hours"] == 1
+    resp = client.post("/api/config/patch", json={"decay_half_life_hours": 2.5})
+    assert resp.status_code == 200
+    assert client.get("/api/config").json()["decay_half_life_hours"] == 2.5
+    disable = client.post("/api/config/patch", json={"decay_half_life_hours": None})
+    assert disable.status_code == 200
+    assert client.get("/api/config").json()["decay_half_life_hours"] is None
+
+
 def test_generate_cache_uses_saved_score_config_patch(monkeypatch, tmp_path):
     patch_path = tmp_path / ".hotspottriage" / "dashboard_config_patch.yml"
     srv = _server(config_patch_path=patch_path)

@@ -32,7 +32,9 @@ DEFAULTS: dict[str, Any] = {
     "block_workers": None,
     "cache_dir": None,
     "log_level": "warning",
-    "decay_half_life": 2592000,  # 30 days in seconds
+    # Exponential decay half-life for churn, in hours (converted to seconds at use).
+    # Default 1 hour. Set null to disable decay (raw churn only).
+    "decay_half_life_hours": 1,
     "smell_weight": 0.0,
     "smell_max_statements": 50,
     "smell_max_attributes": 10,

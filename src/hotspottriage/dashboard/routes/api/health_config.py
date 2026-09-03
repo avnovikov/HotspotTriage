@@ -42,10 +42,21 @@ def register_health_and_config_routes(router: APIRouter, dash: Any) -> None:
         except ValidationError as e:
             raise HTTPException(status_code=422, detail=e.errors()) from e
         body = {k: v for k, v in body_model.model_dump(exclude_none=True).items()}
+        # Allow explicit null to disable decay (exclude_none would drop it).
+        if (
+            isinstance(payload, dict)
+            and "decay_half_life_hours" in payload
+            and payload.get("decay_half_life_hours") is None
+        ):
+            body["decay_half_life_hours"] = None
         if not body:
             raise HTTPException(
                 status_code=400,
-                detail="patch body must include metric_normalization and/or score_aggregation and/or proposed_models",
+                detail=(
+                    "patch body must include metric_normalization and/or "
+                    "score_aggregation and/or proposed_models and/or "
+                    "decay_half_life_hours"
+                ),
             )
         with dash._patch_lock:
             current = dash._load_patch_unlocked()

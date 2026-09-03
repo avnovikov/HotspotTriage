@@ -65,10 +65,10 @@ cache_dir: null
 # Logging verbosity: debug | info | warning | error
 log_level: warning
 
-# Exponential decay half-life for churn, in seconds (default: 30 days).
-# Recent changes weigh more heavily than old ones. Set to a larger value to
-# reduce the impact of aging, or disable via `decay_half_life: null`.
-decay_half_life: 2592000
+# Exponential decay half-life for churn, in hours (default: 1).
+# Recent changes weigh more heavily than old ones. Set a larger value to
+# reduce the impact of aging, or disable via `decay_half_life_hours: null`.
+decay_half_life_hours: 1
 
 # Weight applied when score_metrics includes smell_count.
 # Score factor contribution: 1 + (smell_weight * smell_count)

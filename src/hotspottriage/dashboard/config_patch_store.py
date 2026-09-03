@@ -82,6 +82,8 @@ class ConfigPatchStore:
                     out[key] = _config._deep_merge(base_chunk, sub)
                 else:
                     out[key] = deepcopy(sub)
+        if "decay_half_life_hours" in patch:
+            out["decay_half_life_hours"] = patch.get("decay_half_life_hours")
         return out
 
     def score_metrics_csv_for_cache_jobs(self) -> str:
@@ -101,9 +103,12 @@ class ConfigPatchStore:
         probe = deepcopy(_config.DEFAULTS)
         for key in ("metric_normalization", "score_aggregation", "proposed_models"):
             probe[key] = merge_config_overlay(self._base, merged_patch, key)
+        if "decay_half_life_hours" in merged_patch:
+            probe["decay_half_life_hours"] = merged_patch.get("decay_half_life_hours")
         _normalize.validate_metric_normalization(probe)
         _score_mod.validate_score_aggregation(probe)
         _config._validate_proposed_models(probe)
+        _config._validate_decay_half_life_and_smell_weight(probe)
 
     def enrich_snapshot_for_ui(self, snap: dict[str, Any]) -> dict[str, Any]:
         """Add ``*_display`` strings for dashboard UI; canonical paths unchanged."""
