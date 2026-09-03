@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+import logging
+import os
 import subprocess
 import sys
 import threading
@@ -18,10 +20,15 @@ from hotspottriage.dashboard.block_metrics_store import BlockMetricsStore
 from hotspottriage.dashboard.cache_http import CacheJob, slim_cache_job_result
 from hotspottriage.dashboard.cache_jobs import find_free_port
 from hotspottriage.dashboard.config_patch_store import ConfigPatchStore
+from hotspottriage.dashboard.instance_lock import (
+    clear_dashboard_lock,
+    write_dashboard_lock,
+)
 from hotspottriage.dashboard.local_state import DEFAULT_SCORE_METRICS, DashboardLocalState
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.stats import StatsCollector
 
+logger = logging.getLogger(__name__)
 BASE_PORT = 9123
 
 
@@ -38,6 +45,7 @@ class DashboardServer:
         base_port: int = BASE_PORT,
         open_on_start: bool = False,
         config_patch_path: Path | None = None,
+        project_path: Path | None = None,
     ) -> None:
         self._stats = stats
         self._log_handler = log_handler
@@ -49,19 +57,36 @@ class DashboardServer:
         self._cache_jobs: dict[str, CacheJob] = {}
         self._cache_jobs_lock = threading.Lock()
         self._patch_lock = threading.Lock()
+        proj = project_path
+        if proj is None:
+            raw = ""
+            if isinstance(config, dict):
+                project = config.get("project")
+                if isinstance(project, dict):
+                    raw = str(project.get("path") or "").strip()
+            proj = Path(raw).expanduser().resolve() if raw else Path.cwd().resolve()
+        else:
+            proj = Path(proj).expanduser().resolve()
+        self._project_path = proj
         patch_path = config_patch_path or (
-            Path(".hotspottriage") / "dashboard_config_patch.yml"
+            self._project_path / ".hotspottriage" / "dashboard_config_patch.yml"
         )
         self._config_patch = ConfigPatchStore(deepcopy(config), patch_path)
         self._config_patch.ensure_defaults()
         self._local_state = DashboardLocalState(
-            Path(".hotspottriage") / "dashboard_state.json",
+            self._project_path / ".hotspottriage" / "dashboard_state.json",
             threading.Lock(),
         )
         self.block_store = BlockMetricsStore()
         self._app = self._build_app()
         self._thread: threading.Thread | None = None
         self._server: uvicorn.Server | None = None
+        self._owns_instance_lock = False
+
+    @property
+    def project_path(self) -> Path:
+        """Resolved project directory this dashboard instance is bound to."""
+        return self._project_path
 
     @property
     def _state_file(self) -> Path:
@@ -206,5 +231,23 @@ class DashboardServer:
             name="hotspottriage-dashboard",
         )
         self._thread.start()
+        try:
+            write_dashboard_lock(
+                self._project_path, host=self._host, port=self._port
+            )
+            self._owns_instance_lock = True
+        except OSError:
+            logger.warning(
+                "Could not write dashboard instance lock under %s",
+                self._project_path,
+                exc_info=True,
+            )
         if self._open_on_start:
             self._open_browser()
+
+    def release_instance_lock(self) -> None:
+        """Drop the per-directory lock if this process owns it."""
+        if not self._owns_instance_lock:
+            return
+        clear_dashboard_lock(self._project_path, pid=os.getpid())
+        self._owns_instance_lock = False

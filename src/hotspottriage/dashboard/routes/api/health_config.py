@@ -1,6 +1,7 @@
 """Dashboard API: health check and merged config + YAML patch."""
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
@@ -16,9 +17,16 @@ def register_health_and_config_routes(router: APIRouter, dash: Any) -> None:
 
     @router.get("/health")
     def health() -> dict[str, Any]:
+        project_path = ""
+        try:
+            project_path = str(getattr(dash, "project_path", "") or "")
+        except Exception:
+            project_path = ""
         return {
             "status": "alive",
             "uptime_s": round(time.monotonic() - dash._started_at, 1),
+            "pid": os.getpid(),
+            "project_path": project_path,
         }
 
     @router.get("/config")

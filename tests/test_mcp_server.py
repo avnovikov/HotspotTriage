@@ -643,8 +643,39 @@ async def test_mcp_lifespan_dashboard_failure_is_non_fatal(monkeypatch):
             raise OSError("no free ports")
 
     monkeypatch.setattr(mcp_server, "DashboardServer", _Boom)
+    monkeypatch.setattr(
+        mcp_server, "find_running_dashboard_for_project", lambda _p: None
+    )
     async with mcp_server._mcp_lifespan(None):
         assert True
+
+
+@pytest.mark.anyio
+async def test_mcp_lifespan_reuses_existing_dashboard_without_starting(monkeypatch):
+    started: list[object] = []
+
+    class _ShouldNotStart:
+        def __init__(self, **_: object) -> None:
+            raise AssertionError("DashboardServer must not be constructed")
+
+        def start(self) -> None:
+            started.append(self)
+
+    monkeypatch.setattr(mcp_server, "DashboardServer", _ShouldNotStart)
+    monkeypatch.setattr(
+        mcp_server,
+        "find_running_dashboard_for_project",
+        lambda _p: {
+            "host": "127.0.0.1",
+            "port": 9123,
+            "pid": 1,
+            "project_path": "/tmp/x",
+            "base_url": "http://127.0.0.1:9123",
+        },
+    )
+    async with mcp_server._mcp_lifespan(None):
+        assert mcp_server._dashboard_server_instance is None
+    assert started == []
 
 
 def test_analyze_filtered_dashboard_publish_excludes_other_cached_files(

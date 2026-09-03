@@ -25,6 +25,7 @@ from hotspottriage import cache_generator as _cache_gen
 from hotspottriage import config as _config
 from hotspottriage.dashboard.log_handler import MemoryLogHandler
 from hotspottriage.dashboard.server import DashboardServer
+from hotspottriage.dashboard.instance_lock import find_running_dashboard_for_project
 from hotspottriage.dashboard.stats import StatsCollector
 from hotspottriage import discovery, stats
 from hotspottriage import revision_cache as _rev_cache
@@ -153,27 +154,45 @@ async def _mcp_lifespan(_: Any):
     dashboard: DashboardServer | None = None
     cfg = _effective_dashboard_config()
     dash_cfg = dict(cfg.get("dashboard") or {})
+    project_dir = Path.cwd().resolve()
     if bool(dash_cfg.get("enabled", True)):
-        try:
-            dashboard = DashboardServer(
-                config=_config.to_dashboard_snapshot(
-                    cfg,
-                    project_path=str(Path.cwd().resolve()),
-                ),
-                stats=_dashboard_stats,
-                log_handler=_dashboard_log_handler,
-                host=str(dash_cfg.get("host", "127.0.0.1")),
-                base_port=int(dash_cfg.get("base_port", 9123)),
-                open_on_start=bool(dash_cfg.get("open_on_start", False)),
+        existing = find_running_dashboard_for_project(project_dir)
+        if existing is not None:
+            logger.info(
+                "HotspotTriage dashboard already running for %s at %s/dashboard/ "
+                "(pid %s) — not starting another server or browser",
+                project_dir,
+                existing["base_url"],
+                existing.get("pid"),
             )
-            _dashboard_server_instance = dashboard
-            dashboard.start()
-            logger.info("HotspotTriage dashboard: %s/dashboard/", dashboard.base_url)
-        except Exception as e:  # pragma: no cover - defensive path
-            logger.warning("Dashboard startup failed: %s", e)
-    yield
-    _dashboard_server_instance = None
-    _shutdown_all_cache_managers()
+        else:
+            try:
+                dashboard = DashboardServer(
+                    config=_config.to_dashboard_snapshot(
+                        cfg,
+                        project_path=str(project_dir),
+                    ),
+                    stats=_dashboard_stats,
+                    log_handler=_dashboard_log_handler,
+                    host=str(dash_cfg.get("host", "127.0.0.1")),
+                    base_port=int(dash_cfg.get("base_port", 9123)),
+                    open_on_start=bool(dash_cfg.get("open_on_start", False)),
+                    project_path=project_dir,
+                )
+                _dashboard_server_instance = dashboard
+                dashboard.start()
+                logger.info(
+                    "HotspotTriage dashboard: %s/dashboard/", dashboard.base_url
+                )
+            except Exception as e:  # pragma: no cover - defensive path
+                logger.warning("Dashboard startup failed: %s", e)
+    try:
+        yield
+    finally:
+        if dashboard is not None:
+            dashboard.release_instance_lock()
+        _dashboard_server_instance = None
+        _shutdown_all_cache_managers()
 
 
 mcp = FastMCP("hotspottriage", lifespan=_mcp_lifespan)
