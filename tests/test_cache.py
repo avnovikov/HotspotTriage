@@ -69,6 +69,54 @@ def test_save_writes_metadata(tmp_path: Path):
     assert "generated_at" in meta
 
 
+def test_save_and_load_drop_gitignore_paths(tmp_path: Path):
+    """Ignored files must not enter or leave blocks.pkl (heatmap/cache DB)."""
+    repo = tmp_path / "myrepo"
+    repo.mkdir()
+    (repo / ".gitignore").write_text("ignored.py\n.venv/\n")
+    rows = [
+        {"path": "kept.py::f", "churn": 1},
+        {"path": "ignored.py::g", "churn": 2},
+        {"path": ".venv/lib/x.py::h", "churn": 3},
+    ]
+    save_block_results(repo, rows)
+    loaded = load_block_results(repo)
+    assert loaded is not None
+    assert [r["path"] for r in loaded] == ["kept.py::f"]
+
+    # Legacy unfiltered pickle still scrubbed on load.
+    cache_dir = cache_path_for(repo)
+    dirty = [
+        {"path": "kept.py::f", "churn": 1},
+        {"path": "ignored.py::g", "churn": 9},
+    ]
+    envelope = {"__cache_version": CACHE_VERSION, "obj": dirty}
+    with open(cache_dir / _CACHE_FILE, "wb") as f:
+        pickle.dump(envelope, f)
+    loaded2 = load_block_results(repo)
+    assert loaded2 is not None
+    assert [r["path"] for r in loaded2] == ["kept.py::f"]
+
+
+def test_block_cache_manager_put_rows_drops_gitignore(tmp_path: Path):
+    repo = tmp_path / "myrepo"
+    repo.mkdir()
+    (repo / ".gitignore").write_text("skip.py\n")
+    mgr = BlockCacheManager(repo)
+    mgr.put_rows(
+        [
+            {"path": "ok.py::a", "churn": 1},
+            {"path": "skip.py::b", "churn": 2},
+        ]
+    )
+    paths = {r["path"] for r in mgr.get_all_rows()}
+    assert paths == {"ok.py::a"}
+    mgr.flush()
+    loaded = load_block_results(repo)
+    assert loaded is not None
+    assert [r["path"] for r in loaded] == ["ok.py::a"]
+
+
 def test_versioned_envelope_rejects_old_format(tmp_path: Path):
     """A raw (non-envelope) pickle written by an older version is ignored."""
     repo = tmp_path / "myrepo"

@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from hotspottriage.filtering import (
+    filter_block_rows_excluding_gitignore,
     is_ignored_by_directory_prefixes,
     is_ignored_by_gitignore,
     make_filter,
@@ -129,3 +130,26 @@ def test_make_tracked_path_predicate_combines_globs_and_gitignore(tmp_path: Path
     assert keep("a.py")
     assert not keep("b.py")  # gitignore
     assert not keep("c/d.py")  # directory prefix
+
+
+def test_filter_block_rows_excluding_gitignore_drops_ignored(tmp_path: Path):
+    repo = build_repo(tmp_path / "r")
+    (repo / ".gitignore").write_text("b.py\n")
+    rows = [
+        {"path": "a.py::f", "churn": 1},
+        {"path": "b.py::g", "churn": 2},
+        {"path": "__similarity__", "churn": 0},
+    ]
+    kept = filter_block_rows_excluding_gitignore(repo, rows)
+    paths = {r["path"] for r in kept}
+    assert paths == {"a.py::f", "__similarity__"}
+
+
+def test_filter_block_rows_excluding_gitignore_can_be_disabled(tmp_path: Path):
+    repo = build_repo(tmp_path / "r")
+    (repo / ".gitignore").write_text("b.py\n")
+    rows = [{"path": "b.py::g", "churn": 2}]
+    kept = filter_block_rows_excluding_gitignore(
+        repo, rows, respect_gitignore=False
+    )
+    assert kept == rows

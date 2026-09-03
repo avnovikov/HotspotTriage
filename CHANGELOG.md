@@ -9,6 +9,10 @@ This project adheres to [Semantic Versioning](https://semver.org/) and [Keep a C
 
 ## [Unreleased]
 
+### Fixed
+- Block cache (`blocks.pkl`) never stores rows for paths matching the repo
+  `.gitignore` (save/load/`BlockCacheManager`); dashboard heatmap stays clean (#204).
+
 ### Security
 - Bump lockfile / constraints to clear open Dependabot alerts on `mcp`, `starlette`,
   `cryptography`, `pyjwt`, `joserfc`, `python-multipart`, `pydantic-settings`, and
